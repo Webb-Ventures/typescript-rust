@@ -3839,18 +3839,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A missing global through `globalThis` is implicitly `any` (TS7017 under
         // noImplicitAny), unless it names a global `let`/`const` (not a property of the
         // global object): that is a missing property.
-        if !name.starts_with('#')
-            && (nt == self.global_this_type()
-                || self.is_augmented_global_this(Loc::new(e.file, obj)))
-            && !self
-                .c
-                .global_symbol(&name, meaning::VALUE)
-                .is_some_and(|g| {
-                    self.c
-                        .sym_flags(g)
-                        .intersects(SymbolFlags::BLOCK_SCOPED_VARIABLE)
-                })
-        {
+        if self.is_missing_global_through_global_this(nt, Loc::new(e.file, obj), &name) {
             if self.c.opts.no_implicit_any {
                 let ts = self.type_to_string(nt);
                 self.error(
@@ -3863,6 +3852,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         self.report_missing_property(pl, &name, nt);
         TypeId::ERROR
+    }
+
+    /// `name`, missing on `nt` read through object `obj`, is a missing global read through
+    /// `globalThis` (implicitly `any`, TS7017 under noImplicitAny), and not a global
+    /// `let`/`const` (not a property of the global object: a missing property).
+    pub(crate) fn is_missing_global_through_global_this(
+        &mut self,
+        nt: TypeId,
+        obj: Loc,
+        name: &str,
+    ) -> bool {
+        !name.starts_with('#')
+            && (nt == self.global_this_type() || self.is_augmented_global_this(obj))
+            && !self.c.global_symbol(name, meaning::VALUE).is_some_and(|g| {
+                self.c
+                    .sym_flags(g)
+                    .intersects(SymbolFlags::BLOCK_SCOPED_VARIABLE)
+            })
     }
 
     /// A write of property `p` through access `e` is to a read-only property: one declared
@@ -10207,8 +10214,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 reported = true;
                 continue;
             }
+            // A computed name that is not a literal (`[SYM]: 'str'`) says so in the head
+            // (tsc: `isComputedNonLiteralName` in `elaborateElementwise`, relater.go).
+            let computed_head = match *ast.node(key) {
+                Node::ComputedKey { expr } => !matches!(
+                    *ast.node(expr),
+                    Node::StringLit { .. } | Node::NumberLit { .. }
+                ),
+                _ => false,
+            }
+            .then_some(crate::relate::Head {
+                info: dg::TYPE_OF_COMPUTED_PROPERTY_S_VALUE_IS_0_WHICH_IS_NOT_ASSIGNABLE_TO_TYPE_1_2418,
+            });
             let (chain, at) =
-                self.relation_error_chain(vt, tprop_type, RelationKind::Assignable, None);
+                self.relation_error_chain(vt, tprop_type, RelationKind::Assignable, computed_head);
             let mark = self.diags.len();
             self.error_chain(at.unwrap_or(kl), &chain);
             self.relate_expected_property(mark, target, nid, &name);

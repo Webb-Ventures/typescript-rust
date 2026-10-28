@@ -3043,6 +3043,39 @@ Files, by layer:
     `tests/parity/widened_literal_subtypes_and_iife_params`.
   - `import<T>` resolves its type arguments. `export default X` of a local type `X` and an
     exported value `X` is a value for `alias_is_value` (`tests/alias_is_value.rs`).
+  - Round 7 (wip/v1-checker7).
+    - A rest parameter of a generic type (`...t: T`, not a tuple) is related as a whole.
+      It compares against the other side's parameters from its position on, after the
+      positions both sides have. The variance measurement is marked unreliable.
+    - When a generic source signature is instantiated in the context of a target, its
+      generic rest infers from the target's rest type at that position (tsc:
+      `compareSignaturesRelated` and `applyToParameterTypes` in relater.go and
+      inference.go). Fixtures: `generic_rest_relations_and_deferred_tail` and
+      `generic_rest_signature_inference_and_infer_constraint`.
+    - A deferred conditional's constraint instantiates its true branch with the `infer`
+      results. With a deferred check type nothing is inferred: each parameter is read at
+      its constraint (`unknown[]` in a rest position), else `unknown`.
+    - An uninferred type parameter with no default maps to its constraint when `unknown`
+      does not satisfy it.
+    - Under exactOptionalPropertyTypes, a failure caused only by `undefined` written to an
+      optional property heads with TS2375 (TS2379 for an argument).
+    - `typeof a.p` with no `p` on `a` reads an index signature. Otherwise it reports what
+      `a.p` would: TS2339, or TS7017 for a missing global through `globalThis`. The root
+      of the path narrows through a union constraint, as the object of a property access
+      does. Fixture: `type_query_missing_property`.
+    - `super` in a member, parameter or class decorator is placed in the scope around the
+      class. Decorators on both sides of `export` are TS8038. Fixtures:
+      `decorator_super_outer_scope` and `decorators_both_sides_of_export`.
+    - A JS this-property that the constructor assigns only on some paths reads
+      `T | undefined` under strictNullChecks. "Some paths" means not in a statement
+      directly in the body before any `return`, and the rule does not apply when a base
+      class declares the property. Fixture: `js_this_property_unset_in_constructor`.
+      The first `return` of each constructor body is found by one walk, cached in
+      `Ck::ctor_first_return`. A body over the walk's budget counts as having no
+      `return`, so its properties fall back to `T`, never `T | undefined`
+      (`tests/bounded.rs`, and `ts_r_emit`'s `javascript_many_this_properties_are_linear`).
+    - Type nodes name a JS ES module's exports through its file symbol, so `.d.ts` emit
+      writes `import("./Test.js").default` (`ts_r_check/tests/cli.rs`).
 - Front-end crates are read-only; parser problems go to
   [../../docs/design/ast-requests.md](../../docs/design/ast-requests.md).
 
@@ -3232,13 +3265,15 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-27, d5a9934, wip/v1-checker6 on v1/emit6: circular initializers that
-  name the variable, inferred predicates through flow, `in` and `satisfies`, elaboration
-  through `=` and comma operands, binding-pattern contextual types and member order;
-  12750 compared variants): 12433 exact (97.5%; all diagnostics and chains), 12453 (97.7%)
-  exact on first lines; 150 variants with a diagnostic tsc does not report, 5 of them
-  tests where tsc reports nothing.
-  Earlier: 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-27, 6a873bc, wip/v1-checker7 on v1/lsp7: uninferred parameters read
+  through their constraints, exactOptionalPropertyTypes heads (TS2375/TS2379), generic
+  rest parameters related and inferred as a whole, deferred conditional constraints,
+  `typeof a.p` property checks, decorator `super` placement and TS8038, JS constructor
+  this-properties and JS module names in type nodes; 12750 compared variants):
+  12446 exact (97.6%; all diagnostics and chains), 12466 (97.8%) exact on first lines;
+  144 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
+  nothing.
+  Earlier: 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

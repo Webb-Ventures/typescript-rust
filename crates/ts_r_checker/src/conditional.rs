@@ -76,9 +76,38 @@ impl<'c, 'a> Ck<'c, 'a> {
         let root = *s.conditional_root_data(d.root);
         let a = self.conditional_branch(root.decl, true);
         let b = self.conditional_branch(root.decl, false);
-        let mut a = self.instantiate(a, d.mapper);
-        let b = self.instantiate(b, d.mapper);
         let check = self.instantiate(root.check, d.mapper);
+        // The true branch sees what its `infer` parameters infer from a check type that is
+        // not itself deferred (`((...t: T) => void) extends (h: any, ...r: infer R) => void
+        // ? R : never` stands for `T[number][]`; tsc: `getInferredTrueTypeFromConditionalType`).
+        let infer = s.list_items(root.infer_params).to_vec();
+        let tuples = self.is_simple_tuple_pair(root.decl);
+        // A deferred check type infers nothing: each `infer` parameter stands for its
+        // constraint (`unknown[]` in a rest position), else `unknown`, so
+        // `F extends { (...a: infer A): infer R } ? (...p: A) => R : never` is a function of
+        // `unknown[]` (tsc: the combined mapper of `getConditionalType`).
+        let true_mapper =
+            if !infer.is_empty() && check != TypeId::UNRESOLVED && !self.store().is_error(check) {
+                let deferred = self.is_deferred_conditional_operand(check, tuples);
+                let ext = self.instantiate(root.extends, d.mapper);
+                let mut ctx = InferenceContext::new(&infer);
+                ctx.base_signatures = true;
+                ctx.implicit_never = true;
+                if !deferred {
+                    self.infer_types(&mut ctx, check, ext, 0);
+                }
+                let results = self.infer_results(&mut ctx, d.mapper, deferred);
+                let (src, dst) = s.mapper_lists(d.mapper);
+                let mut src = src.to_vec();
+                let mut dst = dst.to_vec();
+                src.extend(infer.iter().copied());
+                dst.extend(results);
+                s.mapper(&src, &dst)
+            } else {
+                d.mapper
+            };
+        let mut a = self.instantiate(a, true_mapper);
+        let b = self.instantiate(b, d.mapper);
         if a == check {
             let ext = self.instantiate(root.extends, d.mapper);
             if ext != TypeId::UNRESOLVED && !self.store().is_error(ext) {

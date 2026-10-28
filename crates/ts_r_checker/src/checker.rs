@@ -656,6 +656,10 @@ pub struct Ck<'c, 'a> {
     /// `finally` labels restricted while walking through a reduce label.
     pub(crate) flow_reduce: Vec<(ts_r_binder::FlowId, Vec<ts_r_binder::FlowId>)>,
     pub(crate) ref_keys: FxHashMap<Loc, Option<crate::flow::RefKey>>,
+    /// Per JS constructor body: the start of its first `return` outside nested functions
+    /// (`u32::MAX` when it has none, or when the walk ran out of budget), so the
+    /// definitely-assigned check of its this-properties is one walk per constructor.
+    pub(crate) ctor_first_return: FxHashMap<Loc, u32>,
     /// What a const binding aliases (`const { kind } = v` is `v.kind`).
     pub(crate) binding_aliases: FxHashMap<SymId, Option<crate::flow::BindingAlias>>,
     /// The aliased reference's root name for identifiers in conditions.
@@ -902,6 +906,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             loop_node_types: FxHashMap::default(),
             flow_reduce: Vec::new(),
             ref_keys: FxHashMap::default(),
+            ctor_first_return: FxHashMap::default(),
             binding_aliases: FxHashMap::default(),
             alias_roots: FxHashMap::default(),
             cond_alias_depth: 0,

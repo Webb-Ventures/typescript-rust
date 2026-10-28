@@ -921,6 +921,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         let info = match head {
+            Some(h)
+                if h.info.code
+                    == dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_2345.code
+                    && self.has_exact_optional_unassignable_props(s, t) =>
+            {
+                dg::ARGUMENT_OF_TYPE_0_IS_NOT_ASSIGNABLE_TO_PARAMETER_OF_TYPE_1_WITH_EXACTOPTIONALPR_2379
+            }
             Some(h) => h.info,
             None => {
                 if rel == RelationKind::Comparable {
@@ -928,6 +935,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 } else if gs == ts {
                     // Even qualified, the names are alike (two type parameters `T`).
                     dg::TYPE_0_IS_NOT_ASSIGNABLE_TO_TYPE_1_TWO_DIFFERENT_TYPES_WITH_THIS_NAME_EXIST_BUT_T_2719
+                } else if self.has_exact_optional_unassignable_props(s, t) {
+                    dg::TYPE_0_IS_NOT_ASSIGNABLE_TO_TYPE_1_WITH_EXACTOPTIONALPROPERTYTYPES_TRUE_CONSIDER_2375
                 } else {
                     // A string literal against a union of string literals suggests the
                     // closest one.
@@ -949,6 +958,36 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(r) = self.rel.report.as_mut() {
             r.last_names = Some((gs, ts));
         }
+    }
+
+    /// Whether, under `exactOptionalPropertyTypes`, some property of the object target is
+    /// optional (its type has `missing`) while the source's property of that name may be
+    /// `undefined`. Such a pair names the option in a relation message's head, even when
+    /// another property failed (`RegExpMatchArray` to `RegExpExecArray`: both have an
+    /// optional `groups`); never between two tuples (tsc:
+    /// `getExactOptionalUnassignableProperties` in `tsc/internal/checker/relater.go`).
+    fn has_exact_optional_unassignable_props(&mut self, s: TypeId, t: TypeId) -> bool {
+        if !self.c.opts.exact_optional_property_types
+            || !self.store().flags(t).contains(TypeFlags::OBJECT)
+            || (self.c.is_tuple_type(s) && self.c.is_tuple_type(t))
+        {
+            return false;
+        }
+        for (name, tp) in self.properties_of(t) {
+            let tt = self.type_of_symbol(tp);
+            if !self.some_member(tt, |m| m == TypeId::MISSING) {
+                continue;
+            }
+            let Some(sp) = self.property_of_type_id(s, name) else {
+                continue;
+            };
+            let st_ = self.type_of_symbol(sp);
+            let store = self.store();
+            if self.some_member(st_, |m| store.flags(m).contains(TypeFlags::UNDEFINED)) {
+                return true;
+            }
+        }
+        false
     }
 
     /// The hints tsc adds under a relation message about the global `Object` type (TS2696:
@@ -4791,16 +4830,62 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return false;
         }
-        let count = if s_rest || t_rest {
+        // A rest parameter of a generic type (`...t: T`) is related as a whole, against the
+        // other side's parameters from its position on as a tuple, after the positions both
+        // have (tsc: `getNonArrayRestType` in `compareSignaturesRelated`, relater.go). Tuple
+        // rests keep the element-wise comparison.
+        let generic_rest = |ck: &mut Self, sig: SigId| -> Option<bool> {
+            let d = ck.store().sig(sig);
+            if !d.has_rest() {
+                return Some(false);
+            }
+            let r = d.params.last()?.ty;
+            if ck.store().tuple_shape_of(r).is_some() {
+                return None;
+            }
+            Some(
+                ck.store()
+                    .flags(r)
+                    .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS),
+            )
+        };
+        let rest_index = match (generic_rest(self, ssig), generic_rest(self, tsig)) {
+            (Some(a), Some(b)) if a || b => {
+                let rest_of =
+                    |ck: &Self, sig: SigId| ck.store().sig(sig).params.last().map(|p| p.ty);
+                let r = if a {
+                    rest_of(self, ssig)
+                } else {
+                    rest_of(self, tsig)
+                };
+                if let Some(r) = r {
+                    self.note_unreliable_rest_type(r);
+                }
+                Some(s_count.min(t_count).checked_sub(1))
+            }
+            _ => None,
+        };
+        let count = if let Some(ri) = rest_index {
+            ri.map_or(0, |r| r + 1)
+        } else if s_rest || t_rest {
             s_count.max(t_count)
         } else {
             s_count.min(t_count)
         };
         for i in 0..count {
-            let Some(sp) = self.param_type_at(ssig, i) else {
+            let at_rest = rest_index.flatten() == Some(i);
+            let Some(sp) = (if at_rest {
+                Some(self.rest_type_at(ssig, i))
+            } else {
+                self.param_type_at(ssig, i)
+            }) else {
                 continue;
             };
-            let Some(tp) = self.param_type_at(tsig, i) else {
+            let Some(tp) = (if at_rest {
+                Some(self.rest_type_at(tsig, i))
+            } else {
+                self.param_type_at(tsig, i)
+            }) else {
                 continue;
             };
             // With strict arity, an optional source parameter where the target's is required
@@ -5004,11 +5089,35 @@ impl<'c, 'a> Ck<'c, 'a> {
             .params
             .len()
             .max(self.store().sig(tsig).params.len());
+        // A generic rest of the source (`...args: A`) infers from the target's parameters
+        // from that position on as a whole (`A` from the target's `...args: A2`; tsc:
+        // `applyToParameterTypes` with the rest type at that position).
+        let generic_rest = {
+            let d = self.store().sig(ssig);
+            match d.params.last().map(|p| p.ty) {
+                Some(r)
+                    if d.has_rest()
+                        && self.store().tuple_shape_of(r).is_none()
+                        && self
+                            .store()
+                            .flags(r)
+                            .intersects(TypeFlags::TYPE_PARAMETER | TypeFlags::INDEXED_ACCESS) =>
+                {
+                    Some((d.params.len() - 1, r))
+                }
+                _ => None,
+            }
+        };
+        let n = generic_rest.map_or(n, |(at, _)| at);
         for i in 0..n {
             if let (Some(sp), Some(tp)) = (self.param_type_at(ssig, i), self.param_type_at(tsig, i))
             {
                 self.infer_types(&mut ctx, tp, sp, 0);
             }
+        }
+        if let Some((at, r)) = generic_rest {
+            let tr = self.rest_type_at(tsig, at);
+            self.infer_types(&mut ctx, tr, r, 0);
         }
         let mut rctx = crate::infer::InferenceContext::new(tps);
         rctx.filter_by_constraint = true;

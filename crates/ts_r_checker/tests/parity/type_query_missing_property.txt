@@ -1,0 +1,13 @@
+a.ts(6,19): error TS2339: Property 'a' does not exist on type '{ a: 1; } | { b: 2; }'.
+  Property 'a' does not exist on type '{ b: 2; }'.
+a.ts(7,84): error TS2339: Property 'y' does not exist on type 'T'.
+a.ts(9,19): error TS2339: Property 'B' does not exist on type 'typeof E'.
+a.ts(11,19): error TS2339: Property 'w' does not exist on type 'typeof N'.
+a.ts(12,52): error TS2339: Property 'zz' does not exist on type 'K'.
+a.ts(13,19): error TS2339: Property 't' does not exist on type 'typeof K'.
+a.ts(20,19): error TS2339: Property 'nope' does not exist on type 'string'.
+a.ts(28,25): error TS2339: Property 'hasFins' does not exist on type 'Pet'.
+  Property 'hasFins' does not exist on type 'Dog'.
+a.ts(32,21): error TS2339: Property 'c' does not exist on type '{ b: number; }'.
+a.ts(33,27): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.
+a.ts(35,19): error TS18048: 'this' is possibly 'undefined'.

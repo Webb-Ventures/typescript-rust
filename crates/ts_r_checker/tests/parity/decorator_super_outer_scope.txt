@@ -1,0 +1,3 @@
+a.ts(7,11): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.
+a.ts(23,21): error TS2335: 'super' can only be referenced in a derived class.
+a.ts(27,3): error TS2660: 'super' can only be referenced in members of derived classes or object literal expressions.

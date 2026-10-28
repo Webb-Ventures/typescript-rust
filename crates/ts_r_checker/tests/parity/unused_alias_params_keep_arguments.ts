@@ -1,0 +1,13 @@
+type B<T> = () => any;
+let b: B<string> = {};
+type D<T> = { (): any };
+let d: D<string> = {};
+type E<T> = { a: 1 };
+let e: E<string> = {};
+type U<T> = 'a' | 'b';
+let u: U<string> = 'c';
+type I<T> = { a: 1 } & { b: 2 };
+let i2: I<string> = {};
+type F<T> = (x: number) => void;
+declare let fs: F<string>;
+let n: number = fs;

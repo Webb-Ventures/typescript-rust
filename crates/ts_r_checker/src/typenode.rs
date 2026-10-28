@@ -940,9 +940,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         if file == cx.enclosing.file {
             return None;
         }
+        // (An ES-module JavaScript file is a module too: `typeof import("./Test.js").default`
+        // of `class Test {}; export default Test;` in `Test.js`.)
         let module = self
             .c
-            .module_target_symbol(ts_r_binder::program::ModuleTarget::File(file))?;
+            .module_target_symbol(ts_r_binder::program::ModuleTarget::File(file))
+            .or_else(|| {
+                let sf = self.c.file(file);
+                (sf.is_js() && !sf.is_json() && sf.bound.is_module)
+                    .then(|| self.c.sym(file, sf.bound.file_symbol))
+            })?;
         if !self
             .c
             .sym_flags(module)

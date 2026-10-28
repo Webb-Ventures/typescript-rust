@@ -1,0 +1,2 @@
+a.ts(2,13): error TS8038: Decorators may not appear after 'export' or 'export default' if they also appear before 'export'.
+b.ts(2,21): error TS8038: Decorators may not appear after 'export' or 'export default' if they also appear before 'export'.

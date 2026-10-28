@@ -1,0 +1,2 @@
+a.ts(3,22): error TS2339: Property 'notHere' does not exist on type 'A'.
+a.ts(5,22): error TS2339: Property 'notHere' does not exist on type 'A'.

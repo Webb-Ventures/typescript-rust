@@ -1496,7 +1496,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let m = self.store().mapper(&ctx.params, &fixed);
                         self.instantiate(d, m)
                     }
-                    _ => TypeId::UNKNOWN,
+                    Some(_) => TypeId::UNKNOWN,
+                    // Nothing inferred and no default: `unknown`, which gives way to the
+                    // constraint when it does not satisfy it (`<U extends T, T extends A>():
+                    // U` reads `T` as `A`; tsc: the non-fixing mapper's `getInferredType`).
+                    None => match self.type_param_constraint(p) {
+                        Some(c) => {
+                            let fixed: Vec<TypeId> = ctx
+                                .fixed
+                                .iter()
+                                .map(|f| f.unwrap_or(TypeId::UNKNOWN))
+                                .collect();
+                            let m = self.store().mapper(&ctx.params, &fixed);
+                            let ic = self.instantiate(c, m);
+                            if self.is_assignable(TypeId::UNKNOWN, ic) {
+                                TypeId::UNKNOWN
+                            } else {
+                                ic
+                            }
+                        }
+                        None => TypeId::UNKNOWN,
+                    },
                 },
             };
             dst.push(t);

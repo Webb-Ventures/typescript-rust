@@ -139,6 +139,23 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// Notes, while measuring, a generic rest parameter type (`...args: T`) related as a
+    /// whole that mentions a marker: such a comparison is unreliable, references fall back
+    /// to structure (tsc: `reportUnreliableMarkers` on `getNonArrayRestType`).
+    pub(crate) fn note_unreliable_rest_type(&mut self, rt: TypeId) {
+        if self.rel.probe.as_ref().is_none_or(|p| p.unreliable) {
+            return;
+        }
+        let (sub, sup, other) = self.variance_markers();
+        if (self.type_mentions(rt, sub)
+            || self.type_mentions(rt, sup)
+            || self.type_mentions(rt, other))
+            && let Some(p) = self.rel.probe.as_mut()
+        {
+            p.unreliable = true;
+        }
+    }
+
     fn unmeasurable_type(&mut self, x: TypeId) -> bool {
         let st = self.store();
         if !st.traits(x).contains(TypeTraits::CONTAINS_TYPE_PARAMETER) {

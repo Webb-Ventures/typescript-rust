@@ -187,3 +187,52 @@ fn wide_object_pattern_with_defaults() {
     let took = start.elapsed();
     assert!(took.as_secs() < 30, "took {took:?}");
 }
+
+/// A JS constructor of 6,000 `this.pN = 0;` statements: whether each property is
+/// definitely assigned is one walk of the constructor (cached), not one per property
+/// with a budget that ran out near 3,000 and made the rest `number | undefined`. A
+/// statement ahead of every `return` stays `number` (tsc 7.0.2). The 50,000-property
+/// case is `ts_r_emit`'s `javascript_many_this_properties_are_linear`.
+#[test]
+fn many_this_properties_of_a_js_constructor_stay_definitely_assigned() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let n = 6_000;
+    let mut src =
+        String::from("export class C {\n  /** @param {boolean} b */\n  constructor(b) {\n");
+    for i in 0..n {
+        src.push_str(&format!("    this.p{i} = 0;\n"));
+    }
+    src.push_str("    if (b) return;\n    this.late = 0;\n  }\n}\n");
+    src.push_str(&format!(
+        "/** @type {{string}} */\nvar a = new C(true).p{};\n/** @type {{string}} */\nvar b = new C(true).late;\n",
+        n - 1
+    ));
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/a.js", &src);
+    fs.add_file(
+        "/p/tsconfig.json",
+        "{\"compilerOptions\": {\"strict\": true, \"allowJs\": true, \"checkJs\": true, \"target\": \"es2022\"}, \"files\": [\"a.js\"]}",
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let start = std::time::Instant::now();
+    let result = check_program(&program, CheckRun { threads: 1 });
+    let took = start.elapsed();
+    let msgs: Vec<&str> = result
+        .diagnostics
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        msgs,
+        [
+            "Type 'number' is not assignable to type 'string'.",
+            "Type 'number | undefined' is not assignable to type 'string'.\n  Type 'undefined' is not assignable to type 'string'.",
+        ],
+        "{msgs:?}"
+    );
+    assert!(took.as_secs() < 60, "took {took:?}");
+}

@@ -48,13 +48,36 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.decorator_error(file, s, dg::DECORATORS_ARE_NOT_VALID_HERE_1206);
                 }
             }
-            Node::ClassDecl { decorators, .. } => {
+            Node::ClassDecl {
+                decorators,
+                modifiers,
+                ..
+            } => {
+                // `@a export @b class C {}`: decorators on both sides of `export` (at the
+                // first one after it).
+                let list = ast.list(decorators);
+                let text = &self.c.file(file).text;
+                for w in list.windows(2) {
+                    let gap = text
+                        .get(ast.span(w[0]).end as usize..ast.span(w[1]).start as usize)
+                        .unwrap_or("");
+                    if modifiers.contains(Modifiers::EXPORT) && gap_has_export_keyword(gap) {
+                        let s = ast.span(w[1]).start;
+                        self.decorator_error(
+                            file,
+                            s,
+                            dg::DECORATORS_MAY_NOT_APPEAR_AFTER_EXPORT_OR_EXPORT_DEFAULT_IF_THEY_ALSO_APPEAR_BEF_8038,
+                        );
+                        break;
+                    }
+                }
                 // `export @dec default class C {}`: decorators between `export` and `default`.
                 if let Some(&last) = ast.list(decorators).last() {
                     let text = &self.c.file(file).text;
                     let rest = text.get(ast.span(last).end as usize..).unwrap_or("");
                     let rest = rest.trim_start();
-                    if rest.starts_with("default")
+                    if modifiers.contains(Modifiers::EXPORT)
+                        && rest.starts_with("default")
                         && rest[7..].starts_with(|c: char| c.is_ascii_whitespace())
                     {
                         self.first_decorator_error(
@@ -527,4 +550,33 @@ fn metadata_entity_name(
         Node::TypeRef { name, .. } => Some(name),
         _ => None,
     }
+}
+
+/// Whether the text between two decorators holds the `export` keyword (comments skipped).
+fn gap_has_export_keyword(gap: &str) -> bool {
+    let b = gap.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i..].starts_with(b"//") {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b[i..].starts_with(b"/*") {
+            i += 2;
+            while i < b.len() && !b[i..].starts_with(b"*/") {
+                i += 1;
+            }
+            i += 2;
+        } else if b[i..].starts_with(b"export")
+            && (i == 0
+                || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_' || b[i - 1] == b'$'))
+            && b.get(i + 6)
+                .is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_' || *c == b'$'))
+        {
+            return true;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }

@@ -6336,7 +6336,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if tps.is_empty() {
             if n_args > 0 && !self.is_jsdoc_record(r) {
                 let d = self.declared_type_of_symbol(sym);
-                let ts = self.type_to_string(d);
+                // An alias is named as written (`type U = number; U<N>` says 'U'), a class
+                // or interface by its declared type (tsc: `getTypeFromTypeAliasReference`).
+                let ts = if flags.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE) {
+                    self.type_to_string(d)
+                } else {
+                    crate::nodes::entity_text(ast, name)
+                };
                 self.error(r, dg::TYPE_0_IS_NOT_GENERIC_2315, &[&ts]);
             }
             return;

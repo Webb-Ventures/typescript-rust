@@ -1386,3 +1386,33 @@ fn regression_lib_side_link_diagnostics_are_reported_with_the_lib_path() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A JS ES module's default export is named through `import("./Test.js")` in a `.d.ts`, and a
+/// this-property the constructor assigns only on some paths gets `| undefined` (tsc test
+/// jsDeclarationEmitDoesNotRenameImport).
+#[test]
+fn js_module_type_named_through_import_type() {
+    let dir = temp_project(
+        "ts-r-check-cli-js-import-type",
+        &[
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"target":"es2015","allowJs":true,"declaration":true,"emitDeclarationOnly":true,"strict":false,"strictNullChecks":true,"outDir":"out"},"files":["test/Test.js","Test.js","index.js"]}"#,
+            ),
+            ("test/Test.js", "class Test {}\nexport default Test;\n"),
+            ("Test.js", "class Test {}\nexport default Test;\n"),
+            (
+                "index.js",
+                "import Test from './test/Test.js'\n\n/**\n * @typedef {Object} Options\n * @property {typeof import(\"./Test.js\").default} [test]\n */\n\nclass X extends Test {\n    /**\n     * @param {Options} options\n     */\n    constructor(options) {\n        super();\n        if (options.test) {\n            this.test = new options.test();\n        }\n    }\n}\n\nexport default X;\n",
+            ),
+        ],
+    );
+    let (out, code) = ts_r_check_args(&dir, &["--pretty", "false"]);
+    assert_eq!(code, 0, "{out}");
+    let dts = std::fs::read_to_string(dir.join("out/index.d.ts")).unwrap();
+    assert!(
+        dts.contains("test: import(\"./Test.js\").default | undefined;"),
+        "{dts}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

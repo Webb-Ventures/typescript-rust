@@ -999,10 +999,160 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // `this.x = v` only in a class's methods, never in its constructor, may be unset:
         // `| undefined` under strictNullChecks (tsc 7).
-        if self.c.opts.strict_null_checks && self.this_property_only_in_methods(s) {
+        if self.c.opts.strict_null_checks
+            && (self.this_property_only_in_methods(s) || self.this_property_maybe_unset(s))
+        {
             return self.union(&[t, TypeId::UNDEFINED]);
         }
         t
+    }
+
+    /// A JavaScript `this.x` property every declaration of which is a `this.x = v`
+    /// assignment, some in a constructor, none of them a statement of that constructor's
+    /// body ahead of every `return`: unset on some path out of the constructor, so its
+    /// type includes `undefined` (`if (p) { this.position = p; }`). tsc reads the
+    /// property's flow type at the constructor's end, starting from `undefined` (or the
+    /// base class's property, which is left alone here; tsc: `getFlowTypeInConstructor` in
+    /// `tsc/internal/checker/checker.go`). A constructor that only assigns `null` or
+    /// `undefined` does not count.
+    fn this_property_maybe_unset(&mut self, s: SymId) -> bool {
+        let decls = self.c.decls(s).to_vec();
+        let mut in_ctor = false;
+        let mut ctor_value_types = Vec::new();
+        for d in &decls {
+            if !self.c.file(d.file).is_js() {
+                return false;
+            }
+            let ast = self.ast(d.file);
+            let Node::Member { obj, .. } = *ast.node(d.node) else {
+                return false;
+            };
+            if !matches!(ast.node(obj), Node::This {}) {
+                return false;
+            }
+            let parents = self.c.file(d.file).parents();
+            let Some(assign) = parents.parent(d.node) else {
+                return false;
+            };
+            let Node::Assign { left, right, .. } = *ast.node(assign) else {
+                return false;
+            };
+            if left != d.node {
+                return false;
+            }
+            // The nearest non-arrow function.
+            let mut cur = parents.parent(assign);
+            let mut func = None;
+            let mut steps = 0;
+            while let Some(n) = cur {
+                steps += 1;
+                if steps > 4096 {
+                    return false;
+                }
+                match ast.node(n) {
+                    Node::Arrow { .. } => {}
+                    Node::FunctionExpr { .. } | Node::FunctionDecl { .. } => {
+                        func = Some(n);
+                        break;
+                    }
+                    Node::ClassDecl { .. }
+                    | Node::ClassExpr { .. }
+                    | Node::StaticBlock { .. }
+                    | Node::PropertyDef { .. } => break,
+                    _ => {}
+                }
+                cur = parents.parent(n);
+            }
+            let Some(f) = func else { continue };
+            let Some(m) = parents.parent(f) else { continue };
+            let Node::MethodDef {
+                kind: MethodKind::Constructor,
+                ..
+            } = *ast.node(m)
+            else {
+                continue;
+            };
+            // A base class's property of that name is the starting type: not modelled.
+            if let Some(class) = parents.parent(m)
+                && let Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. } =
+                    *ast.node(class)
+                && !ast.list(heritage).is_empty()
+            {
+                let base_has = self.c.sym_parent(s).is_some_and(|cs| {
+                    let name = self.c.sym_name(s).to_owned();
+                    let bases = self.base_types(cs);
+                    bases
+                        .iter()
+                        .any(|&b| self.property_of_type(b, &name).is_some())
+                });
+                if base_has {
+                    return false;
+                }
+            }
+            in_ctor = true;
+            let vt = self.quietly(|ck| ck.check_expr(Loc::new(d.file, right)));
+            ctor_value_types.push(vt);
+            // Definitely assigned: a statement of the constructor body before any `return`.
+            let Some(body) = crate::nodes::fn_parts(ast, f).and_then(|p| p.body) else {
+                continue;
+            };
+            let stmt = parents.parent(assign);
+            let at_top = stmt.is_some_and(|st| {
+                matches!(ast.node(st), Node::ExprStmt { .. }) && parents.parent(st) == Some(body)
+            });
+            // Before the constructor's first `return` (found once per constructor).
+            if at_top && ast.span(assign).start < self.first_return_in_body(Loc::new(d.file, body))
+            {
+                return false;
+            }
+        }
+        in_ctor
+            && ctor_value_types.iter().any(|&t| {
+                !self
+                    .store()
+                    .flags(t)
+                    .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::VOID)
+            })
+    }
+
+    /// The start of the first `return` in function body `body`, outside nested functions
+    /// and classes; `u32::MAX` when there is none. Cached per body. A body too large to
+    /// walk within the budget counts as having none (every top-level assignment is then
+    /// definitely assigned: the plain declared type, never a spurious `| undefined`).
+    fn first_return_in_body(&mut self, body: Loc) -> u32 {
+        if let Some(&r) = self.ctor_first_return.get(&body) {
+            return r;
+        }
+        let ast = self.ast(body.file);
+        let mut first = u32::MAX;
+        let mut stack = vec![body.node];
+        let mut seen = 0u32;
+        while let Some(n) = stack.pop() {
+            seen += 1;
+            if seen > 2_000_000 {
+                first = u32::MAX;
+                break;
+            }
+            let start = ast.span(n).start;
+            if start >= first {
+                continue;
+            }
+            match ast.node(n) {
+                Node::Return { .. } => {
+                    first = start;
+                    continue;
+                }
+                Node::FunctionExpr { .. }
+                | Node::FunctionDecl { .. }
+                | Node::Arrow { .. }
+                | Node::ClassDecl { .. }
+                | Node::ClassExpr { .. } => continue,
+                _ => {}
+            }
+            ast.for_each_child(n, |c| stack.push(c));
+        }
+        self.ctor_first_return.insert(body, first);
+        first
     }
 
     /// Every declaration of `s` is a `this.x` assignment target in a class method or
