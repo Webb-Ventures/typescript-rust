@@ -172,6 +172,9 @@ impl Emitter<'_, '_> {
     /// Writes the namespace of function `s`'s expando properties (`sym` is the function's
     /// symbol, `name` its name). `prefix` is written before `namespace`.
     pub(super) fn expando_namespace(&mut self, s: NodeId, sym: SymId, name: &str, prefix: &str) {
+        // Names are looked up where the namespace is declared, not inside the function
+        // (its parameters do not shadow).
+        let outer = self.parents.parent(s).unwrap_or(s);
         if self.opts.isolated_declarations {
             return;
         }
@@ -191,9 +194,10 @@ impl Emitter<'_, '_> {
                 continue;
             }
             let shadows = is_reserved(&pname)
+                || pname == "undefined"
                 || self
                     .ck
-                    .resolve_name_at(self.loc(s), &pname, meaning::VALUE)
+                    .resolve_name_at(self.loc(outer), &pname, meaning::VALUE)
                     .is_some();
             if shadows {
                 let local = self.expando_temp_name();

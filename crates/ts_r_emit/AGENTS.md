@@ -26,7 +26,8 @@ Files: `lib.rs` (config, `emit`, the resolver, rootDir diagnostics, JSON printin
 `FsWriter`, `MemoryWriter`), `dts/` (declaration emit, E2: `mod.rs` statements, classes and selection of what is
 printed; `types.rs` type nodes, parameters and members; `reuse.rs` types written from
 syntax; `isolated.rs` the `isolatedDeclarations` TS9xxx rules; `expando.rs` the namespace
-written for a function's expando properties, `f.x = 1`). Declaration emit works on a clone
+written for a function's expando properties, `f.x = 1`; `js.rs` which JavaScript files
+are written (TSR2006) and the properties of `this.x = v`). Declaration emit works on a clone
 of the file's AST (inferred types are added to the clone, then rolled back between passes)
 and prints it with its own printer: tsc's declaration layout (type literals always
 multi-line, `/** */` comments only) differs from JS emit enough that sharing codegen would
@@ -49,7 +50,14 @@ cost both. It never mutates the checker's AST.
   (`[-1]`); an object literal's TS9038 name that is an entity name is printed as written,
   so the local it names is printed too and may be TS9010 itself
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
-  declarations of JavaScript inputs (TSR2006, JSDoc declaration emit is not implemented).
+  declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
+  does not write yet (TSR2006 naming it: CommonJS exports, `@typedef`/`@callback`/
+  `@template`/`@overload`/`@enum`/`@import`, a class's statics assigned from outside,
+  `this["x"] = v`; the list and the observed rules are in `dts/js.rs`). Other JavaScript
+  files get their `.d.ts`: JSDoc types are written as tsc writes them (`String` is
+  `string`, `Array` `any[]`, `T=` `T | undefined`, `?` alone `any`, `function` `Function`,
+  `?T` in a union `(T | null)`; `Emitter::jsdoc_type`), and `this.x = v` in a class's
+  constructor or methods declares `x` first in the class body (statics `| undefined`).
   `EmitResult::skipped` then makes the exit code 1. Declarations do not depend on the target:
   a file refused with TSR2003 still gets its `.d.ts`.
 - **Nothing is written before every diagnostic is known**: `emit` only produces
@@ -203,13 +211,14 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-27, v1 checker round 5, `cargo run --release -p ts_r_check --example
-emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,090 (96.8%), shape 2,139
-(99.1%; the 20 others are in `emit_known_gaps.txt`), map segments equal on 17 of 17
-bytes-exact outputs with a map baseline; all 17,352 outputs: 15,890 bytes-exact (91.6%), JS
-13,727 / 14,476
-(94.8%), `.d.ts` 1,961 / 2,640. Declarations (E2): 1,191 of 1,315 baselines without
-JavaScript inputs have every `.d.ts` bytes-exact (90.6%); 1,191 / 1,634 over all baselines.
+Latest (2026-10-27, v1 emit round 6, `cargo run --release -p ts_r_check --example
+emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,092 (96.9%), shape 2,141
+(99.2%; the 18 others are in `emit_known_gaps.txt`), map segments equal on 17 of 17
+bytes-exact outputs with a map baseline; all 17,352 outputs: 16,266 bytes-exact (93.7%), JS
+13,732 / 14,476 (94.9%), `.d.ts` 2,332 / 2,640 (88.3%). Declarations (E2): 1,364 of 1,499
+baselines without TSR2006 refusals have every `.d.ts` bytes-exact (91.0%); 1,364 / 1,634 over
+all baselines (83.5%). TSR2006 refuses 168 JavaScript inputs' `.d.ts` (was 552; v1 checker
+round 5: `.d.ts` 1,961, baselines 1,191 / 1,634).
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

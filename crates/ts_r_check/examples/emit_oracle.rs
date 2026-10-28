@@ -1829,8 +1829,8 @@ fn downlevel_gates(out: &mut impl std::io::Write, results: &[Outcome]) {
 fn dts_gates(out: &mut impl std::io::Write, results: &[Outcome]) {
     let (mut outputs, mut exact, mut shape, mut extra) = (0u32, 0u32, 0u32, 0u32);
     let (mut baselines, mut baselines_exact) = (0u32, 0u32);
-    // Baselines with a JavaScript input's declarations (JSDoc declaration emit, outside
-    // record 0012: TSR2006).
+    // Baselines where a JavaScript input's declarations were refused (TSR2006: a JavaScript
+    // pattern the declaration emitter does not write yet).
     let mut js_baselines = 0u32;
     let mut missing: BTreeMap<&str, u32> = BTreeMap::new();
     for o in results {
@@ -1884,7 +1884,7 @@ fn dts_gates(out: &mut impl std::io::Write, results: &[Outcome]) {
     let ts_baselines = baselines - js_baselines;
     let _ = writeln!(
         out,
-        "  baselines without JavaScript inputs: {baselines_exact} / {ts_baselines} ({:.1}%)",
+        "  baselines without TSR2006 refusals: {baselines_exact} / {ts_baselines} ({:.1}%)",
         pct(baselines_exact, ts_baselines)
     );
     let _ = writeln!(

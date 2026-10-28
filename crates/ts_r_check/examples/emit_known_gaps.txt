@@ -16,8 +16,6 @@ conformance/esDecorators/esDecorators-decoratorExpression.3.ts(experimentaldecor
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=es2022)	topLevelAwaitErrors.1.js	differs: classes
 conformance/externalModules/topLevelAwaitErrors.1.ts(module=esnext)	topLevelAwaitErrors.1.js	differs: classes
 conformance/jsdoc/jsdocTypeTag.ts	a.js	missing: TS5055: would overwrite an input
-conformance/parser/ecmascript6/Iterators/parserForOfStatement22.ts	parserForOfStatement22.js	differs: other
 conformance/salsa/plainJSGrammarErrors.ts	plainJSGrammarErrors.js	missing: TSR2002: resolver answered Unknown
 tsc7/compiler/anonymousClassDecoratorEs2022.ts	anonymousClassDecoratorEs2022.js	differs: arrow functions
 tsc7/compiler/jsxNestedIndentation.js	jsxNestedIndentation.js	missing: TS5055: would overwrite an input
-tsc7/compiler/panicForInEmptyDeclarationList.ts	panicForInEmptyDeclarationList.js	differs: other

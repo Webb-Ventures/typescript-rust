@@ -341,7 +341,7 @@ not read or write tsc's tsbuildinfo schema.**
   | TSR2003 | error | lowering for this target not implemented |
   | TSR2004 | error | output-changing flag not implemented |
   | TSR2005 | warning | flag accepted and ignored (profiling, `--locale`); exit code unchanged |
-  | TSR2006 | error | `.d.ts` for a JavaScript input not supported |
+  | TSR2006 | error | `.d.ts` for a JavaScript input that uses a pattern not written yet |
 
 ## Invariants agents must keep
 
@@ -427,8 +427,9 @@ and in the owning crates' AGENTS.md.
 - **Writes are irreversible.** `--clean` and output paths get fixture tests for symlinked
   outDirs, `rootDir` outside the project, and outputs that would overwrite inputs (TS5055).
 - **`allowJs` input emit and JS→`.d.ts`** (JSDoc declaration emit) are not covered here.
-  Until a follow-up record covers them, JS inputs are emitted by the JS path only and their
-  `.d.ts` is refused with TSR2006.
+  Until a follow-up record covers them, JS inputs are emitted by the JS path, and their
+  `.d.ts` is written only when it needs nothing beyond TypeScript's declaration emit (see
+  "JavaScript declarations, first part" below); otherwise it is refused with TSR2006.
 
 ## Decisions (2026-10-19, Riley Webb)
 
@@ -1545,3 +1546,33 @@ ts-r-check:
 
 Out of scope here: JSDoc declaration emit for JavaScript inputs (TSR2006), and declaration
 diagnostics under `--noEmit` (an open decision).
+
+## JavaScript declarations, first part (v1 emit round 6, 2026-10-27)
+
+The `.d.ts` of a JavaScript input is written by the TypeScript declaration emitter, reading
+the checker's tree, which carries the annotations JSDoc desugared into. Added for
+JavaScript: JSDoc type syntax written as tsc 7 writes it (`String` is `string`, `Array`
+`any[]`, a generic without arguments takes `any` for each, `T=` is `T | undefined` with
+an optional parameter, `?` alone `any`, `function` `Function`, `?T` inside a union or
+intersection `(T | null)`), one `implements` clause for several `@implements`, `@this` as a
+`this` parameter, and the properties a class declares with `this.x = v` in its
+constructor or methods (first in the body, statics `| undefined`). The file is refused
+(TSR2006 naming the pattern) when tsc 7 declares something from a JavaScript pattern the
+emitter does not write yet: CommonJS exports, `@typedef`/`@callback`/`@template`/
+`@overload`/`@enum`/`@import`, `C.x = v` on a class, `this["x"] = v`, and `this.x = v`
+where the checker's property type is not tsc's yet (a base class declares `x`, or the
+value reads `this.x`). The rules are in `crates/ts_r_emit/src/dts/js.rs`.
+
+| Emit oracle, `--emitter program` | Before | After |
+|---|---|---|
+| `.d.ts` outputs bytes-exact | 1,961 / 2,640 | 2,332 / 2,640 |
+| Baselines with every `.d.ts` bytes-exact | 1,191 / 1,634 | 1,364 / 1,634 |
+| The same, baselines without TSR2006 refusals | 1,191 / 1,315 | 1,364 / 1,499 |
+| JavaScript inputs' `.d.ts` refused (TSR2006) | 552 | 168 |
+
+Of the JavaScript inputs' `.d.ts` no longer refused, 12 differ from tsc's and 3 are still not
+written (TSR2001, `not emitted`). The causes are the checker's types (a parameter's declared
+type narrowed at a `this.x = v`, a function's `typeof f` written instead of its signature, the
+order of a binding pattern's properties) and two layout details (`!T` and `?T` in
+intersections, a property's JSDoc on an object literal's expando).
+

@@ -1942,6 +1942,9 @@ fn ts_in_js_matches_tsc() {
             "import type * as ns from \"x\";\nexport type { default } from \"y\";",
             &[(8006, 1, 1), (8006, 2, 1)],
         ),
+        // `export type {}` after modifiers is an export declaration, not a type alias
+        // (tsc 7; typescript-estree too: unicorn/require-module-specifiers).
+        ("declare export type {} from \"foo\";", &[(8006, 1, 1)]),
         // JavaScript has no namespaces: the module-level codes (importDeclarationInModuleDeclaration2).
         (
             "function f() {\n    import \"fs\";\n    export { x };\n}",
@@ -2055,6 +2058,7 @@ fn recovery_matches_tsc() {
         ("var;", &[(1123, 1, 4)]),
         ("var a,;", &[(1009, 1, 6)]),
         ("for (var of X) {}", &[(1123, 1, 9)]),
+        ("for (let in x) {}", &[(1123, 1, 9)]),
         ("var a,; )", &[(1128, 1, 9)]),
         (
             "var export;\nvar class;",

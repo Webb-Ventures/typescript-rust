@@ -18,6 +18,7 @@
 
 mod expando;
 mod isolated;
+pub mod js;
 mod reuse;
 mod types;
 
@@ -35,7 +36,8 @@ use ts_r_types::{SymId, TypeFlags, TypeId, TypeKind};
 
 /// TSR2001: an inferred type in a declaration is unresolved; the `.d.ts` is skipped.
 pub const TSR_UNRESOLVED_TYPE: u32 = SOUND_CODE_BASE + 2001;
-/// TSR2006: `.d.ts` output for a JavaScript input is not supported.
+/// TSR2006: the `.d.ts` of a JavaScript input uses a pattern this emitter does not
+/// write yet ([`js::unsupported`]).
 pub const TSR_JS_DECLARATIONS: u32 = SOUND_CODE_BASE + 2006;
 
 /// Options of one declaration file.
@@ -2687,6 +2689,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
             self.name_text(n);
         }
         self.type_params(type_params);
+        let mut prev_kind = None;
         for &h in &heritage {
             let Node::HeritageClause { kind, types } = *self.ast.node(h) else {
                 continue;
@@ -2696,10 +2699,17 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 continue;
             }
             self.start(h);
-            self.w(match kind {
-                ts_r_ast::HeritageKind::Extends => " extends ",
-                ts_r_ast::HeritageKind::Implements => " implements ",
-            });
+            // JSDoc writes one `implements` clause per `@implements` tag: tsc lists them
+            // in one clause.
+            if prev_kind == Some(kind) && self.ast.is_jsdoc(h) {
+                self.w(", ");
+            } else {
+                self.w(match kind {
+                    ts_r_ast::HeritageKind::Extends => " extends ",
+                    ts_r_ast::HeritageKind::Implements => " implements ",
+                });
+            }
+            prev_kind = Some(kind);
             for (i, &t) in types.iter().enumerate() {
                 if i > 0 {
                     self.w(", ");
@@ -2889,6 +2899,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 self.w(";");
                 self.nl();
             }
+        }
+        if !self.ast.source_kind.is_typescript() {
+            self.this_properties(class, members);
         }
         let mut prev_end = self.body_open(class);
         let mut printed_private: FxHashSet<String> = FxHashSet::default();
