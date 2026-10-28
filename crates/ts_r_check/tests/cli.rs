@@ -16,7 +16,11 @@ ts_r_testing::cap_memory!();
 const PLACEHOLDER: &str = "${FIXTURE}";
 
 /// Fixtures whose program is checked (no option error stops it), so they need the libs.
-const NEEDS_LIBS: &[&str] = &["config-parse-errors-sorted", "js-type-syntax"];
+const NEEDS_LIBS: &[&str] = &[
+    "config-parse-errors-sorted",
+    "js-type-syntax",
+    "js-unexported-type-cannot-be-named",
+];
 
 fn fixtures() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
@@ -1427,6 +1431,36 @@ fn js_module_type_named_through_import_type() {
     assert!(
         dts.contains("test: import(\"./Test.js\").default | undefined;"),
         "{dts}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A module read through `const ns = require(m)` is written `typeof ns` in declarations,
+/// with the require as an import (tsc 7.0.2).
+#[test]
+fn required_module_is_named_through_its_variable() {
+    if ts_r_checker::LibStore::locate().is_none() {
+        return;
+    }
+    let dir = temp_project(
+        "ts-r-check-cli-require-typeof",
+        &[
+            ("cls.js", "exports.x = 1;\n"),
+            (
+                "cjs.js",
+                "const ns = require(\"./cls\");\nmodule.exports = { ns };\n",
+            ),
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"allowJs":true,"declaration":true,"emitDeclarationOnly":true,"outDir":"out","types":[]},"files":["cls.js","cjs.js"]}"#,
+            ),
+        ],
+    );
+    let (out, code) = ts_r_check_args(&dir, &["-p", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("out/cjs.d.ts")).unwrap(),
+        "declare const _exports: {\n    ns: typeof ns;\n};\nexport = _exports;\nimport ns = require(\"./cls\");\n"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

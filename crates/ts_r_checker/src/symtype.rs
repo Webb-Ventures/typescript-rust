@@ -947,6 +947,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let mut types = Vec::new();
         let mut object_literals = 0;
+        // Whether a CommonJS export's nullish values are all the `undefined` identifier
+        // (under strictNullChecks not widening, unlike `void 0` and `null`: observed).
+        let mut plain_undefined = None;
         // A CommonJS export (`exports.x = {}`) is no container.
         let commonjs_export = self
             .c
@@ -989,6 +992,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                     let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, r)));
                     let t = self.store().regular(t);
+                    if matches!(t, TypeId::UNDEFINED | TypeId::NULL) {
+                        // Only as the assigned value itself, not at a chain's end.
+                        let ident = self.c.opts.strict_null_checks
+                            && crate::nodes::ident_text(ast, skip_parens(ast, right))
+                                == Some("undefined");
+                        plain_undefined = Some(plain_undefined.unwrap_or(true) && ident);
+                    }
                     let skip = t == TypeId::UNDEFINED
                         && self.c.decls(s).len() > 1
                         && self.c.decls(s).first() == Some(&d);
@@ -1007,7 +1017,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // `x.f = undefined` (or `void 0`) declares nothing: `any` alone, else the other
         // assignments' types (observed).
-        if types.iter().all(|&t| t == TypeId::UNDEFINED) {
+        if types
+            .iter()
+            .all(|&t| t == TypeId::UNDEFINED || commonjs_export && t == TypeId::NULL)
+        {
+            if plain_undefined == Some(true) {
+                return TypeId::UNDEFINED;
+            }
             // In JavaScript, implicitly `any` (TS7008 at the first assignment).
             let js = self
                 .c

@@ -102,7 +102,8 @@ Files:
   tsc 7. `@template in out T` takes variance modifiers, `const` and the other modifier
   keywords (the checker reports the misplaced ones; the type parameter's span starts at the
   first modifier);
-  `@callback` reads `@this`. `@enum` types are not read (tsc 7 reports nothing in them).
+  `@callback` reads `@this`. Each `@overload` tag's `JsDocTag::ty` is a function type like a
+  `@callback`'s, of the `@param`s after it and one `@returns`. `@enum` types are not read (tsc 7 reports nothing in them).
   `@template {C}` with no name after the braces is a JSDoc TS1069 at the braces' end (at
   the `}` when `*/` follows with no space; at the next line's first character, the margin
   `*`, when the comment goes on past that line) and declares nothing.
@@ -151,8 +152,8 @@ Files:
   nodes; every tag loop consumes the comment text or stops, and malformed JSDoc never panics
   (`pathological_comments_terminate`).
   Nested parameter/property paths are grouped before synthesis and built from the leaves
-  up, sharing each prefix type. Nested type synthesis has a source-sized work budget
-  (TS99003 on exhaustion); qualified names become member expressions iteratively.
+  up, sharing each prefix type. Nested type synthesis, and the `@template` copies each
+  `@overload` makes, have a source-sized work budget (TS99003 on exhaustion); qualified names become member expressions iteratively.
 
 - **tsc 7 is the spec.** What parses, and which error code is reported at which position, is
   checked by running `npx -y -p typescript@7 tsc --noEmit` on a tiny file. tsc's parser

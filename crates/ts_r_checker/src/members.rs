@@ -1150,6 +1150,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             })
             .collect();
+        // A JavaScript function or method with JSDoc `@overload` tags has their signatures
+        // instead of its own (the parser types each tag as a function type).
+        if fns.iter().any(|d| self.c.file(d.file).is_js()) {
+            let mut out = Vec::with_capacity(fns.len());
+            for d in fns {
+                let ast = self.ast(d.file);
+                let mut hosts = vec![d.node];
+                if let Node::MethodDef { kind, value, .. } = *ast.node(d.node)
+                    && kind == MethodKind::Method
+                {
+                    hosts.push(value);
+                }
+                let before = out.len();
+                for h in hosts {
+                    out.extend(
+                        ast.jsdoc_tags_of(h)
+                            .iter()
+                            .filter(|t| t.kind == ts_r_ast::JsDocTagKind::Overload)
+                            .filter_map(|t| t.ty)
+                            .map(|ty| Loc::new(d.file, ty)),
+                    );
+                }
+                if out.len() == before {
+                    out.push(d);
+                }
+            }
+            fns = out;
+        }
         // With overloads, the implementation signature is not visible.
         let has_body =
             |ck: &Self, d: &Loc| fn_parts(ck.ast(d.file), d.node).is_some_and(|p| p.body.is_some());

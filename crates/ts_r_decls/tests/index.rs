@@ -66,6 +66,8 @@ fn detached_jsdoc_types_change_the_signature() {
         "export const o = {\n/** @type {number} */ x: 0\n};",
         "export function f() {}\n/** @type {number} */ f.x = 0;",
         "/** @type {number} */ export default 0;",
+        "/** @overload @param {number} a @returns {void} */\nexport function f(a) {}",
+        "export class C {\n/** @overload @param {number} a @returns {void} */\nm(a) {}\n}",
     ] {
         let base = idx_js(src);
         let changed = idx_js(&src.replace("number", "string"));

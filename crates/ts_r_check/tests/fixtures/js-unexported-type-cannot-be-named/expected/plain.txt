@@ -1,0 +1,1 @@
+index.js(1,7): error TS4023: Exported variable 'items' has or is using name 'Item' from external module "${FIXTURE}/some-mod" but cannot be named.

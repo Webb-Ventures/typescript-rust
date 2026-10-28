@@ -1,0 +1,1 @@
+index.js(10,7): error TS2322: Type '(a: { x: string; }, b: { y: () => void; }) => void | ""' is not assignable to type 'number'.

@@ -1,0 +1,8 @@
+[96mindex.js[0m:[93m1[0m:[93m7[0m - [91merror[0m[90m TS4023: [0mExported variable 'items' has or is using name 'Item' from external module "${FIXTURE}/some-mod" but cannot be named.
+
+[7m1[0m const items = require("./some-mod")();
+[7m [0m [91m      ~~~~~[0m
+
+
+Found 1 error in index.js[90m:1[0m
+

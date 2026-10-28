@@ -67,7 +67,9 @@ Files, by layer:
   nested `node_modules`) is `NotNameable::NotPortable` (TS2883), never a deep import; an
   anonymous class type with private or protected members is `PrivateMember` (TS4094, every
   member), and with `TypeNodeCx::report_unnameable` a recursive type whose only name is
-  another module's unexported alias is `CannotBeNamed` (TS4023), as is a unique-symbol
+  another module's unexported alias is `CannotBeNamed` (TS4023), as is a class or
+  interface another module declares without exporting it (`unnameable_declared`; not
+  inlined), and a unique-symbol
   property key another module declares that the file cannot name (named by the first name
   of its chain: `Foo` for `Foo.sym`); a mapped type's property
   keyed by a unique symbol is `NonSerializableProperty` (TS4118).
@@ -84,7 +86,9 @@ Files, by layer:
   Naming rules observed in tsc 7 (record 0012, E6 notes): a symbol reachable through a
   top-level namespace import of the file prints `ns.Name`; a local declaration another
   module exports by an export declaration is named by that export (`import("./c").default`,
-  `import("./foo")` for `export =`, `y.Member` through a namespace import of the module);
+  `import("./foo")` for `export =`, `y.Member` through a namespace import of the module,
+  `typeof ns` through a JavaScript file's top-level `const ns = require(m)`,
+  `require_variable_for`);
   `import("…").Name` goes through a module the file imports that exports the symbol
   (explicitly or by `export *`) when that specifier ranks before the declaring module's
   (package before relative, then fewer path segments), else through a program module that
@@ -851,8 +855,8 @@ Files, by layer:
   contravariant (methods either way), and a source `this: void` asks nothing. A callback
   parameter's own parameters are contravariant whatever declared the callback: a method's
   callbacks (`callback`), and a strict function type's callback typed from a method
-  (`typeof Foo.f`, `{ f(x: T): U }["f"]`), re-checked one level deep by
-  `method_callback_fails_strictly` (tsc: checker/relater.go, compareSignaturesRelated).
+  (`typeof Foo.f`, `{ f(x: T): U }["f"]`), re-checked by
+  `method_callback_fails_strictly` up to `STRICT_CALLBACK_DEPTH` (3) nested re-checks (tsc: checker/relater.go, compareSignaturesRelated).
 - **Union call signatures** (`union_signatures`; tsc: `getUnionSignatures` in
   `tsc/internal/checker/checker.go`, `findMatchingSignatures` and `isMatchingSignature` in
   `relater.go`). Every member signature is tried first, single-signature members included:
@@ -1191,8 +1195,10 @@ Files, by layer:
   - The binder declares `exports.x = v`/`module.exports.x = v` as exports (expando-typed:
     the union of the regular types of the rightmost assigned values, literals kept
     (`exports.y = exports.x = void 0; exports.x = 1` is `1`), a first `undefined` of several
-    dropped, then widened; `undefined` alone is `IMPLICIT_ANY`, TS7008 at the assignment
-    under noImplicitAny, as for other JavaScript expandos; tsc: checker.go,
+    dropped, then widened; `undefined`, `void 0` or `null` alone is `IMPLICIT_ANY`, TS7008
+    at each assignment of a chain under noImplicitAny, as for other JavaScript expandos,
+    except that a value that is the `undefined` identifier itself under strictNullChecks
+    is `undefined` (observed); tsc: checker.go,
     getAssignmentDeclarationInitializerType. References to `exports.x` and
     `module.exports.x` narrow by assignment: undeclared `exports`/`module` root at the
     module symbol in `flow.rs`;
@@ -1327,7 +1333,7 @@ Files, by layer:
     dotted `@typedef` name. An import resolved to a `.jsx` file without `jsx` set is
     TS6142, as for `.tsx`, whether or not the file is in the program.
   - Another name through a `require` binding (`is_require_binding`), `o.Name` on a plain
-    variable (`@typedef {T} o.Name` is not modelled), `typeof module.exports.x`, and a
+    variable (`@typedef {T} o.Name` is not modelled), and a
     qualified import type of a CommonJS JavaScript module are left unresolved and unreported. Except, as tsc 7
     reports TS2749 for them, a plain name bound to a value of a module
     (`require_destructured_value`): `const C = require("m").C`, and `const {C} =
@@ -1366,6 +1372,8 @@ Files, by layer:
     targets without `jsx` are not reported. A type-only import (`@import`, `import type`)
     with an empty `with { }` is TS1464. JavaScript ES modules get the TypeScript import
     checks (TS1192, TS2305, TS2306); CommonJS modules and JSON targets do not.
+  - JSDoc `typeof module.exports` (`.x`) in a CommonJS JavaScript module is its exports
+    object (`commonjs_export_equals_type`), as the expression is.
   - A JSDoc type naming an import whose target is only a value is TS2749, unless the import
     or its immediate export also has a type or namespace meaning (`import_export_has_type`:
     a default export merged with an interface) or the target is `export =`.
@@ -1375,7 +1383,9 @@ Files, by layer:
 - **Implicit any in JavaScript**: TS7006/TS7019 as in TypeScript; a parameter is exempt only
   when its function has a JSDoc `@type` or follows `@overload` comments (`has_jsdoc_type`).
   An `@overload` comment without `@returns`/`@return` is TS7012 at the tag name
-  (`check_jsdoc_overload_returns`; overload signatures themselves are not modelled). A
+  (`check_jsdoc_overload_returns`). Each `@overload` tag's function type (`JsDocTag::ty`,
+  built by the parser) is one call signature of its function or method, replacing the
+  implementation's (`signature_decls`; constructors are not modelled, nor TS2394). A
   binding-pattern parameter made optional (`{ a }?`, or JSDoc `@param [o]` / `{T=}`) with
   no default in a function with a body is TS2463 at the parameter (`check_param`; tsc:
   tsc/internal/checker/checker.go, checkParameter). JSDoc syntax errors (`SourceFile::jsdoc`) are part of each checked file's `check_files`
@@ -3322,13 +3332,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-27, 400dc10, wip/v1-checker9 on v1/emit9: CommonJS export literal
-  types and narrowing, TS2355 for return-less functions, callback parameters from methods
-  relate contravariantly; 12750 compared variants):
-  12458 exact (97.7%; all diagnostics and chains), 12478 (97.9%) exact on first lines;
+  Current (2026-10-27, f2f24bb, wip/v1-checker10 on v1/emit10: JSDoc `@overload`
+  signatures, TS4023 for unexported declared types, TS7008 along CommonJS export chains;
+  12750 compared variants):
+  12460 exact (97.7%; all diagnostics and chains), 12480 (97.9%) exact on first lines;
   144 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
   nothing.
-  Earlier: 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

@@ -31,7 +31,7 @@ use crate::shape::{Hash, PathKey};
 /// Cache namespace of persisted histories.
 pub const NAMESPACE: &str = "check";
 /// Bump when the manifest layout or anything hashed into it changes.
-pub const FORMAT_VERSION: u32 = 12;
+pub const FORMAT_VERSION: u32 = 13;
 const MAGIC: &[u8; 4] = b"TSRH";
 
 /// Where a module request led (paths relative to the config directory).
