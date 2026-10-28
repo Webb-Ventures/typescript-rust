@@ -2255,17 +2255,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         crate::nodes::key_text(ast, key.node)
     }
 
-    /// The type implied by a binding pattern (`{ a, b }` → `{ a: any; b: any }`).
-    /// Elements with a default are optional and typed by it (`{ a = 1 }` → `{ a?: number }`),
+    /// The type implied by a binding pattern (`{ b, a }` → `{ a: any; b: any }`, members in
+    /// name order). Elements with a default are optional and typed by it (`{ a = 1 }` → `{ a?: number }`),
     /// nested patterns recurse, an object rest adds `[x: string]: any`, and an array pattern
     /// is a tuple (`[a, b = 1]` → `[any, number?]`). Plain names are implicitly `any`.
     pub fn type_from_binding_pattern(&mut self, l: Loc) -> TypeId {
         if self.depth > 100 {
             return TypeId::IMPLICIT_ANY;
         }
+        // The implied type is independent of context, so outside speculation (where a
+        // default could read a parameter's tentative type) it is computed once per pattern:
+        // the contextual type of each property of an object literal initializer asks for it.
+        let cacheable =
+            self.speculative == 0 && self.context_overrides.is_empty() && self.flow_loop == 0;
+        if cacheable && let Some(&t) = self.pattern_types.get(&l) {
+            return t;
+        }
         self.depth += 1;
         let r = self.type_from_binding_pattern_inner(l);
         self.depth -= 1;
+        if cacheable {
+            self.pattern_types.insert(l, r);
+        }
         r
     }
 
@@ -2273,7 +2284,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(l.file);
         match *ast.node(l.node) {
             Node::ObjectPattern { props } => {
-                let mut members: Vec<(ts_r_types::StrId, SymId)> = Vec::new();
+                let mut members: Vec<((ts_r_types::StrId, SymId), String)> = Vec::new();
+                let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
                 let mut index = Vec::new();
                 for &p in ast.list(props) {
                     match *ast.node(p) {
@@ -2289,16 +2301,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                             };
                             let mut flags = SymbolFlags::PROPERTY;
                             if let Some(i) = init {
-                                ty = self.binding_default_type(Loc::new(l.file, i));
+                                ty = self.pattern_default_type(l, i);
                                 ty = self.add_optionality(ty);
                                 flags |= SymbolFlags::OPTIONAL;
                             }
-                            let nid = self.store().intern_str(&name);
-                            if members.iter().any(|m| m.0 == nid) {
+                            if !seen.insert(name.clone()) {
                                 continue;
                             }
+                            let nid = self.store().intern_str(&name);
                             let s = self.c.new_synth(SynthSym::new(nid, flags, 0).with_type(ty));
-                            members.push((nid, s));
+                            members.push(((nid, s), name));
                         }
                         Node::Rest { .. } => index.push(ts_r_types::IndexInfo {
                             key: TypeId::STRING,
@@ -2309,6 +2321,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         _ => {}
                     }
                 }
+                // The members have no declarations, so they are in name order (tsc sorts
+                // a table's members by declaration, then by name: utilities.go
+                // compareSymbolsWorker): `({ b, a })` takes `{ a: any; b: any; }`.
+                members.sort_by(|x, y| x.1.as_bytes().cmp(y.1.as_bytes()));
+                let members = members.into_iter().map(|m| m.0).collect();
                 self.store().literal_object(
                     SymId::NONE,
                     ObjectFlags::ANONYMOUS,
@@ -2330,7 +2347,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         },
                         Node::AssignPattern { right, .. } => crate::declared::TupleEl {
                             ty: {
-                                let t = self.binding_default_type(Loc::new(l.file, right));
+                                let t = self.pattern_default_type(l, right);
                                 self.add_optionality(t)
                             },
                             kind: TupleElement::OPTIONAL,
@@ -2460,6 +2477,78 @@ impl<'c, 'a> Ck<'c, 'a> {
             ResolvedMembers::new(props, Vec::new(), Vec::new(), index),
             TypeTraits::NONE,
         )
+    }
+
+    /// The type the default `init` of an element of `pattern` gives it in the pattern's
+    /// implied type: `any` when the default names a binding of the same pattern outside
+    /// the functions in it (`{ fn1 = (x: number) => 0, fn2 = fn1 }`), since that binding's
+    /// type needs the pattern's (a cycle in tsc: getTypeFromBindingElement reads the
+    /// sibling's type, which is still being resolved; intraBindingPatternReferences).
+    fn pattern_default_type(&mut self, pattern: Loc, init: NodeId) -> TypeId {
+        if self.names_own_pattern(pattern, init) {
+            return TypeId::ANY;
+        }
+        self.binding_default_type(Loc::new(pattern.file, init))
+    }
+
+    /// `init` names, outside its functions and classes, a binding declared in the
+    /// outermost binding pattern around `pattern`.
+    fn names_own_pattern(&self, pattern: Loc, init: NodeId) -> bool {
+        let file = pattern.file;
+        let ast = self.ast(file);
+        let parents = self.c.file(file).parents();
+        let mut root = pattern.node;
+        for _ in 0..256 {
+            let Some(p) = parents.parent(root) else {
+                break;
+            };
+            if !matches!(
+                ast.node(p),
+                Node::ObjectPattern { .. }
+                    | Node::ArrayPattern { .. }
+                    | Node::BindingProperty { .. }
+                    | Node::AssignPattern { .. }
+                    | Node::Rest { .. }
+            ) {
+                break;
+            }
+            root = p;
+        }
+        let span = ast.span(root);
+        let mut stack = vec![init];
+        let mut seen = 0u32;
+        while let Some(c) = stack.pop() {
+            seen += 1;
+            if seen > 10_000 {
+                return false;
+            }
+            match *ast.node(c) {
+                Node::FunctionExpr { .. }
+                | Node::Arrow { .. }
+                | Node::MethodDef { .. }
+                | Node::ClassExpr { .. } => {}
+                Node::Ident { .. } => {
+                    if let Some(s) = self.c.resolve_ident(Loc::new(file, c), meaning::VALUE)
+                        && let Some(d) = self.c.first_decl(s)
+                        && d.file == file
+                    {
+                        let ds = ast.span(d.node);
+                        if ds.start >= span.start && ds.end <= span.end {
+                            return true;
+                        }
+                    }
+                }
+                Node::Member { obj, .. } => stack.push(obj),
+                Node::Property { key, value, .. } => {
+                    stack.push(value);
+                    if matches!(ast.node(key), Node::ComputedKey { .. }) {
+                        stack.push(key);
+                    }
+                }
+                _ => ast.for_each_child(c, |x| stack.push(x)),
+            }
+        }
+        false
     }
 
     /// The type a binding element's default gives it in an implied pattern type.
@@ -4438,6 +4527,10 @@ fn write_pattern(ast: &ts_r_ast::Ast, n: NodeId, out: &mut String, depth: u32) -
                 match *ast.node(p) {
                     Node::BindingProperty { key, value, .. } => {
                         let k = match crate::nodes::key_text(ast, key) {
+                            // A string key keeps its quotes (`{ "data-testid": id }`).
+                            Some(k) if matches!(ast.node(key), Node::StringLit { .. }) => {
+                                crate::print::quote_string(&k)
+                            }
                             Some(k) => k,
                             // A computed entity name prints as written (`[foo.bar]: c`).
                             None => match *ast.node(key) {

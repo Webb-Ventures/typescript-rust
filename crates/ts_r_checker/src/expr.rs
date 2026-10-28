@@ -7345,7 +7345,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     let mut c = Vec::new();
                     for &sib in sibs {
-                        if !self.is_object_literal_type(sib) {
+                        if !self.is_normalizable_literal(sib) {
                             continue;
                         }
                         let sp = self
@@ -7384,7 +7384,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             let own_count = out.len();
             let mut seen = own;
             for &sib in sibs {
-                if sib == t || !self.is_object_literal_type(sib) {
+                if sib == t || !self.is_normalizable_literal(sib) {
                     continue;
                 }
                 let Some(sm) = self.store().object_of(sib).and_then(|o| o.members()) else {
@@ -7486,6 +7486,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// An object literal expression's type (fresh or widened).
+    /// An object literal type that widening with its union siblings still normalizes: not
+    /// one already widened (a variable's type: `[a, b]` of two declared literals keeps
+    /// them as they are; tsc drops the object literal flags when it widens).
+    pub(crate) fn is_normalizable_literal(&self, t: TypeId) -> bool {
+        self.store().object_of(t).is_some_and(|o| {
+            o.flags.contains(ObjectFlags::OBJECT_LITERAL)
+                && !o.flags.contains(ObjectFlags::WIDENED_LITERAL)
+        })
+    }
+
     fn is_object_literal_type(&self, t: TypeId) -> bool {
         self.store()
             .object_of(t)
@@ -9635,7 +9645,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The type a write to property `p` must satisfy: the setter's parameter type for an
     /// accessor whose setter is annotated (`get x(): string; set x(v: string | number)`),
     /// else the property's type.
-    pub(crate) fn write_type_of_symbol(&mut self, p: SymId) -> TypeId {
+    pub fn write_type_of_symbol(&mut self, p: SymId) -> TypeId {
         let read = self.type_of_symbol(p);
         let (base, mapper) = match self.c.synth_sym(p) {
             Some(x)
@@ -9886,6 +9896,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         let ast = self.ast(expr.file);
         let n = skip_parens(ast, expr.node);
         let el = Loc::new(expr.file, n);
+        // An assignment or a comma expression elaborates its right operand (tsc:
+        // elaborateError in relater.go).
+        match *ast.node(n) {
+            Node::Assign {
+                op: ts_r_ast::AssignOp::Assign,
+                right,
+                ..
+            } => return self.elaborate_error(Loc::new(expr.file, right), source, target),
+            Node::Seq { exprs } => {
+                return match ast.list(exprs).last() {
+                    Some(&last) => self.elaborate_error(Loc::new(expr.file, last), source, target),
+                    None => false,
+                };
+            }
+            _ => {}
+        }
         let tf = self.store().flags(target);
         if tf.intersects(TypeFlags::PRIMITIVE) && !tf.contains(TypeFlags::UNION) {
             return false;

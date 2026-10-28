@@ -2474,7 +2474,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Whether the end of function `l`'s body can be reached.
-    fn function_end_reachable(&mut self, l: Loc) -> bool {
+    pub(crate) fn function_end_reachable(&mut self, l: Loc) -> bool {
         match self.c.bound(l.file).flow.function_flow(l.node) {
             Some(ff) => {
                 let end = ff.end;

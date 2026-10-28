@@ -2821,15 +2821,38 @@ impl<'c, 'a> Ck<'c, 'a> {
             return None;
         }
         let body = parts.body?;
+        // The one `return` with a value; with other statements around it, the end of the
+        // body must be unreachable and the parameters are narrowed by the flow before it
+        // (`if (x instanceof Date) throw ...; return typeof x === "string"` is `x is
+        // string`; tsc: getTypePredicateFromBody).
+        let mut flow_before = None;
         let expr = match *ast.node(body) {
             Node::Block { stmts } => {
                 let list = ast.list(stmts);
-                if list.len() != 1 {
-                    return None;
-                }
-                match *ast.node(list[0]) {
-                    Node::Return { arg: Some(a) } => a,
-                    _ => return None,
+                match list {
+                    [only] => match *ast.node(*only) {
+                        Node::Return { arg: Some(a) } => a,
+                        _ => return None,
+                    },
+                    _ => {
+                        let mut returns = Vec::new();
+                        crate::func::collect_returns(ast, body, &mut returns, 0);
+                        let [ret] = returns[..] else {
+                            return None;
+                        };
+                        let Node::Return { arg: Some(a) } = *ast.node(ret) else {
+                            return None;
+                        };
+                        if self.function_end_reachable(decl) {
+                            return None;
+                        }
+                        let f = self.first_flow_in(decl.file, a)?;
+                        if f.is_unreachable() {
+                            return None;
+                        }
+                        flow_before = Some(f);
+                        a
+                    }
                 }
             }
             _ if parts.is_arrow => body,
@@ -2877,13 +2900,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                 file: decl.file,
                 at: None,
             };
-            let t_true = self.narrow(&w, declared, cond, true, 0);
+            let start = match flow_before {
+                Some(f) => self.walk_flow(&w, f),
+                None => declared,
+            };
+            let t_true = self.narrow(&w, start, cond, true, 0);
             if t_true == declared || t_true == TypeId::NEVER {
                 continue;
             }
             // "Only if": the false branch removes exactly the members the true branch keeps
             // (union partition), or no value of the true type can make the condition false.
-            let t_false = self.narrow(&w, declared, cond, false, 0);
+            let t_false = self.narrow(&w, start, cond, false, 0);
             let s = self.store();
             let members = |t: TypeId| -> Vec<TypeId> {
                 if s.flags(t).contains(TypeFlags::UNION) {
@@ -2894,7 +2921,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     vec![t]
                 }
             };
-            let (dm, tm, fm) = (members(declared), members(t_true), members(t_false));
+            let (dm, tm, fm) = (members(start), members(t_true), members(t_false));
             let partition = dm.len() > 1
                 && tm.iter().all(|m| dm.contains(m))
                 && dm.iter().all(|m| tm.contains(m) != fm.contains(m));
@@ -2907,6 +2934,34 @@ impl<'c, 'a> Ck<'c, 'a> {
                 param_name: pname,
                 ty: Some(t_true),
             });
+        }
+        None
+    }
+
+    /// The flow node recorded first in `n`, in source order and outside nested functions:
+    /// the flow where evaluating `n` starts.
+    fn first_flow_in(&self, file: ts_r_diagnostics::FileId, n: NodeId) -> Option<FlowId> {
+        let ast = self.ast(file);
+        let flow = &self.c.bound(file).flow;
+        let mut stack = vec![n];
+        let mut seen = 0u32;
+        while let Some(c) = stack.pop() {
+            seen += 1;
+            if seen > MAX_CONDITION_SCAN {
+                return None;
+            }
+            if let Some(f) = flow.flow_at(c) {
+                return Some(f);
+            }
+            if matches!(
+                ast.node(c),
+                Node::FunctionExpr { .. } | Node::Arrow { .. } | Node::ClassExpr { .. }
+            ) {
+                continue;
+            }
+            let at = stack.len();
+            ast.for_each_child(c, |x| stack.push(x));
+            stack[at..].reverse();
         }
         None
     }
@@ -3128,6 +3183,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => t,
             },
             Node::Seq { .. } => t,
+            // `(x != null) satisfies boolean` narrows as its operand (tsc: narrowType).
+            Node::Satisfies { expr, .. } => self.narrow(w, t, at(expr), assume_true, depth + 1),
             _ => t,
         }
     }
@@ -4256,19 +4313,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         // Each member: whether it may have `name` when the check is true (a property or an
         // applicable index signature) and when it is false (no required property).
+        // Primitives (an error operand) answer through their apparent types: `"length" in s`
+        // keeps `string`, and `null` has nothing (tsc: isTypePresencePossible, flow.go).
         let mut presence = Vec::with_capacity(members.len());
         for &m in &members {
-            let mf = self.store().flags(m);
-            if !mf.intersects(
-                TypeFlags::OBJECT
-                    | TypeFlags::INTERSECTION
-                    | TypeFlags::NON_PRIMITIVE
-                    | TypeFlags::INSTANTIABLE,
-            ) {
-                // Primitives: `in` on them is an error; they stay as they are.
-                presence.push(None);
-                continue;
-            }
             let prop = self.property_of_type(m, name);
             let required =
                 prop.is_some_and(|p| !self.c.sym_flags(p).intersects(SymbolFlags::OPTIONAL));

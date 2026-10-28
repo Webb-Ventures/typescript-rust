@@ -1,0 +1,8 @@
+a.ts(2,14): error TS7031: Binding element 'b' implicitly has an 'any' type.
+a.ts(2,17): error TS7031: Binding element 'a' implicitly has an 'any' type.
+a.ts(2,30): error TS7031: Binding element 'y' implicitly has an 'any' type.
+a.ts(2,33): error TS7031: Binding element 'x' implicitly has an 'any' type.
+a.ts(3,7): error TS2322: Type '({ b, a, c }: { a: any; b: any; c?: number | undefined; }, [y, x]: [any, any]) => void' is not assignable to type 'string'.
+a.ts(5,29): error TS7031: Binding element 'id' implicitly has an 'any' type.
+a.ts(5,40): error TS7031: Binding element 'd' implicitly has an 'any' type.
+a.ts(6,7): error TS2322: Type '({ "data-testid": id, [dyn]: d, z }: { "data-dyn": any; "data-testid": any; z?: string | undefined; }) => number' is not assignable to type 'string'.

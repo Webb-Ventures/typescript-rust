@@ -165,3 +165,25 @@ fn relating_big_generic_interfaces_is_bounded() {
     };
     assert_eq!(out, vec!["125:18 TS2352"]);
 }
+
+/// A flat object pattern with defaults over an object literal: each property's contextual
+/// type asks for the pattern's implied type, which is built once (5,000 properties took 99 s
+/// and 3.6 GB in release before the cache, 0.1 s after).
+#[test]
+fn wide_object_pattern_with_defaults() {
+    let n = 3000;
+    let mut pattern = String::from("const { f = (x: number) => 0");
+    let mut value = String::from("{ f: x => x");
+    for i in 0..n {
+        pattern.push_str(&format!(", p{i} = 0"));
+        value.push_str(&format!(", p{i}: 0"));
+    }
+    let src = format!("{pattern} }} = {value} }};\nexport {{}};\n");
+    let start = std::time::Instant::now();
+    let Some(out) = check(&src) else {
+        return;
+    };
+    assert!(out.is_empty(), "{out:?}");
+    let took = start.elapsed();
+    assert!(took.as_secs() < 30, "took {took:?}");
+}

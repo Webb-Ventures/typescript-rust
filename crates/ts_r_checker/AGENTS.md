@@ -28,8 +28,12 @@ result.diagnostics; result.error_count();
 // scope), ck.signature_to_string_at(sig, kind, arrow, scope),
 // ck.type_to_string_with(t, PrintMode::quick_info(scope)) and
 // ck.signature_to_string_with(sig, kind, arrow, mode) (PrintMode: scope, `?` members without
-// the added `| undefined`, names through import aliases), ck.jsx_props_type(opening),
-// ck.pattern_parent_type(pattern)
+// the added `| undefined`, names through import aliases, annotations reused as written:
+// `(x: 'hi') => number`, `f: { (x: number): number; }`; a name that means something else
+// at the scope is qualified further: `typeof M.C`), ck.jsx_props_type(opening),
+// ck.pattern_parent_type(pattern), ck.write_type_of_symbol(p) (a setter's parameter type),
+// PrintMode::quick_info_alias(scope) (a type alias's declared type: the outermost alias
+// expands, `type B = "a" | "b"` for `type B = A`; nested ones stay named)
 ```
 
 Files, by layer:
@@ -738,6 +742,10 @@ Files, by layer:
   not `any[]`: `...[a, b]` is `[any, any]` and needs two arguments, `...[a, b = 1]` one or
   two, `...[a, ...b]` at least one (`param_type`; tsc: `getTypeForVariableLikeDeclaration`
   in tsc/internal/checker/checker.go; `calls_members.rs::rest_parameter_pattern_counts_its_elements`).
+- A binding pattern's implied type (`type_from_binding_pattern`) is computed once per
+  pattern outside speculation (`Ck::pattern_types`): it does not depend on context, and an
+  object literal initializer asks for it once per property (`bounded.rs::wide_object_pattern_with_defaults`).
+  Under speculation it is recomputed, since a default may read a tentative parameter type.
 - In a class whose `extends` expression is the `null` literal, `super` (static or instance,
   not a `super()` callee) is `null`, so `super.x` is TS2531; the first `super(...)` call in
   its constructor is TS17005 (`check_super`, `check_derived_constructor_super`; tsc:
@@ -1100,7 +1108,9 @@ Files, by layer:
   scope by its own name is named through an import alias in scope that resolves to it or
   to one of its namespaces, the nearest first: `a<a<string>>` for `import a =
   require("./a")` of `export = Foo`, `d.C<number>` for `import d = M.N`; tsc:
-  checker.go getAccessibleSymbolChain). Tests: `tests/instantiation_queries.rs`.
+  checker.go getAccessibleSymbolChain), and `in_type_alias` (`Ck::print_skip_alias`, spent
+  by the outermost `print_type`: that type prints structurally even when it carries an
+  alias, as tsc's TypeFormatFlags.InTypeAlias). Tests: `tests/instantiation_queries.rs`.
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
@@ -3222,13 +3232,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-27, 31b97a8, wip/v1-checker5 on v1/lint5 with v1/build5, v1/emit5 and
-  v1/lsp5 merged: JSON imports under node16+, overload adjacency, type-parameter scope,
-  invalid thenables (TS1058, TS1320), generic tuple relations, circular variables as `any`,
-  recovered bodies; 12750 compared variants): 12428 exact (97.5%; all diagnostics and
-  chains), 12448 (97.6%) exact on first lines; 154 variants with a diagnostic tsc does not
-  report, 5 of them tests where tsc reports nothing.
-  Earlier: 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Current (2026-10-27, d5a9934, wip/v1-checker6 on v1/emit6: circular initializers that
+  name the variable, inferred predicates through flow, `in` and `satisfies`, elaboration
+  through `=` and comma operands, binding-pattern contextual types and member order;
+  12750 compared variants): 12433 exact (97.5%; all diagnostics and chains), 12453 (97.7%)
+  exact on first lines; 150 variants with a diagnostic tsc does not report, 5 of them
+  tests where tsc reports nothing.
+  Earlier: 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
