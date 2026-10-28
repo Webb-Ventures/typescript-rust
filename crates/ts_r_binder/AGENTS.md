@@ -145,6 +145,10 @@ texts), `dump.rs`.
   `QualifiedName` node (`typeof x.p` after `x.p === "A"` is `"A"`) and on its leftmost
   identifier, which the checker uses for the whole name when the node has none
   (`typeof this.a.b` inside `if (this.a)`).
+- **JSX tags read the flow.** A value tag (`<C />`, not an intrinsic lowercase name)
+  records the flow at its identifier, and a `<o.n.C />` tag at each `JsxMemberExpr` and at
+  its root identifier, so `if (C) <C />` narrows the tag (tsc binds a tag name like any
+  other reference).
 - **Array mutations.** Every `xs.push(..)` / `xs.unshift(..)` call (not only a statement)
   gets an `ArrayMutation` node after its arguments, with an exception edge like a call;
   its object is a reference through parentheses, the last expression of a comma list and

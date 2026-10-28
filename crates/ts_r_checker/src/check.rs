@@ -2802,13 +2802,29 @@ impl<'c, 'a> Ck<'c, 'a> {
                         let nullable = s
                             .flags(t)
                             .intersects(TypeFlags::NULL | TypeFlags::UNDEFINED | TypeFlags::VOID);
-                        let fits = !nullable
-                            && self
-                                .global_reference(
-                                    crate::checker::GlobalType::ReadonlyArray,
-                                    &[TypeId::ANY],
-                                )
-                                .is_some_and(|ro| self.is_assignable(t, ro));
+                        // A recursive alias spread in its own branch (`[A, ...M<Tail<T>>]`)
+                        // relates through ever deeper instantiations; running out there
+                        // counts as a fit, not TS2589 (tsc's relation stops at deeply nested
+                        // types with a maybe; type-fest's MergeDeep).
+                        let overflowed = self.inst_overflow;
+                        let ro = self.global_reference(
+                            crate::checker::GlobalType::ReadonlyArray,
+                            &[TypeId::ANY],
+                        );
+                        let fits = !nullable && ro.is_some_and(|ro| self.is_assignable(t, ro));
+                        // In a conditional's true branch, `M` is narrowed by its check
+                        // (`M extends readonly X[] ? [...M] : ..`).
+                        let fits = fits
+                            || ro.is_some_and(|ro| {
+                                let nt = self.narrowed_in_true_branch(Loc::new(file, ty), t);
+                                nt != t && self.is_assignable(nt, ro)
+                            });
+                        let fits = if self.inst_overflow && !overflowed {
+                            self.inst_overflow = false;
+                            true
+                        } else {
+                            fits
+                        };
                         if !fits {
                             self.error(
                                 Loc::new(file, e),
@@ -4293,11 +4309,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_static_function_name_conflicts(l, members);
         // Only the first type of the first `extends` clause is the base; the others
         // (`extends A, B`, `extends A extends B`, both grammar errors) are never checked.
+        // An element the parser recovered as missing is skipped: tsc's list holds no such
+        // element (`class C extends await<string>` in a module checks `string`: TS2863).
         let base_node = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
             Node::HeritageClause {
                 kind: HeritageKind::Extends,
                 types,
-            } => ast.list(types).first().copied(),
+            } => ast.list(types).iter().copied().find(|&t| {
+                !matches!(*ast.node(t), Node::ExprWithTypeArgs { expr, .. }
+                    if matches!(ast.node(expr), Node::Missing { .. }))
+            }),
             _ => None,
         });
         if let Some(t) = base_node
@@ -5091,6 +5112,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let o0 = o;
         let mut o = self.with_implied_constraints(obj, o);
+        if o == o0 {
+            o = self.mapped_under_implied_constraints(obj, o);
+        }
         // An unconstrained `...infer R` in a rest position is an array.
         if let Some(c) = self.rest_infer_array(o) {
             o = self.intersection(&[o, c]);
@@ -5115,14 +5139,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             let mut changed = false;
             let mut out = Vec::with_capacity(ms.len());
-            for m in ms {
-                match self.rest_infer_array(m) {
-                    Some(rc) => {
-                        out.push(rc);
-                        changed = true;
-                    }
-                    None => out.push(m),
+            // A conditional member (a nested conditional in a branch) is read through its
+            // own constraint, a few levels deep.
+            let mut work: Vec<(TypeId, u8)> = ms.into_iter().rev().map(|m| (m, 0)).collect();
+            while let Some((m, depth)) = work.pop() {
+                if let Some(rc) = self.rest_infer_array(m) {
+                    out.push(rc);
+                    changed = true;
+                    continue;
                 }
+                if depth < 8
+                    && self.store().flags(m).contains(TypeFlags::CONDITIONAL)
+                    && let Some(mc) = self.conditional_constraint(m)
+                    && mc != m
+                {
+                    let s = self.store();
+                    let inner = if s.flags(mc).contains(TypeFlags::UNION) {
+                        s.members_of_union(mc).to_vec()
+                    } else {
+                        vec![mc]
+                    };
+                    if inner.iter().any(|&x| self.rest_infer_array(x).is_some()) {
+                        changed = true;
+                        work.extend(inner.into_iter().rev().map(|x| (x, depth + 1)));
+                        continue;
+                    }
+                }
+                out.push(m);
             }
             if changed {
                 o = self.union(&out);
@@ -5166,6 +5209,49 @@ impl<'c, 'a> Ck<'c, 'a> {
             );
             return;
         }
+    }
+
+    /// Mapped or conditional type `o` written at `obj` inside the true branch of conditionals
+    /// whose check types are type parameters, with each such `T` replaced by `E & T` (tsc
+    /// reads `T` there as a substitution type, so `{ [K in keyof T]: K }[number]` under
+    /// `T extends any[] ?` is keyed by `number`, and so is `W<T>` with `W<X> = X extends
+    /// unknown ? X : never`; expect-type's `UsefulKeys`, array-flatten's `PickValue`,
+    /// type-fest's `VariablePartOfArray<T>[number]`).
+    fn mapped_under_implied_constraints(&mut self, obj: Loc, o: TypeId) -> TypeId {
+        if self.mapped_info(o).is_none() && !self.store().flags(o).contains(TypeFlags::CONDITIONAL)
+        {
+            return o;
+        }
+        let mut src = Vec::new();
+        let mut dst = Vec::new();
+        let mut cur = obj;
+        for _ in 0..200 {
+            let Some(p) = self.c.parent(cur) else {
+                break;
+            };
+            if let Node::ConditionalType { check, true_ty, .. } = *self.node(p)
+                && true_ty == cur.node
+            {
+                let ct = self.type_from_node(Loc::new(p.file, check));
+                if self.store().flags(ct).contains(TypeFlags::TYPE_PARAMETER) && !src.contains(&ct)
+                {
+                    let n = self.with_implied_constraints(obj, ct);
+                    if n != ct {
+                        src.push(ct);
+                        dst.push(n);
+                    }
+                }
+            }
+            if self.node(p).is_statement() {
+                break;
+            }
+            cur = p;
+        }
+        if src.is_empty() {
+            return o;
+        }
+        let m = self.store().mapper(&src, &dst);
+        self.instantiate(o, m)
     }
 
     /// `unknown[]` for an unconstrained `infer X` in a rest position (tsc:
@@ -5253,9 +5339,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = p;
         }
         if !constraints.is_empty() {
+            let c = if constraints.len() == 1 {
+                constraints[0]
+            } else {
+                self.intersection(&constraints)
+            };
             // The constraints come first (`T & number`), as tsc's substitution types read.
             constraints.push(t);
-            return self.intersection(&constraints);
+            let r = self.intersection(&constraints);
+            return self.implied_intersection(r, t, c);
         }
         let s = self.store();
         let f = s.flags(t);
@@ -5307,6 +5399,39 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         t
+    }
+
+    /// `r`, the intersection `C & T` made for `T` read under the implied constraint `C`,
+    /// marked so that instantiation can drop `C` again: the intersection is stored with a
+    /// symbol-less alias holding `[T, C]` (see [`Self::implied_parts`]). Other results
+    /// (a reduced intersection, a union) are returned as they are.
+    pub(crate) fn implied_intersection(&mut self, r: TypeId, t: TypeId, c: TypeId) -> TypeId {
+        let s = self.store();
+        match s.kind(r) {
+            TypeKind::Intersection { list, alias } if alias == ts_r_types::AliasId::NONE => {
+                let members = s.list_items(list).to_vec();
+                let origin = s.alias(ts_r_types::SymId::NONE, s.list(&[t, c]));
+                s.intersection_sorted(&members, Some(origin))
+            }
+            _ => r,
+        }
+    }
+
+    /// The type and the implied constraint of an intersection made by
+    /// [`Self::implied_intersection`].
+    pub(crate) fn implied_parts(&self, r: TypeId) -> Option<(TypeId, TypeId)> {
+        let s = self.store();
+        let TypeKind::Intersection { alias, .. } = s.kind(r) else {
+            return None;
+        };
+        let info = s.alias_info(alias)?;
+        if info.sym != ts_r_types::SymId::NONE {
+            return None;
+        }
+        match *s.list_items(info.args) {
+            [t, c] => Some((t, c)),
+            _ => None,
+        }
     }
 
     pub(crate) fn every_array_or_tuple(&mut self, t: TypeId) -> bool {
@@ -5968,8 +6093,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.store().is_error(at) || at == TypeId::UNRESOLVED || c == TypeId::UNRESOLVED {
                 continue;
             }
-            // `infer X` parameters take implied constraints from where they appear.
-            if self.is_infer_type_param(at) {
+            // `infer X` parameters take implied constraints from where they appear. A
+            // template literal placeholder's (`${infer X}`) is `string`, which decides
+            // `Box<X>` in the true branch like a declared constraint.
+            if self.is_infer_type_param(at) && !self.is_template_infer_param(at) {
                 continue;
             }
             if !self.is_assignable(at, c) {
@@ -6008,6 +6135,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// is `X & T` (tsc's implied constraint).
     fn narrowed_in_true_branch(&mut self, a: Loc, at: TypeId) -> TypeId {
         let ast = self.ast(a.file);
+        let mut at = at;
         let mut cur = a;
         let mut params = Vec::new();
         let mut implied = Vec::new();
@@ -6051,18 +6179,24 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 implied.push(both);
                             }
                         }
-                    } else if ct == at
-                        && self
-                            .store()
-                            .traits(ct)
-                            .contains(ts_r_types::TypeTraits::CONTAINS_TYPE_PARAMETER)
+                    } else if self
+                        .store()
+                        .traits(ct)
+                        .contains(ts_r_types::TypeTraits::CONTAINS_TYPE_PARAMETER)
                     {
                         // `T["k"] extends X ? F<T["k"]> : ...`: the argument is `T["k"] & X`
                         // (so is any generic check type: `[A, B] extends unknown[][] ?
-                        // Bar<[A, B]>`, `Set<A> extends Set<unknown[]> ? Bar<Set<A>>`).
-                        let et = self.type_from_node(Loc::new(a.file, extends));
-                        if !self.store().is_error(et) && et != TypeId::UNRESOLVED {
-                            return self.intersection(&[et, at]);
+                        // Bar<[A, B]>`, `Set<A> extends Set<unknown[]> ? Bar<Set<A>>`), and
+                        // so is that member of an intersection argument (`F<T["k"] & {}>`).
+                        // Outer conditionals narrow the result further.
+                        let s = self.store();
+                        let member = s.flags(at).contains(TypeFlags::INTERSECTION)
+                            && s.members_of_union(at).contains(&ct);
+                        if ct == at || member {
+                            let et = self.type_from_node(Loc::new(a.file, extends));
+                            if !self.store().is_error(et) && et != TypeId::UNRESOLVED {
+                                at = self.intersection(&[et, at]);
+                            }
                         }
                     }
                 }
@@ -9494,44 +9628,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         diags: Vec<Diagnostic>,
     ) -> Vec<Diagnostic> {
         let sf = self.c.file(file);
-        let ast = &sf.ast;
-        let text = sf.text.as_str();
-        // (line of the directive, span, is_expect, used)
-        let mut directives: Vec<(u32, Span, bool, bool)> = Vec::new();
-        let lines = sf.lines();
-        for c in &ast.comments {
-            let body = c.span.text(text);
-            // A line comment is read after its slashes (`/// @ts-ignore` too); a block
-            // comment only on its last line, after leading blanks and any run of `/` and
-            // `*`, and the directive spans that last line (tsc: scanner.go,
-            // processCommentDirective).
-            let (inner, start) = match c.kind {
-                CommentKind::Line => (body.trim_start_matches('/'), c.span.start),
-                _ => {
-                    let last = body
-                        .char_indices()
-                        .rev()
-                        .find(|&(_, ch)| matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
-                        .map_or(0, |(i, ch)| i + ch.len_utf8());
-                    let line = body[last..]
-                        .trim_start_matches([' ', '\t'])
-                        .trim_start_matches(['/', '*']);
-                    (line, c.span.start + last as u32)
-                }
-            };
-            let inner = inner.trim_start_matches([' ', '\t']);
-            // A prefix is enough: `// @ts-ignore-line` and `@ts-expect-errors` are directives
-            // too (tsc 7, observed).
-            let is_expect = inner.starts_with("@ts-expect-error");
-            let is_ignore = inner.starts_with("@ts-ignore");
-            if !is_expect && !is_ignore {
-                continue;
-            }
-            let line = lines.line_of(c.span.end.saturating_sub(1));
-            directives.push((line, Span::new(start, c.span.end), is_expect, false));
-        }
+        let mut directives = comment_directives(sf);
         if directives.is_empty() {
             return diags;
+        }
+        let lines = sf.lines();
+        // Program-level merge errors in this file (a duplicate global member) are reported
+        // apart from the file's check, but a directive above them is used all the same.
+        for d in &self.c.link.diagnostics {
+            if d.file == file
+                && d.is_error()
+                && let Some(i) = directive_for_line(sf, lines.line_of(d.span.start), &directives)
+            {
+                directives[i].3 = true;
+            }
         }
         let mut out = Vec::with_capacity(diags.len());
         for d in diags {
@@ -9540,7 +9650,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 continue;
             }
             let line = lines.line_of(d.span.start);
-            if let Some(i) = self.directive_for_line(file, line, &directives) {
+            if let Some(i) = directive_for_line(sf, line, &directives) {
                 directives[i].3 = true;
                 continue;
             }
@@ -9560,36 +9670,86 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         out
     }
+}
 
-    /// The directive governing `line`: on the closest preceding line, skipping blank lines
-    /// and comment-only lines.
-    fn directive_for_line(
-        &self,
-        file: FileId,
-        line: u32,
-        directives: &[(u32, Span, bool, bool)],
-    ) -> Option<usize> {
-        let sf = self.c.file(file);
-        let lines = sf.lines();
-        let text = sf.text.as_str();
-        let mut l = line;
-        for _ in 0..1000 {
-            if l == 0 {
-                return None;
+/// Whether an error at `d` in `sf` sits under a `// @ts-ignore` or `// @ts-expect-error`
+/// directive (for diagnostics reported outside a file's check, such as program merges).
+pub fn suppressed_by_directive(sf: &crate::program::SourceFile, d: &Diagnostic) -> bool {
+    if !d.is_error() {
+        return false;
+    }
+    let directives = comment_directives(sf);
+    !directives.is_empty()
+        && directive_for_line(sf, sf.lines().line_of(d.span.start), &directives).is_some()
+}
+
+/// The `@ts-ignore` / `@ts-expect-error` comments of `sf`: (line of the directive, span,
+/// is_expect, used).
+fn comment_directives(sf: &crate::program::SourceFile) -> Vec<(u32, Span, bool, bool)> {
+    let ast = &sf.ast;
+    let text = sf.text.as_str();
+    let mut directives: Vec<(u32, Span, bool, bool)> = Vec::new();
+    let lines = sf.lines();
+    for c in &ast.comments {
+        let body = c.span.text(text);
+        // A line comment is read after its slashes (`/// @ts-ignore` too); a block
+        // comment only on its last line, after leading blanks and any run of `/` and
+        // `*`, and the directive spans that last line (tsc: scanner.go,
+        // processCommentDirective).
+        let (inner, start) = match c.kind {
+            CommentKind::Line => (body.trim_start_matches('/'), c.span.start),
+            _ => {
+                let last = body
+                    .char_indices()
+                    .rev()
+                    .find(|&(_, ch)| matches!(ch, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
+                    .map_or(0, |(i, ch)| i + ch.len_utf8());
+                let line = body[last..]
+                    .trim_start_matches([' ', '\t'])
+                    .trim_start_matches(['/', '*']);
+                (line, c.span.start + last as u32)
             }
-            l -= 1;
-            if let Some(i) = directives.iter().position(|d| d.0 == l) {
-                return Some(i);
-            }
-            let span = lines.line_span(l)?;
-            let t = span.text(text).trim();
-            if t.is_empty() || t.starts_with("//") || (t.starts_with("/*") && t.ends_with("*/")) {
-                continue;
-            }
+        };
+        let inner = inner.trim_start_matches([' ', '\t']);
+        // A prefix is enough: `// @ts-ignore-line` and `@ts-expect-errors` are directives
+        // too (tsc 7, observed).
+        let is_expect = inner.starts_with("@ts-expect-error");
+        let is_ignore = inner.starts_with("@ts-ignore");
+        if !is_expect && !is_ignore {
+            continue;
+        }
+        let line = lines.line_of(c.span.end.saturating_sub(1));
+        directives.push((line, Span::new(start, c.span.end), is_expect, false));
+    }
+    directives
+}
+
+/// The directive governing `line`: on the closest preceding line, skipping blank lines
+/// and comment-only lines.
+fn directive_for_line(
+    sf: &crate::program::SourceFile,
+    line: u32,
+    directives: &[(u32, Span, bool, bool)],
+) -> Option<usize> {
+    let lines = sf.lines();
+    let text = sf.text.as_str();
+    let mut l = line;
+    for _ in 0..1000 {
+        if l == 0 {
             return None;
         }
-        None
+        l -= 1;
+        if let Some(i) = directives.iter().position(|d| d.0 == l) {
+            return Some(i);
+        }
+        let span = lines.line_span(l)?;
+        let t = span.text(text).trim();
+        if t.is_empty() || t.starts_with("//") || (t.starts_with("/*") && t.ends_with("*/")) {
+            continue;
+        }
+        return None;
     }
+    None
 }
 
 /// The `this.<name>` / `this[<key>]` targets a constructor body assigns (outside nested

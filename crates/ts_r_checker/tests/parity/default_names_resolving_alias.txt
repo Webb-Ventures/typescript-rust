@@ -1,0 +1,4 @@
+a.ts(5,28): error TS2322: Type 'number' is not assignable to type 'ParsedNode'.
+a.ts(11,27): error TS2322: Type 'number' is not assignable to type 'Kind'.
+a.ts(13,20): error TS2716: Type parameter 'T' has a circular default.
+b.ts(6,31): error TS2322: Type 'false' is not assignable to type 'true'.

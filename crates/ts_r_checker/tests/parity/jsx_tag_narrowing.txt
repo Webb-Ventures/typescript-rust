@@ -1,0 +1,2 @@
+a.tsx(23,4): error TS2604: JSX element type 'o.C' does not have any construct or call signatures.
+a.tsx(24,28): error TS2604: JSX element type 'S' does not have any construct or call signatures.

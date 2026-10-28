@@ -1373,11 +1373,15 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.collect_computed_members(d, true, &mut computed);
         }
         let mut have: rustc_hash::FxHashSet<StrId> = rustc_hash::FxHashSet::default();
+        // Members that are aliases (`export { X as y }` in a merged namespace): a base
+        // constructor's member of the same name replaces them.
+        let mut aliases: Vec<StrId> = Vec::new();
         for (name, s) in self.c.exports_of(sym) {
             if name == "prototype" {
                 continue;
             }
-            let target = if self.c.sym_flags(s).intersects(SymbolFlags::ALIAS) {
+            let alias = self.c.sym_flags(s).intersects(SymbolFlags::ALIAS);
+            let target = if alias {
                 match self.c.resolve_alias(s) {
                     Some(t) => t,
                     None => continue,
@@ -1392,6 +1396,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             let n = self.store().intern_str(&name);
             have.insert(n);
+            if alias {
+                aliases.push(n);
+            }
             props.push((n, s));
         }
         for (_, name, s) in computed {
@@ -1432,6 +1439,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 for (&n, &p) in bm.names.iter().zip(bm.props.iter()) {
                     if have.insert(n) {
                         props.push((n, p));
+                    } else if let Some(i) = aliases.iter().position(|&a| a == n) {
+                        aliases.swap_remove(i);
+                        if let Some(own) = props.iter_mut().find(|(m, _)| *m == n) {
+                            own.1 = p;
+                        }
                     }
                 }
             }
@@ -2764,8 +2776,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return match self.mapped_apparent_type(t) {
                 Some(a) if a != t => self.apparent_type(a),
-                // Its members come from the lower bound of its key type.
-                _ if self.mapped_lower_bound_keys(t).is_some() => t,
+                // Its members come from the lower bound of its key type, or from the
+                // properties of a generic intersection it maps (`Required<O & X>`).
+                _ if self.mapped_lower_bound_keys(t).is_some()
+                    || self.mapped_generic_intersection_modifiers(t).is_some() =>
+                {
+                    t
+                }
                 _ => TypeId::UNRESOLVED,
             };
         }

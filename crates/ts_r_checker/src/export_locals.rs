@@ -9,6 +9,9 @@
 //! - A name that resolves to a declaration outside the exporting module (a global, lib
 //!   or `globalThis`, or a top-level declaration of the file around `declare module "m"`)
 //!   is TS2661 at the local name.
+//! - A name whose first declaration is not a top-level statement of a script or lib file
+//!   is local anyway: a `global { }` block inside another declaration of the same ambient
+//!   module declares globals that `export { }` may name (@types/node's `Buffer`).
 //! - A `declare global` in a script (itself TS2669) checks its specifiers too; only its
 //!   own declarations are local there.
 
@@ -68,9 +71,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
                 None => false,
-                Some(sym) => self.c.decls(sym).iter().any(|d| {
-                    d.file == l.file && self.within(d.node, container, own_global, l.file)
-                }),
+                Some(sym) => {
+                    let decls = self.c.decls(sym);
+                    decls.iter().any(|d| {
+                        d.file == l.file && self.within(d.node, container, own_global, l.file)
+                    }) || decls.first().is_some_and(|&d| !self.in_script_top_level(d))
+                }
             };
             if !local_decl {
                 self.error(
@@ -189,6 +195,41 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = parents.parent(n);
         }
         None
+    }
+
+    /// Whether declaration `d` is a top-level statement of a script (or lib) file: its
+    /// container, the parent of the statement it belongs to (a variable's statement, an
+    /// import's declaration), is a source file that is not a module.
+    fn in_script_top_level(&self, d: Loc) -> bool {
+        if self.c.file(d.file).bound.is_module {
+            return false;
+        }
+        let ast = self.ast(d.file);
+        let parents = self.c.file(d.file).parents();
+        let mut cur = d.node;
+        for _ in 0..MAX_STEPS {
+            let Some(p) = parents.parent(cur) else {
+                return false;
+            };
+            match ast.node(p) {
+                Node::Program { .. } => return true,
+                Node::VarDecl { .. }
+                | Node::VarDeclarator { .. }
+                | Node::ObjectPattern { .. }
+                | Node::ArrayPattern { .. }
+                | Node::BindingProperty { .. }
+                | Node::AssignPattern { .. }
+                | Node::Rest { .. }
+                | Node::ImportDecl { .. }
+                | Node::ImportSpecifier { .. }
+                | Node::ImportDefaultSpecifier { .. }
+                | Node::ImportNamespaceSpecifier { .. } => cur = p,
+                // The declaration's name inside the declaration node.
+                _ if matches!(ast.node(cur), Node::Ident { .. }) && cur == d.node => cur = p,
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Whether `node` is `container` or inside it, without crossing a `declare global`

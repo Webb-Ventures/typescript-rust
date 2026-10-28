@@ -170,6 +170,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         truncate(s)
     }
 
+    /// The printed form of a type as seen from `scope` (for editor hovers): names carry the
+    /// namespaces around them (`m1.m2.c`, `N.D2<number>`, `typeof M.C`), except those whose
+    /// body encloses `scope`.
+    pub fn type_to_string_at(&mut self, t: TypeId, scope: Loc) -> String {
+        let saved = (self.print_qualified, self.print_scope);
+        self.print_qualified = true;
+        self.print_scope = Some(scope);
+        let s = self.type_to_string(t);
+        (self.print_qualified, self.print_scope) = saved;
+        s
+    }
+
     /// Prints `t` before a postfix (`[]`, `?`, `[K]`): like [`Self::print_wrapped`], and a
     /// readonly array or tuple is parenthesized too (`(readonly [...T])[]`).
     fn print_postfix_operand(&mut self, t: TypeId, depth: u32, stack: &mut Vec<TypeId>) -> String {
@@ -621,6 +633,24 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// variable it initializes (`const A = class {}` prints `A`), else `(Anonymous class)`.
     pub(crate) fn sym_display_name(&self, sym: SymId) -> String {
         let name = self.c.sym_name(sym);
+        // The export symbol of `export default class C` prints as the declaration names it
+        // (`C`), except after a module path (`import("./c").default`).
+        if name == "default"
+            && !(self.print_qualified && self.print_module_qualified)
+            && let Some(d) = self.c.first_decl(sym)
+        {
+            let ast = self.c.ast(d.file);
+            let named = match *ast.node(d.node) {
+                Node::ClassDecl { name, .. } | Node::FunctionDecl { name, .. } => name,
+                Node::Interface { name, .. } => Some(name),
+                _ => None,
+            };
+            if let Some(n) = named
+                && let Node::Ident { name } = *ast.node(n)
+            {
+                return ast.atom(name).to_owned();
+            }
+        }
         if name != "__class" {
             return name.to_owned();
         }

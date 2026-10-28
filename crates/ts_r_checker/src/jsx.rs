@@ -29,7 +29,7 @@ use ts_r_span::Span;
 impl<'c, 'a> Ck<'c, 'a> {
     /// The props type the attributes of a `JsxOpening` are checked against (see
     /// `jsx_check.rs`), or `None` when not modelled.
-    pub(crate) fn jsx_props_type(&mut self, opening: Loc) -> Option<TypeId> {
+    pub fn jsx_props_type(&mut self, opening: Loc) -> Option<TypeId> {
         self.jsx_target(opening).props
     }
 

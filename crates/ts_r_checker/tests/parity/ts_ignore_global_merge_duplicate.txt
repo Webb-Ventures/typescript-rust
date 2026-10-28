@@ -1,0 +1,4 @@
+a.ts(4,5): error TS2300: Duplicate identifier 'bold'.
+a.ts(5,5): error TS2300: Duplicate identifier 'big'.
+a.ts(6,5): error TS2300: Duplicate identifier 'dim'.
+b.ts(8,5): error TS2300: Duplicate identifier 'dim'.

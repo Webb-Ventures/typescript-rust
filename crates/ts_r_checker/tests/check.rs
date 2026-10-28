@@ -487,7 +487,7 @@ fn check_through(name: &str, options: &str, src: &str) -> Option<Vec<String>> {
 
 #[test]
 fn semantic_checks_run_through_syntax_errors() {
-    let cases: [(&str, &str, &[&str]); 9] = [
+    let cases: [(&str, &str, &[&str]); 10] = [
         // A constructor's or setter's annotation is no return type: no TS2355.
         (
             "a.ts",
@@ -545,6 +545,18 @@ fn semantic_checks_run_through_syntax_errors() {
                 "1:14 TS1144: '{' or ';' expected.",
                 "1:15 TS1068: Unexpected token. A constructor, method, accessor, or property was expected.",
                 "1:17 TS7008: Member 'number' implicitly has an 'any' type.",
+            ],
+        ),
+        // `extends await<string>` in a module: the parser's missing `await` operand is no
+        // heritage element, so `string` is the base (tsc 7.0.2, topLevelAwaitErrors.1).
+        (
+            "a.ts",
+            "export {};\nclass C extends await<string> {}\n",
+            &[
+                "2:17 TS1109: Expression expected.",
+                "2:22 TS1109: Expression expected.",
+                "2:23 TS2863: A class cannot extend a primitive type like 'string'. Classes can only extend constructable values.",
+                "2:29 TS1005: ',' expected.",
             ],
         ),
         // In JavaScript `require("m")` is an import, not a use of a `require` value: its

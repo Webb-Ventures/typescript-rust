@@ -234,19 +234,21 @@ Yarn 4 install needs corepack).
 ## Diagnostics against tsc 7 (2026-10-24)
 
 Each `check-*` scenario's project at `ea41eac`, `--pretty false`, ts-r-check with
-`--no-history`, compared with tsc 7.0.2 by file, line, column and code:
+`--no-history`, compared with tsc 7.0.2 by file, line, column and code. Playwright and RxJS
+were measured again on 2026-10-26 at `687b025` (the v1 checker round); the React Compiler row
+is still from `ea41eac`:
 
 | Project | tsc 7 | ts-r-check | Only ts-r-check | Only tsc |
 |---|---:|---:|---:|---:|
 | tRPC `packages/server` | 0 | 0 | 0 | 0 |
 | date-fns `pkgs/core` | 0 | 0 | 0 | 0 |
 | TypeORM `packages/typeorm` | 31 | 31 | 0 | 0 |
-| Playwright | 13 | 15 | 2 | 0 |
-| RxJS `packages/rxjs` | 21,908 | 21,909 | 6 | 5 |
+| Playwright | 13 | 13 | 0 | 0 |
+| RxJS `packages/rxjs` | 21,908 | 21,903 | 0 | 5 |
 | React Compiler | 156 | 227 | 71 | 0 |
 
-3 of the 6 match tsc 7 exactly. Playwright's 2 extra are TS2604 (issue 6 below); RxJS's 6
-extra are TS2339 and its 5 missing TS2344. The React Compiler's 71 extra are 65 TS4111
+4 of the 6 match tsc 7 exactly (tRPC, date-fns, TypeORM, Playwright). RxJS has none only
+ours; its 5 missing are TS2344 in `*.spec.ts` from expect-type's `toEqualTypeOf`. The React Compiler's 71 extra are 65 TS4111
 (property access on `env.config.*`, whose type is zod 4's `z.infer` of a schema), 4 TS7022,
 1 TS7006 and 1 TS2345.
 
@@ -481,7 +483,9 @@ Checker (`ts_r_checker`, `ts_r_check`, `ts_r_config`, `ts_r_parser`):
    1,333 and 901. Most of the rest come from relating rxjs's globally augmented `Observable`
    against generic constraints (variance through deep structures). Measured again on
    2026-10-24 at `087afc9`: tsc 21,908, ts-r 21,909; 21,903 agree, 6 only ours (TS2339 in
-   `packages/test/src/assertions.ts`), 5 only tsc's (TS2344 in `*.spec.ts`).
+   `packages/test/src/assertions.ts`), 5 only tsc's (TS2344 in `*.spec.ts`). Measured again on
+   2026-10-26 at `687b025`: tsc 21,908, ts-r 21,903, all agree, 0 only ours (`x.constructor
+   === C` now narrows through C's prototype only), the same 5 only tsc's.
 6. **playwright:** all 13 of tsc's diagnostics (missing generated files, TS2307) match, plus
    24 only ours (TS2322 9, TS2769 5, TS7053 2; was 814): overload resolution in `clock.ts`,
    `program.ts` and `network.ts`, `ElementHandle<T>` and `CommandReturnValues[T]` indexed
@@ -490,7 +494,9 @@ Checker (`ts_r_checker`, `ts_r_check`, `ts_r_config`, `ts_r_parser`):
    bodies were not checked). Measured again on 2026-10-24 at `087afc9`: all 13 of tsc's match,
    plus 2 only ours (TS2604 on a `Story` JSX element in `packages/html-reporter/tests/main.tsx`
    and `packages/web/playwright/gallery/main.tsx`). tRPC, date-fns and TypeORM match tsc 7
-   exactly (0, 0 and 31 diagnostics).
+   exactly (0, 0 and 31 diagnostics). Measured again on 2026-10-26 at `687b025`: all 13 of
+   tsc's match and none only ours (JSX value tags are narrowable references, so `Story` is
+   narrowed as tsc narrows it).
 
 Linter (`ts_r_lint`):
 

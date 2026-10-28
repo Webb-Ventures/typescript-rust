@@ -62,6 +62,17 @@ pub fn should_check(program: &ProgramFiles, i: usize) -> bool {
     !f.has_ts_nocheck()
 }
 
+/// Whether program-level (link) diagnostic `d` is reported: its file is checked, and no
+/// `// @ts-ignore` or `// @ts-expect-error` directive governs its line (tsc applies the
+/// directives to every semantic error of a file, merge errors included: @colors/colors
+/// ignores its `bold` member of the global `String`).
+pub fn link_diagnostic_reported(program: &ProgramFiles, d: &Diagnostic) -> bool {
+    let f = d.file.0 as usize;
+    f < program.files.len()
+        && should_check(program, f)
+        && !crate::check::suppressed_by_directive(&program.files[f], d)
+}
+
 /// A "plain" JavaScript file: JavaScript without `checkJs` set either way, `// @ts-check` or
 /// `// @ts-nocheck`, outside `node_modules`. tsc 7 checks it but reports only
 /// [`PLAIN_JS_CODES`] (observed).
@@ -197,6 +208,12 @@ fn check_program_impl<'a>(
             }
             syntax.push(d.with_file(FileId(i as u32)));
         }
+        // A malformed `/// <reference />` is a parse error in tsc (TS1084).
+        let invalid = crate::references::invalid_reference_diagnostics(f);
+        if !invalid.is_empty() {
+            broken[i] = true;
+        }
+        syntax.extend(invalid.into_iter().map(|d| d.with_file(FileId(i as u32))));
     }
     // Program diagnostics (`/// <reference path>` targets) come with the syntax ones.
     let paths: rustc_hash::FxHashSet<&str> =
@@ -268,8 +285,7 @@ fn check_program_impl<'a>(
     };
     out.extend(missing_global_type_diagnostics(&checker));
     for d in &checker.link.diagnostics {
-        let f = d.file.0 as usize;
-        if f < program.files.len() && should_check(program, f) {
+        if link_diagnostic_reported(program, d) {
             out.push(d.clone());
         }
     }
@@ -298,12 +314,14 @@ fn check_program_impl<'a>(
             i += 1;
             i <= n_syntax
                 // (TS1294, `erasableSyntaxOnly`, TS1141 for `import(x)` types, TS1539 for
-                // bigint property names, and the import checks TS1192, TS1205, TS1340, TS1361,
-                // TS1362, TS1484 and TS1485 are semantic errors to tsc 7.)
+                // bigint property names, TS1156 for a `let`/`const` statement as the body of
+                // `if`/`while`/... (the parser keeps the `type`/`interface` one back), and the
+                // import checks TS1192, TS1205, TS1340, TS1361, TS1362, TS1484 and TS1485 are
+                // semantic errors to tsc 7.)
                 || !((1000..2000).contains(&d.code)
                     && !matches!(
                         d.code,
-                        1141 | 1192 | 1205 | 1294 | 1340 | 1361 | 1362 | 1484 | 1485 | 1539
+                        1141 | 1156 | 1192 | 1205 | 1294 | 1340 | 1361 | 1362 | 1484 | 1485 | 1539
                     )
                     || matches!(d.code, 8020 | 17019 | 17020))
                 || !broken.get(d.file.0 as usize).copied().unwrap_or(false)

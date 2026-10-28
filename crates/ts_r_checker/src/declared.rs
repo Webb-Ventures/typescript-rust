@@ -764,20 +764,31 @@ impl<'c, 'a> Ck<'c, 'a> {
         let sym = data.sym;
         let mut res = None;
         if !data.is_this {
+            let def = self
+                .c
+                .decls(sym)
+                .into_iter()
+                .find_map(|d| match *self.node(d) {
+                    Node::TypeParam {
+                        default: Some(def), ..
+                    } => Some(Loc::new(d.file, def)),
+                    _ => None,
+                });
+            // A default naming a type alias that is being resolved (`T = ParsedNode` with
+            // `type ParsedNode = A | Seq` and `interface Seq<T = ParsedNode>`) holds a
+            // forward reference to it, linked once the alias is known: tsc defers
+            // references inside an alias that need defaults, so this is no cycle.
+            if let Some(f) = def.and_then(|d| self.default_alias_forward(d)) {
+                return Some(f);
+            }
             if let Some(e) = self.resolving_defaults.iter_mut().find(|e| e.0 == t) {
                 // A cycle: no default here, nor once the outer resolution ends.
                 e.1 = true;
                 return None;
             }
             self.resolving_defaults.push((t, false));
-            for d in self.c.decls(sym) {
-                if let Node::TypeParam {
-                    default: Some(def), ..
-                } = *self.node(d)
-                {
-                    res = Some(self.type_from_node(Loc::new(d.file, def)));
-                    break;
-                }
+            if let Some(def) = def {
+                res = Some(self.type_from_node(def));
             }
             if let Some((_, true)) = self.resolving_defaults.pop() {
                 res = None;
@@ -786,6 +797,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.store()
             .type_param_data(t)
             .and_then(|x| x.set_default(res))
+    }
+
+    /// The type of default `l` when it is a plain reference to a non-generic type alias
+    /// whose declared type is being resolved, or an array of one (`T = Kind[]`): the
+    /// alias reads as a forward reference (see `type_param_default`).
+    fn default_alias_forward(&mut self, l: Loc) -> Option<TypeId> {
+        let ast = self.ast(l.file);
+        let mut n = crate::nodes::skip_type_parens(ast, l.node);
+        if let Node::ArrayType { elem } = *ast.node(n) {
+            n = crate::nodes::skip_type_parens(ast, elem);
+        }
+        let Node::TypeRef {
+            name,
+            type_args: None,
+        } = *ast.node(n)
+        else {
+            return None;
+        };
+        let sym = self.resolve_entity(Loc::new(l.file, name), meaning::TYPE)?;
+        let sym = self.c.resolve_alias(sym)?;
+        if !self.c.sym_flags(sym).intersects(SymbolFlags::TYPE_ALIAS)
+            || !self.local_type_params(sym).is_empty()
+            || !self.is_resolving(Resolving::DeclaredType(sym))
+        {
+            return None;
+        }
+        Some(self.type_from_node_deferred(l))
     }
 
     /// The declared constraint of a type parameter (`None` when unconstrained).
@@ -967,7 +1005,8 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// (`Box<infer U>` with `Box<X extends string>`), when that constraint mentions no type
     /// parameters; with `rest`, `unknown[]` as a rest parameter or rest tuple element type
     /// (only what an `infer` with no candidates falls back to: `Parameters<any>` is
-    /// `unknown[]`).
+    /// `unknown[]`); `string` for a template literal placeholder.
+    /// (`tsc: tsc/internal/checker/checker.go`, `getInferredTypeParameterConstraint`.)
     pub(crate) fn implied_infer_constraint(&mut self, d: Loc, rest: bool) -> Option<TypeId> {
         if !matches!(self.node(d), Node::TypeParam { .. }) {
             return None;
@@ -993,6 +1032,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             Node::NamedTupleMember { rest: true, ty, .. } if rest && ty == child.node => {
                 Some(self.create_array(TypeId::UNKNOWN, false))
             }
+            // A template literal placeholder (`${infer X}`) holds a string.
+            Node::TemplateLitType { .. } if !rest => Some(TypeId::STRING),
             Node::TypeArgs { args } if !rest => {
                 let idx = ast.list(args).iter().position(|&a| a == child.node)?;
                 let r = self.c.parent(parent)?;

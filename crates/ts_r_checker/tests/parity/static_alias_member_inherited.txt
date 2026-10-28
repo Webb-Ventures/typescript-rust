@@ -1,0 +1,9 @@
+a.ts(8,7): error TS2322: Type 'typeof Q2' is not assignable to type 'number'.
+a.ts(9,7): error TS2322: Type 'typeof Q2' is not assignable to type 'number'.
+a.ts(11,7): error TS2322: Type '"zz"' is not assignable to type '"default" | "prototype"'.
+a.ts(13,7): error TS2322: Type 'typeof S2' is not assignable to type 'number'.
+a.ts(15,7): error TS2322: Type '"zz"' is not assignable to type '"default"'.
+a.ts(19,15): error TS2417: Class static side 'typeof R5' incorrectly extends base class static side 'typeof P5'.
+  Types of property 'd' are incompatible.
+    Type 'typeof R5.d' is not assignable to type 'typeof P5.d'.
+      Cannot assign an abstract constructor type to a non-abstract constructor type.

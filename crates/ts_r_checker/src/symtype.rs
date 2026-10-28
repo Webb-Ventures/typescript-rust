@@ -1902,7 +1902,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The type of the pattern (or declaration) a binding element belongs to.
-    pub(crate) fn pattern_parent_type(&mut self, pattern: Loc) -> TypeId {
+    pub fn pattern_parent_type(&mut self, pattern: Loc) -> TypeId {
         let Some(p) = self.c.parent(pattern) else {
             return TypeId::ANY;
         };

@@ -836,14 +836,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(lb)
     }
 
+    /// The modifiers type of a generic `{ [K in keyof X]: ... }` whose `X` is a generic
+    /// intersection (`Required<O & Omit<D, keyof O>>`): its members are read off the
+    /// properties of `X`'s members' constraints, as for a concrete `X` (tsc:
+    /// checker.go resolveMappedTypeMembers, which iterates the modifiers type's
+    /// properties whenever the key is `keyof X`).
+    pub(crate) fn mapped_generic_intersection_modifiers(&mut self, t: TypeId) -> Option<TypeId> {
+        let info = self.mapped_info(t)?;
+        self.keyof_constraint_operand(&info)?;
+        if info.name_node.is_some() {
+            return None;
+        }
+        let m = self.mapped_modifiers_type(&info);
+        (self.store().flags(m).contains(TypeFlags::INTERSECTION) && self.is_generic_type(m))
+            .then_some(m)
+    }
+
     pub fn mapped_members(&mut self, t: TypeId) -> ResolvedMembers {
         let Some(info) = self.mapped_info(t) else {
             return ResolvedMembers::empty();
         };
         let mut constraint = self.mapped_constraint(&info);
+        let mut generic_modifiers = false;
         if constraint != TypeId::UNRESOLVED && self.is_generic_index_type(constraint) {
             match self.mapped_lower_bound_keys(t) {
                 Some(lb) => constraint = lb,
+                None if self.mapped_generic_intersection_modifiers(t).is_some() => {
+                    generic_modifiers = true;
+                }
                 None => return ResolvedMembers::empty(),
             }
         }
@@ -852,11 +872,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let name_raw = self.mapped_name_raw(&info);
         let modifiers = self.mapped_modifiers_type(&info);
-        let keys: Vec<TypeId> = if self.keyof_constraint_operand(&info).is_some() {
-            self.mapped_keys_of_modifiers(modifiers)
-        } else {
-            self.union_members(constraint)
-        };
+        let keys: Vec<TypeId> =
+            if generic_modifiers || self.keyof_constraint_operand(&info).is_some() {
+                self.mapped_keys_of_modifiers(modifiers)
+            } else {
+                self.union_members(constraint)
+            };
         // Properties in key order with the keys that map to each (their union is built once
         // at the end: building it key by key is quadratic).
         let mut props: Vec<(StrId, Vec<TypeId>)> = Vec::new();

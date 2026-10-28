@@ -1018,6 +1018,9 @@ impl<'a> Checker<'a> {
             {
                 return Some(p);
             }
+            if let Some(g) = self.global_type_past_value_alias(l, id, meaning) {
+                return Some(g);
+            }
             if symbol_meaning(f) & meaning != 0 && !self.alias_lacks_meaning(id, meaning) {
                 if !self.member_out_of_scope(l, f, meaning) && !self.namespace_export_in_enum(l, id)
                 {
@@ -1049,6 +1052,40 @@ impl<'a> Checker<'a> {
             return Some(s);
         }
         self.global_symbol(name, meaning)
+    }
+
+    /// A global type named like alias `id` when `id` stands for a value only (`import
+    /// Blob from "./blob"` of a `const Blob`): the alias does not match a type meaning, so
+    /// tsc's lookup goes on outwards and finds the global `Blob` interface (tsc:
+    /// checker.go getSymbol, which checks an alias's target flags against the meaning).
+    fn global_type_past_value_alias(&self, l: Loc, id: SymId, meaning: u8) -> Option<SymId> {
+        if meaning != ts_r_binder::meaning::TYPE {
+            return None;
+        }
+        let f = self.sym_flags(id);
+        if !f.intersects(SymbolFlags::ALIAS)
+            || symbol_meaning(f.without(SymbolFlags::ALIAS))
+                & (ts_r_binder::meaning::TYPE | ts_r_binder::meaning::NAMESPACE)
+                != 0
+        {
+            return None;
+        }
+        let t = self.resolve_alias(id)?;
+        let tf = self.sym_flags(t);
+        if t == id
+            || tf.intersects(SymbolFlags::ALIAS)
+            || self.sym_name(t) == "export="
+            || symbol_meaning(tf) & ts_r_binder::meaning::VALUE == 0
+            || symbol_meaning(tf) & (ts_r_binder::meaning::TYPE | ts_r_binder::meaning::NAMESPACE)
+                != 0
+        {
+            return None;
+        }
+        let name = match *self.node(l) {
+            Node::Ident { name } => self.ast(l.file).atom(name),
+            _ => return None,
+        };
+        self.global_symbol(name, meaning).filter(|&g| g != id)
     }
 
     /// A top-level import of a module file that shares its name with an exported variable of
@@ -1299,7 +1336,12 @@ impl<'a> Checker<'a> {
                 }
                 // Exported declarations of a module file or namespace are in scope too
                 // (`export const x = 1` then `let y: x` is TS2749, not TS2304).
-                if let Some(id) = self.lookup_in_scope_exports(l.file, sc, n, meaning) {
+                // A class static shared through a merged namespace's exports is not in
+                // scope; the walk goes on to the outer scopes (decimal.js: `typeof Decimal`
+                // in `namespace Decimal` with a `static Decimal` member).
+                if let Some(id) = self.lookup_in_scope_exports(l.file, sc, n, meaning)
+                    && !self.member_out_of_scope(l, self.sym_flags(id), meaning)
+                {
                     return Some(id);
                 }
             }

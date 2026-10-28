@@ -1,0 +1,2 @@
+a.ts(2,1): error TS1084: Invalid 'reference' directive syntax.
+a.ts(4,1): error TS1084: Invalid 'reference' directive syntax.
