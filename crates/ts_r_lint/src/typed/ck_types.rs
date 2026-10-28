@@ -204,6 +204,20 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
                     .or_else(|| ck.c.resolve_ident(l, ts_r_binder::meaning::NAMESPACE))
             }
             Node::This {} => None,
+            // A module specifier (`from "./m"`): the module's symbol.
+            Node::StringLit { .. } => {
+                let ck = self.ck.borrow();
+                let c = &ck.c;
+                let request = c
+                    .bound(l.file)
+                    .module_requests
+                    .iter()
+                    .position(|r| r.node == node);
+                match request {
+                    Some(i) => c.module_target_symbol(c.link.module_target(l.file, i as u32)),
+                    None => c.sym_of_decl(l),
+                }
+            }
             _ => {
                 let ck = self.ck.borrow();
                 ck.c.sym_of_decl(l)
@@ -423,6 +437,8 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
                     Some(ObjectKind::Declared { sym, .. }) => Some(sym),
                     _ => None,
                 },
+                // `typeof C` / `typeof f` / `typeof N`: keyed by the symbol itself.
+                ObjectKind::Anonymous { decl, .. } if decl.0 == u32::MAX => Some(Sym(decl.1)),
                 ObjectKind::Anonymous { decl, .. } | ObjectKind::Mapped { decl, .. } => {
                     if decl.0 as usize >= ck.c.file_count() {
                         return None;
@@ -497,6 +513,10 @@ impl<'a> TypeInfo for CkTypes<'_, '_, 'a> {
 
     fn base_of_literal(&self, t: Ty) -> Ty {
         self.with(|ck| ck.base_of_literal(t))
+    }
+
+    fn widened_type(&self, t: Ty) -> Ty {
+        self.with(|ck| ck.widened_type(t))
     }
 
     fn union_of(&self, types: &[Ty]) -> Ty {

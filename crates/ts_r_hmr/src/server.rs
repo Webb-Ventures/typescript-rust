@@ -1670,7 +1670,7 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
         };
         ensure_asset(shared, file, &url);
         let (css, mut deps) = app_css_text(shared, file, &source);
-        let scoped = scope_css_module(shared, file, &url, &css, 0, &mut deps);
+        let scoped = scope_css_module(shared, file, &url, &css, &mut deps);
         add_watch_deps(shared, file, &url, deps);
         return js_response(req, crate::assets::default_export(&scoped.css));
     }
@@ -1789,7 +1789,9 @@ fn serve_file(shared: &Shared, req: &Request, file: &Path, url_path: &str) -> Re
             Err(_) => Response::text(404, "Not found"),
         },
         _ if is_module_ext(shared, file, &ext) => {
-            match crate::worker::env_prelude(&req.query, &shared.public_url("/@vite/env")) {
+            let env = shared.env();
+            let env_url = shared.public_url("/@vite/env");
+            match crate::worker::env_prelude(&req.query, &env_url, &env.globals) {
                 Some(prelude) => serve_script_with(shared, req, file, &url, &prelude),
                 None => serve_script(shared, req, file, &url),
             }
@@ -1909,7 +1911,7 @@ fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> R
         );
     }
     let mut deps = Vec::new();
-    let scoped = scope_css_module(shared, file, url, &css, 0, &mut deps);
+    let scoped = scope_css_module(shared, file, url, &css, &mut deps);
     add_watch_deps(shared, file, url, deps);
     js_response(
         req,
@@ -1923,8 +1925,19 @@ fn serve_css_module(shared: &Shared, req: &Request, file: &Path, url: &str) -> R
     )
 }
 
-/// `composes: ... from` chains deeper than this stop (a cycle, or a very long chain).
+/// `composes: ... from` chains deeper than this stop (a very long chain).
 const MAX_COMPOSE_DEPTH: u32 = 8;
+
+/// One CSS module's `composes: ... from` traversal: every file is read and scoped once, and
+/// its CSS goes into the output once (where it is first composed), as postcss-modules loads
+/// each composed file once and prepends each one's CSS once. Without this a layered set of
+/// files composing each other is exponential in reads and output size.
+struct ComposeWalk {
+    /// Files already scoped (their exports), in visit order.
+    done: Vec<(PathBuf, Vec<(String, String)>)>,
+    /// Files being scoped (the chain from the root): composing one of them is a cycle.
+    active: Vec<PathBuf>,
+}
 
 /// A CSS module's text (`@import`s already inlined) with its names scoped; the files its
 /// `composes: ... from` reads go to `deps`.
@@ -1933,8 +1946,23 @@ fn scope_css_module(
     file: &Path,
     url: &str,
     css: &str,
+    deps: &mut Vec<PathBuf>,
+) -> crate::css_modules::Scoped {
+    let mut walk = ComposeWalk {
+        done: Vec::new(),
+        active: vec![file.to_path_buf()],
+    };
+    scope_composing(shared, file, url, css, 0, deps, &mut walk)
+}
+
+fn scope_composing(
+    shared: &Shared,
+    file: &Path,
+    url: &str,
+    css: &str,
     depth: u32,
     deps: &mut Vec<PathBuf>,
+    walk: &mut ComposeWalk,
 ) -> crate::css_modules::Scoped {
     let key = url.split(['?', '#']).next().unwrap_or(url);
     crate::css_modules::scope(css, key, shared.css_module_naming, &mut |spec| {
@@ -1943,20 +1971,27 @@ fn scope_css_module(
         }
         let path = spec.split(['?', '#']).next().unwrap_or(spec);
         let target = app_css::resolve_ref(shared, path, file, false)?;
+        if walk.active.contains(&target) {
+            return None; // a cycle
+        }
+        if let Some((_, exports)) = walk.done.iter().find(|(f, _)| *f == target) {
+            // Its CSS is already in the output, before this file's.
+            return Some(crate::css_modules::Scoped {
+                css: String::new(),
+                exports: exports.clone(),
+            });
+        }
         let source = fs::read_to_string(&target).ok()?;
         let mut host = app_css::AppCss::new(shared);
         let text = host.transform(&target, &source);
         deps.push(target.clone());
         deps.extend(host.into_deps());
         let target_url = url_for_file(&shared.root, &target);
-        Some(scope_css_module(
-            shared,
-            &target,
-            &target_url,
-            &text,
-            depth + 1,
-            deps,
-        ))
+        walk.active.push(target.clone());
+        let scoped = scope_composing(shared, &target, &target_url, &text, depth + 1, deps, walk);
+        walk.active.pop();
+        walk.done.push((target, scoped.exports.clone()));
+        Some(scoped)
     })
 }
 
@@ -2089,8 +2124,12 @@ fn serve_script_with(
             }
             b
         }
+        // A file that is there but can't be loaded (a plugin `load` hook threw) is a module
+        // error, with the plugin's message and the overlay; only a missing file is a 404.
         Err(message)
-            if plugins::is_plugin_url(url) || crate::wasm::split_glue_file(file).is_some() =>
+            if plugins::is_plugin_url(url)
+                || crate::wasm::split_glue_file(file).is_some()
+                || file.is_file() =>
         {
             shared
                 .graph
@@ -3674,14 +3713,16 @@ pub(crate) fn render_script(shared: &Shared, id: ModuleId, p: &Prepared, extra: 
             end: rec.end,
             text: url_of(t, true),
         });
-        // Static import attributes go: the server decides what a module is.
+        // Static import attributes go: the server decides what a module is. Their line
+        // breaks stay, so the source map only shifts columns.
         if rec.kind != crate::scan::ImportKind::Dynamic
             && let Some((start, end)) = render::import_attributes_span(&p.output.code, rec.end)
         {
+            let removed = &p.output.code[start as usize..end as usize];
             edits.push(render::Edit {
                 start,
                 end,
-                text: String::new(),
+                text: removed.chars().filter(|&c| c == '\n').collect(),
             });
         }
     }

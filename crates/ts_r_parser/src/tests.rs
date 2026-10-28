@@ -3251,7 +3251,8 @@ fn import_type_has_no_comma_after_attributes() {
 }
 
 /// `import<T>(x)` and `import<T>` keep their type arguments on the `ImportCall` (the
-/// checker resolves them: importWithTypeArguments, TS2304 on `T`); `import<>` has none.
+/// checker resolves those of a bare `import<T>`: importWithTypeArguments, TS2304 on `T`);
+/// `import<>` has none.
 #[test]
 fn import_call_keeps_type_arguments() {
     for (src, expect) in [
@@ -3444,5 +3445,29 @@ fn class_semicolons_are_recorded() {
             (inner_end, pos("{ ; }", 20) + 2),
             (arrow_class_end, pos("{ ; }) =>", 0) + 2),
         ]
+    );
+}
+
+/// The module reparse is only for an `await` whose meaning the module goal can change: a
+/// property name after `.` or `?.` is the same name under either goal, so it does not make
+/// the whole file be parsed again; a top-level `await` reference still does.
+#[test]
+fn member_name_await_does_not_trigger_module_reparse() {
+    let seen = |src: &str| {
+        let mut p = crate::Parser::new(src, SourceKind::Ts);
+        p.parse_program();
+        p.await_name_seen
+    };
+    assert!(!seen("export {}; obj.await;"));
+    assert!(!seen("export {}; obj?.await; a.b.await.c;"));
+    assert!(seen("export {}; obj.await; await;"));
+    assert!(seen("export {}; @await class C {}"));
+    // The reparse still makes the top-level reference an operator.
+    let r = parse("export {}; obj.await; await;", SourceKind::Ts);
+    assert!(!r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+    assert!(
+        parse("export {}; obj.await;", SourceKind::Ts)
+            .diagnostics
+            .is_empty()
     );
 }

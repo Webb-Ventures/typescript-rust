@@ -79,12 +79,18 @@ pub fn wrapper_module(constructor: &str, file_url: &str, query: &str) -> String 
 }
 
 /// What runs before a worker file's code, if `query` asks for the worker file: the env
-/// module, imported (`type=module`) or loaded with `importScripts` (`type=classic`).
-pub fn env_prelude(query: &str, env_url: &str) -> Option<String> {
+/// module, imported (`type=module`) or loaded with `importScripts` (`type=classic`). A
+/// worker whose options carried `/* @vite-ignore */` (`type=ignore`) may be either kind, so
+/// the env module's code (`env_code`) is put in instead, or nothing when it is empty
+/// (`vite: packages/vite/src/node/plugins/worker.ts`, the `worker_file` transform). The
+/// text after the env part is `;\n`, as Vite writes it.
+pub fn env_prelude(query: &str, env_url: &str, env_code: &str) -> Option<String> {
     http::query_param(query, "worker_file")?;
     let url = serde_json::to_string(env_url).unwrap_or_else(|_| "\"\"".to_owned());
     Some(match http::query_param(query, "type") {
         Some("classic") => format!("importScripts({url})\n;\n"),
+        Some("ignore") if env_code.trim().is_empty() => String::new(),
+        Some("ignore") => format!("{}\n;\n", env_code.trim_end()),
         _ => format!("import {url}\n;\n"),
     })
 }
@@ -137,13 +143,26 @@ mod tests {
     #[test]
     fn env_preludes() {
         assert_eq!(
-            env_prelude("worker_file&type=module", "/@vite/env").as_deref(),
+            env_prelude("worker_file&type=module", "/@vite/env", "").as_deref(),
             Some("import \"/@vite/env\"\n;\n")
         );
         assert_eq!(
-            env_prelude("worker_file&type=classic", "/b/@vite/env").as_deref(),
+            env_prelude("worker_file&type=classic", "/b/@vite/env", "").as_deref(),
             Some("importScripts(\"/b/@vite/env\")\n;\n")
         );
-        assert_eq!(env_prelude("import", "/@vite/env"), None);
+        assert_eq!(
+            env_prelude(
+                "worker_file&type=ignore",
+                "/@vite/env",
+                "globalThis.X = 1;\n"
+            )
+            .as_deref(),
+            Some("globalThis.X = 1;\n;\n")
+        );
+        assert_eq!(
+            env_prelude("worker_file&type=ignore", "/@vite/env", "").as_deref(),
+            Some("")
+        );
+        assert_eq!(env_prelude("import", "/@vite/env", ""), None);
     }
 }

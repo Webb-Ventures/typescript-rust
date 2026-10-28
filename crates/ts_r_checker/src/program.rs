@@ -640,6 +640,38 @@ impl ProgramFiles {
     pub fn file_index(&self, path: &str) -> Option<usize> {
         self.files.iter().position(|f| f.path == path)
     }
+
+    /// The paths a `/// <reference path>` finds in the program: its files, and the copies
+    /// package deduplication folded into one of them (a module resolution's
+    /// `redirected_from`; tsc keeps such a copy as a redirect to the kept file, so a
+    /// reference to it is no TS6053).
+    pub fn reference_paths(&self) -> FxHashSet<&str> {
+        let mut paths: FxHashSet<&str> = self.files.iter().map(|f| f.path.as_str()).collect();
+        for r in self
+            .resolutions
+            .values()
+            .chain(self.mode_resolutions.values())
+            .flatten()
+        {
+            if let Some(from) = &r.redirected_from {
+                paths.insert(from.as_str());
+            }
+        }
+        paths
+    }
+
+    /// [`ProgramFiles::missing_type_references`] by containing file path, names in load
+    /// order: one pass, for reporting every file's TS2688s without a scan per file.
+    pub fn missing_type_references_by_file(&self) -> FxHashMap<&str, Vec<&str>> {
+        let mut by_file: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+        for (path, name) in &self.missing_type_references {
+            by_file
+                .entry(path.as_str())
+                .or_default()
+                .push(name.as_str());
+        }
+        by_file
+    }
 }
 
 /// Binding options derived from compiler options for one file.
@@ -1224,40 +1256,6 @@ fn load<F: FileSystem>(
             loaded.insert(f.path.clone(), f);
         }
     }
-    // Lib references of program files, in a deterministic order.
-    let mut referenced: Vec<String> = Vec::new();
-    let mut paths: Vec<&String> = loaded.keys().collect();
-    paths.sort();
-    for path in paths {
-        for (kind, v) in &loaded[path].references {
-            if *kind == "lib" && !referenced.iter().any(|r| r.eq_ignore_ascii_case(v)) {
-                referenced.push(v.to_ascii_lowercase());
-            }
-        }
-    }
-    // `libReplacement`: a lib whose `@typescript/lib-*` package resolves is that file.
-    let lib_base = resolver
-        .options()
-        .config_dir
-        .clone()
-        .unwrap_or_else(|| fs.cwd());
-    let replace_lib = |name: &str| -> Option<Arc<SourceFile>> {
-        let spec = lib_replacement_specifier(name)?;
-        let from = lib_replacement_lookup_file(&lib_base, name);
-        let r = resolver.resolve_module(&spec, &from, ResolutionMode::Require)?;
-        let path = r.resolved_file_name.clone();
-        let text = fs.read_file(&path)?;
-        Some(Arc::new(SourceFile::new(path, text, true, &lib_bind)))
-    };
-    let replace: Option<LibReplace<'_>> = if options.lib_replacement() == Some(true) {
-        Some(&replace_lib)
-    } else {
-        None
-    };
-    let (lib_files, missing_libs) = match libs {
-        Some(l) => lib_closure(l, options, &lib_bind, &referenced, replace),
-        None => (Vec::new(), Vec::new()),
-    };
     // Package deduplication: a file whose package identity an earlier file already has
     // (the same package version installed at two places) is replaced by that file.
     let redirects = if options.effective().deduplicate_packages() && !package_ids.is_empty() {
@@ -1294,7 +1292,7 @@ fn load<F: FileSystem>(
     }
     // Order: lib files, then a depth-first post-order from the `types` entries and roots
     // (dependencies before dependents, as tsc lists them).
-    let mut files: Vec<Arc<SourceFile>> = lib_files;
+    let mut files: Vec<Arc<SourceFile>> = Vec::new();
     let mut done: FxHashSet<String> = FxHashSet::default();
     let mut starts: Vec<String> = type_roots;
     starts.extend(roots.iter().cloned());
@@ -1319,6 +1317,44 @@ fn load<F: FileSystem>(
             }
         }
     }
+    // Lib references of the program's files (after deduplication: a folded copy's own
+    // dependencies are not in the program, nor the libs only they reference), in a
+    // deterministic order.
+    let mut referenced: Vec<String> = Vec::new();
+    let mut paths: Vec<&String> = files.iter().map(|f| &f.path).collect();
+    paths.sort();
+    for path in paths {
+        for (kind, v) in &loaded[path].references {
+            if *kind == "lib" && !referenced.iter().any(|r| r.eq_ignore_ascii_case(v)) {
+                referenced.push(v.to_ascii_lowercase());
+            }
+        }
+    }
+    // `libReplacement`: a lib whose `@typescript/lib-*` package resolves is that file.
+    let lib_base = resolver
+        .options()
+        .config_dir
+        .clone()
+        .unwrap_or_else(|| fs.cwd());
+    let replace_lib = |name: &str| -> Option<Arc<SourceFile>> {
+        let spec = lib_replacement_specifier(name)?;
+        let from = lib_replacement_lookup_file(&lib_base, name);
+        let r = resolver.resolve_module(&spec, &from, ResolutionMode::Require)?;
+        let path = r.resolved_file_name.clone();
+        let text = fs.read_file(&path)?;
+        Some(Arc::new(SourceFile::new(path, text, true, &lib_bind)))
+    };
+    let replace: Option<LibReplace<'_>> = if options.lib_replacement() == Some(true) {
+        Some(&replace_lib)
+    } else {
+        None
+    };
+    let (lib_files, missing_libs) = match libs {
+        Some(l) => lib_closure(l, options, &lib_bind, &referenced, replace),
+        None => (Vec::new(), Vec::new()),
+    };
+    // Lib files first, then the program's files in that order.
+    let files: Vec<Arc<SourceFile>> = lib_files.into_iter().chain(files).collect();
     if let Some(out) = package_jsons {
         *out = resolver.package_json_lookups();
     }
@@ -1365,7 +1401,8 @@ fn package_redirects(
     let mut redirects: FxHashMap<String, String> = FxHashMap::default();
     let mut owner: FxHashMap<&ts_r_resolver::PackageId, &str> = FxHashMap::default();
     let mut seen: FxHashSet<&str> = FxHashSet::default();
-    let is_root = |p: &str| roots.iter().any(|r| r == p);
+    let root_set: FxHashSet<&str> = roots.iter().map(String::as_str).collect();
+    let is_root = |p: &str| root_set.contains(p);
     // An explicit stack of (file, next edge position); edges in walk order are the
     // references (from `reference_starts`) followed by the imports.
     for start in roots.iter().chain(type_roots) {

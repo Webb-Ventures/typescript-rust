@@ -98,21 +98,8 @@ impl GuardTransform {
         }
     }
 
-    fn expand(&self, input: &TransformInput<'_>) -> Option<Expanded> {
-        self.expander.expand(&file_of(input), input.source)
-    }
-}
-
-impl Transform for GuardTransform {
-    fn cache_id(&self) -> &str {
-        &self.cache_id
-    }
-
-    fn handles(&self, path: &Path) -> bool {
-        self.inner.handles(path)
-    }
-
-    fn deps(&self, input: &TransformInput<'_>) -> Vec<PathBuf> {
+    /// The files a module's validators were generated from (memoized per source).
+    fn guard_deps(&self, input: &TransformInput<'_>) -> Vec<PathBuf> {
         if !ts_r_guard::expand::mentions_guard(input.source) {
             return Vec::new();
         }
@@ -142,6 +129,31 @@ impl Transform for GuardTransform {
                 fresh: x,
             },
         );
+        deps
+    }
+
+    fn expand(&self, input: &TransformInput<'_>) -> Option<Expanded> {
+        self.expander.expand(&file_of(input), input.source)
+    }
+}
+
+impl Transform for GuardTransform {
+    fn cache_id(&self) -> &str {
+        &self.cache_id
+    }
+
+    fn handles(&self, path: &Path) -> bool {
+        self.inner.handles(path)
+    }
+
+    fn deps(&self, input: &TransformInput<'_>) -> Vec<PathBuf> {
+        // The wrapped transform's own deps (the file's tsconfig chain) come first.
+        let mut deps = self.inner.deps(input);
+        for d in self.guard_deps(input) {
+            if !deps.contains(&d) {
+                deps.push(d);
+            }
+        }
         deps
     }
 
@@ -253,7 +265,7 @@ mod tests {
         // `Port`, `Positive`).
         let opts = options_for_root(&root);
         assert_eq!(opts.refinements.len(), 3, "{opts:?}");
-        let t = GuardTransform::new(ts, opts);
+        let t = GuardTransform::new(ts.clone(), opts);
         let path = root.join("main.ts");
         let src = std::fs::read_to_string(&path).expect("fixture");
         let input = TransformInput {
@@ -268,14 +280,21 @@ mod tests {
         assert_eq!(t.deps(&input), deps);
         let out = t.transform(&input).expect("transform");
         assert!(out.code.contains("$ParseError"), "{}", out.code);
-        // Files without guard imports have none.
+        // The TS transform's own deps (the tsconfig.json the options come from) come
+        // first; files without guard imports have only those.
+        let tsconfig = ts.deps(&input);
+        assert!(
+            tsconfig.iter().any(|d| d.ends_with("tsconfig.json")),
+            "{tsconfig:?}"
+        );
+        assert_eq!(deps[..tsconfig.len()], tsconfig[..]);
         let plain = TransformInput {
             path: &root.join("plain.ts"),
             id: "plain.ts",
             source: "export const x = 1;\n",
             mode: Mode::Dev,
         };
-        assert!(t.deps(&plain).is_empty());
+        assert_eq!(t.deps(&plain), ts.deps(&plain));
     }
 
     #[test]

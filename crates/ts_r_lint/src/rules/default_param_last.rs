@@ -13,7 +13,7 @@ pub static RULE: RuleDef = RuleDef {
 };
 
 #[derive(Debug, Default)]
-struct DefaultParamLast;
+pub(crate) struct DefaultParamLast;
 
 impl Rule for DefaultParamLast {
     fn kinds(&self) -> &'static [NodeKind] {

@@ -1211,6 +1211,10 @@ impl<'a> Parser<'a> {
             let mut acc = first;
             loop {
                 self.pos += 2;
+                // `&&&` is reserved.
+                if intersection && self.at('&') {
+                    return self.err("Invalid set operation in character class");
+                }
                 let (rhs, range) = self.v_operand()?;
                 if range {
                     return self.err("Invalid set operation in character class");
@@ -1624,6 +1628,10 @@ mod tests {
         assert_eq!(err("(?g:foo)", ""), Some("Invalid group"));
         assert_eq!(err("[[]", "v"), Some("Unterminated character class"));
         assert_eq!(err("[A--[0-9]]", "v"), None);
+        assert_eq!(
+            err("[[A&&&]]", "v"),
+            Some("Invalid set operation in character class")
+        );
         assert_eq!(err("[\\p{Basic_Emoji}--\\q{a|bc|def}]", "v"), None);
         assert_eq!(err("(?<\\ud835\\udc9c>.)", ""), None);
         assert_eq!(err("{", ""), None);

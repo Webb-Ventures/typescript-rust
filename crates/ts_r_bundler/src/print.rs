@@ -540,6 +540,8 @@ fn class_to_var(ast: &mut Ast, scopes: &Scopes, s: NodeId, mangle: bool) -> Node
     // References to the class inside it, and every name used there.
     let sym = scopes.symbol_of(name);
     let mut inner_refs = Vec::new();
+    // `{ C }` shorthands of those references, expanded before the references are renamed.
+    let mut shorthands = Vec::new();
     let mut used: FxHashSet<ts_r_ast::Atom> = FxHashSet::default();
     let mut stack: Vec<NodeId> = Vec::new();
     for &h in ast.list(heritage) {
@@ -549,11 +551,17 @@ fn class_to_var(ast: &mut Ast, scopes: &Scopes, s: NodeId, mangle: bool) -> Node
         stack.push(m);
     }
     while let Some(id) = stack.pop() {
-        if let Node::Ident { name: a } = *ast.node(id) {
-            used.insert(a);
-            if sym.is_some() && scopes.symbol_of(id) == sym {
-                inner_refs.push(id);
+        match *ast.node(id) {
+            Node::Ident { name: a } => {
+                used.insert(a);
+                if sym.is_some() && scopes.symbol_of(id) == sym {
+                    inner_refs.push(id);
+                }
             }
+            Node::ShorthandProp { name: n, .. } if sym.is_some() && scopes.symbol_of(n) == sym => {
+                shorthands.push(id);
+            }
+            _ => {}
         }
         ast.for_each_child(id, |c| stack.push(c));
     }
@@ -572,6 +580,36 @@ fn class_to_var(ast: &mut Ast, scopes: &Scopes, s: NodeId, mangle: bool) -> Node
             i += 1;
         }
         let a = ast.intern(&candidate);
+        for &p in &shorthands {
+            let Node::ShorthandProp {
+                modifiers,
+                name: n,
+                init,
+            } = *ast.node(p)
+            else {
+                continue;
+            };
+            let key = ast.add(*ast.node(n), ast.span(n));
+            let value = match init {
+                Some(init) => {
+                    let at = ast.span(n).start;
+                    ast.add(
+                        Node::Assign {
+                            left: n,
+                            op: AssignOp::Assign,
+                            right: init,
+                        },
+                        Span::new(at, at),
+                    )
+                }
+                None => n,
+            };
+            *ast.node_mut(p) = Node::Property {
+                modifiers,
+                key,
+                value,
+            };
+        }
         for &r in &inner_refs {
             *ast.node_mut(r) = Node::Ident { name: a };
         }

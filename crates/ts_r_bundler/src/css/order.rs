@@ -34,7 +34,7 @@ pub trait Host {
 }
 
 /// One level of `@import` conditions, as printed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Cond {
     /// `Some("")` is an anonymous layer.
     layer: Option<String>,
@@ -43,6 +43,13 @@ struct Cond {
 }
 
 impl Cond {
+    /// What keeping this level in an item costs from the expansion budget.
+    fn cost(&self) -> usize {
+        1 + self.layer.as_ref().map_or(0, String::len)
+            + self.supports.as_ref().map_or(0, String::len)
+            + self.media.len()
+    }
+
     fn text(&self) -> String {
         let mut parts = Vec::new();
         match &self.layer {
@@ -72,17 +79,50 @@ enum Item {
 /// Nesting limit for `@import` chains.
 const MAX_DEPTH: usize = 64;
 
+/// How much one chunk's `@import` expansion may produce: one unit per file, external
+/// import or `@layer` statement, plus the bytes of the conditions each carries. A file
+/// imported twice by each file of a chain is expanded 2^n times (no cycle, no deep
+/// nesting), so past this the stylesheet is an error instead of gigabytes of copies.
+pub const MAX_EXPANSION: usize = 1 << 18;
+
+/// Why [`bundle`] gave up: the expansion budget ran out under this root.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TooManyImports {
+    pub root: ModuleId,
+}
+
 struct Walk<'a> {
     host: &'a dyn Host,
     minify: bool,
     syntax: bool,
     items: Vec<Item>,
     stack: Vec<ModuleId>,
+    /// Budget left ([`MAX_EXPANSION`]); `None` once it ran out.
+    left: Option<usize>,
 }
 
 impl Walk<'_> {
+    /// Adds `item`, paying for it; `false` once the budget is used up.
+    fn push(&mut self, item: Item) -> bool {
+        let chain = match &item {
+            Item::File(_, c) | Item::External(_, c) | Item::Layers(_, c, _) => c,
+        };
+        let cost = 1 + chain.iter().map(Cond::cost).sum::<usize>();
+        match self.left.and_then(|l| l.checked_sub(cost)) {
+            Some(l) => {
+                self.left = Some(l);
+                self.items.push(item);
+                true
+            }
+            None => {
+                self.left = None;
+                false
+            }
+        }
+    }
+
     fn visit(&mut self, m: ModuleId, chain: Vec<Cond>) {
-        if self.stack.contains(&m) || self.stack.len() >= MAX_DEPTH {
+        if self.left.is_none() || self.stack.contains(&m) || self.stack.len() >= MAX_DEPTH {
             return;
         }
         let host = self.host;
@@ -115,12 +155,15 @@ impl Walk<'_> {
             }
         }
         if !leading.is_empty() && sheet.rules.iter().any(|n| matches!(n, Node::Import(_))) {
-            self.items.push(Item::Layers(leading, chain.clone(), true));
+            self.push(Item::Layers(leading, chain.clone(), true));
         }
         // `@import`s and the files `composes ... from` names (as unconditional imports,
         // observed in esbuild), in source order.
         let mut imports = sheet.imports.iter().peekable();
         for (r, rec) in sheet.records.iter().enumerate() {
+            if self.left.is_none() {
+                break;
+            }
             let r = r as u32;
             let mut next = chain.clone();
             match rec.kind {
@@ -153,13 +196,46 @@ impl Walk<'_> {
                 }
                 Target::External(path) => {
                     let path = crate::graph::split_external(&path).0.to_owned();
-                    self.items.push(Item::External(path, next));
+                    self.push(Item::External(path, next));
                 }
                 Target::Missing => {}
             }
         }
         self.stack.pop();
-        self.items.push(Item::File(m, chain));
+        self.push(Item::File(m, chain));
+    }
+}
+
+/// Condition chains seen per key, for asking whether one of them makes a new chain
+/// [`redundant`]. An exact repeat (the usual duplicate) is a hash lookup; only distinct
+/// chains of the same key are compared one by one.
+struct Seen<K> {
+    exact: rustc_hash::FxHashSet<(K, Vec<Cond>)>,
+    by_key: rustc_hash::FxHashMap<K, Vec<Vec<Cond>>>,
+}
+
+impl<K: std::hash::Hash + Eq + Clone> Seen<K> {
+    fn new() -> Self {
+        Seen {
+            exact: Default::default(),
+            by_key: Default::default(),
+        }
+    }
+
+    /// Whether a seen chain of `key` makes `chain` redundant (`redundant(chain, seen)`).
+    fn covers(&self, key: &K, chain: &[Cond]) -> bool {
+        if self.exact.contains(&(key.clone(), chain.to_vec())) {
+            return true;
+        }
+        self.by_key
+            .get(key)
+            .is_some_and(|cs| cs.iter().any(|c| redundant(chain, c)))
+    }
+
+    fn insert(&mut self, key: K, chain: Vec<Cond>) {
+        if self.exact.insert((key.clone(), chain.clone())) {
+            self.by_key.entry(key).or_default().push(chain);
+        }
     }
 }
 
@@ -184,19 +260,29 @@ fn redundant(earlier: &[Cond], later: &[Cond]) -> bool {
 /// The bundled stylesheet for `roots`. `None` when no root is a stylesheet. `syntax`
 /// (`--minify-syntax`) drops rules an identical later rule under the same conditions repeats,
 /// across files too (see `print`).
-pub fn bundle(host: &dyn Host, roots: &[ModuleId], minify: bool, syntax: bool) -> Option<String> {
+/// Past [`MAX_EXPANSION`] it gives up with the root whose expansion ran out.
+pub fn bundle(
+    host: &dyn Host,
+    roots: &[ModuleId],
+    minify: bool,
+    syntax: bool,
+) -> Result<Option<String>, TooManyImports> {
     let mut w = Walk {
         host,
         minify,
         syntax,
         items: Vec::new(),
         stack: Vec::new(),
+        left: Some(MAX_EXPANSION),
     };
     for &r in roots {
         w.visit(r, Vec::new());
+        if w.left.is_none() {
+            return Err(TooManyImports { root: r });
+        }
     }
     if w.items.is_empty() {
-        return None;
+        return Ok(None);
     }
     // Only the leading `@layer` statements before the first file go above the external
     // imports; later ones stay in place (observed in esbuild).
@@ -210,15 +296,12 @@ pub fn bundle(host: &dyn Host, roots: &[ModuleId], minify: bool, syntax: bool) -
     }
     // Drop earlier duplicates (walking backwards, comparing with the copies kept).
     let mut kept: Vec<Option<Item>> = Vec::with_capacity(w.items.len());
-    let mut later_files: Vec<(ModuleId, Vec<Cond>)> = Vec::new();
-    let mut later_ext: Vec<(String, Vec<Cond>)> = Vec::new();
+    let mut later_files: Seen<ModuleId> = Seen::new();
+    let mut later_ext: Seen<String> = Seen::new();
     for item in w.items.into_iter().rev() {
         match item {
             Item::File(m, chain) => {
-                if later_files
-                    .iter()
-                    .any(|(lm, lc)| *lm == m && redundant(&chain, lc))
-                {
+                if later_files.covers(&m, &chain) {
                     // Keep the layer order the dropped copy established.
                     if chain.iter().any(|c| c.layer.as_deref() == Some("")) {
                         kept.push(None);
@@ -235,18 +318,15 @@ pub fn bundle(host: &dyn Host, roots: &[ModuleId], minify: bool, syntax: bool) -
                     }
                     continue;
                 }
-                later_files.push((m, chain.clone()));
+                later_files.insert(m, chain.clone());
                 kept.push(Some(Item::File(m, chain)));
             }
             Item::External(p, chain) => {
-                if later_ext
-                    .iter()
-                    .any(|(lp, lc)| *lp == p && redundant(&chain, lc))
-                {
+                if later_ext.covers(&p, &chain) {
                     kept.push(None);
                     continue;
                 }
-                later_ext.push((p.clone(), chain.clone()));
+                later_ext.insert(p.clone(), chain.clone());
                 kept.push(Some(Item::External(p, chain)));
             }
             other => kept.push(Some(other)),
@@ -373,7 +453,7 @@ pub fn bundle(host: &dyn Host, roots: &[ModuleId], minify: bool, syntax: bool) -
     if minify && !out.is_empty() {
         out.push('\n');
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 /// The layers an item declares, with its conditions, for comparing the statements left by
@@ -402,15 +482,16 @@ fn signature(host: &dyn Host, item: &Item) -> Option<Signature> {
 fn tidy_layers(host: &dyn Host, items: Vec<Item>) -> Vec<Item> {
     let sigs: Vec<_> = items.iter().map(|i| signature(host, i)).collect();
     let is_stmt = |i: &Item| matches!(i, Item::Layers(_, _, false));
-    let covers = |earlier: &Option<Signature>, later: &Option<Signature>| match (earlier, later) {
-        (Some((en, ec)), Some((ln, lc))) => en == ln && redundant(lc, ec),
-        _ => false,
-    };
     let mut keep = vec![true; items.len()];
-    for i in 0..items.len() {
-        if is_stmt(&items[i]) && (0..i).any(|j| keep[j] && covers(&sigs[j], &sigs[i])) {
+    // The kept items so far, by the layers they declare.
+    let mut earlier: Seen<Vec<String>> = Seen::new();
+    for (i, sig) in sigs.iter().enumerate() {
+        let Some((names, chain)) = sig else { continue };
+        if is_stmt(&items[i]) && earlier.covers(names, chain) {
             keep[i] = false;
+            continue;
         }
+        earlier.insert(names.clone(), chain.clone());
     }
     let mut next: Option<usize> = None;
     for i in (0..items.len()).rev() {
@@ -581,7 +662,45 @@ mod tests {
             ("c.css", parse("@layer c; @import \"http://x/c.css\";")),
             ("p.css", parse("@charset \"utf-8\"; p { color: blue }")),
         ]);
-        bundle(&files, &[0], true, syntax).unwrap_or_default()
+        bundle(&files, &[0], true, syntax)
+            .expect("within budget")
+            .unwrap_or_default()
+    }
+
+    /// `f0.css` .. `f{n-1}.css`, each importing the next twice; the last has one rule.
+    fn doubling(n: usize) -> Files {
+        let parse =
+            |s: &str| super::super::parse(std::sync::Arc::from(s), super::super::NameMode::Global);
+        let names: Vec<&'static str> = (0..n)
+            .map(|i| &*Box::leak(format!("f{i}.css").into_boxed_str()))
+            .collect();
+        Files(
+            (0..n)
+                .map(|i| {
+                    let src = if i + 1 == n {
+                        "a { b: c }".to_owned()
+                    } else {
+                        format!("@import '{0}'; @import '{0}';", names[i + 1])
+                    };
+                    (names[i], parse(&src))
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn doubling_imports_stop_at_the_budget() {
+        // 2^27 copies of the last file without the budget; the walk stops after
+        // `MAX_EXPANSION` items instead.
+        assert_eq!(
+            bundle(&doubling(28), &[0], true, false),
+            Err(TooManyImports { root: 0 })
+        );
+        // Below the budget the copies collapse to one of each file.
+        assert_eq!(
+            bundle(&doubling(12), &[0], true, false),
+            Ok(Some("a{b:c}\n".to_owned()))
+        );
     }
 
     #[test]

@@ -52,7 +52,7 @@ fn is_setter(cx: &Ctx<'_, '_>, f: NodeId) -> bool {
     }
 }
 
-fn is_descriptor(cx: &Ctx<'_, '_>, obj: NodeId) -> bool {
+pub(crate) fn is_descriptor(cx: &Ctx<'_, '_>, obj: NodeId) -> bool {
     let ast = cx.ast();
     let src = cx.src();
     let Some(parent) = parent_skip_parens(ast, cx.file.parents, obj) else {

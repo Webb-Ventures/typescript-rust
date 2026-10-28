@@ -334,9 +334,14 @@ fn keep_alive_serves_several_requests_on_one_connection() {
     assert_eq!(statuses, ["HTTP/1.1 200 OK"; 3]);
 }
 
+/// No watcher: only the creation this test sends. The real watcher also reports the write of
+/// `needs.js`; when that lands after the request and before the client connects, the module
+/// fails again with nothing importing it, the page reloads (a message sent before the
+/// client is there) and the module waits for the page to ask for it again, so the creation
+/// below retries nothing (a Windows CI flake: no message until the connection closed).
 #[test]
 fn creating_a_missing_import_retries_a_module_that_failed_over_http() {
-    let f = start();
+    let f = start_with_watch(false);
     f.app.write(
         "src/needs.js",
         "import { x } from './later.js';\nexport const y = x;\n",
@@ -469,6 +474,49 @@ fn css_modules_scope_class_names_and_export_them() {
     // A plain stylesheet still exports nothing.
     let (_, _, body) = f.get("/src/style.css?import");
     assert!(!body.contains("export"), "{body}");
+}
+
+/// Layers of CSS modules that each compose every file of the next layer: each file is read
+/// and its CSS served once (not once per path to it, which is exponential), and a cycle
+/// stops.
+#[test]
+fn css_module_compositions_include_each_file_once() {
+    let f = start();
+    const LAYERS: usize = 8;
+    const WIDTH: usize = 6;
+    let mut root = String::new();
+    for j in 0..WIDTH {
+        root.push_str(&format!(
+            ".r{j} {{ composes: c from './l0_{j}.module.css' }}\n"
+        ));
+    }
+    f.app.write("src/root.module.css", &root);
+    for layer in 0..LAYERS {
+        for j in 0..WIDTH {
+            let mut css = format!(".c {{ color: #{layer}{j}0 }}\n");
+            if layer + 1 < LAYERS {
+                for k in 0..WIDTH {
+                    css.push_str(&format!(
+                        ".n{k} {{ composes: c from './l{}_{k}.module.css' }}\n",
+                        layer + 1
+                    ));
+                }
+            } else {
+                // Back to the root: a cycle.
+                css.push_str(".back { composes: r0 from './root.module.css' }\n");
+            }
+            f.app.write(&format!("src/l{layer}_{j}.module.css"), &css);
+        }
+    }
+    let (status, _, body) = f.get("/src/root.module.css?import");
+    assert_eq!(status, 200, "{}", &body[..body.len().min(400)]);
+    for layer in 0..LAYERS {
+        for j in 0..WIDTH {
+            let rule = format!("{{ color: #{layer}{j}0 }}");
+            assert_eq!(body.matches(&rule).count(), 1, "{rule} once");
+        }
+    }
+    assert!(body.len() < 64 * 1024, "{} bytes", body.len());
 }
 
 #[test]

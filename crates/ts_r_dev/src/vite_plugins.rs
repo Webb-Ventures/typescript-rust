@@ -401,12 +401,12 @@ fn manifest_key(root: &Path, config: &Path, mode: &str) -> Key {
     b.str(env!("CARGO_PKG_VERSION"));
     b.str(mode);
     b.key_field(&Key::of(SIDECAR.as_bytes()));
-    b.str(
-        &config
-            .file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_default(),
-    );
+    // The config's path, root-relative when it is inside the root: two configs with the same
+    // name and text in different directories (`--config configs/a/vite.config.mjs`) see
+    // other `import.meta.dirname`s and relative imports.
+    b.str(&ts_r_hmr::paths::id(
+        config.strip_prefix(root).unwrap_or(config),
+    ));
     // The config and the plugin code it imports: their output is cached under this key.
     for f in config_files(config).into_iter().chain(
         ["package.json"]
@@ -1196,6 +1196,16 @@ mod tests {
         assert_eq!(manifest_key(&dir, &config, "development"), before);
         std::fs::write(dir.join("word.js"), "export const word = 'new';\n").expect("write");
         assert_ne!(manifest_key(&dir, &config, "development"), before);
+        // The same file name and text in another directory is another config.
+        let text = "export default { define: { DIR: JSON.stringify(import.meta.dirname) } };\n";
+        for d in ["configs/a", "configs/b"] {
+            std::fs::create_dir_all(dir.join(d)).expect("dir");
+            std::fs::write(dir.join(d).join("vite.config.mjs"), text).expect("write");
+        }
+        assert_ne!(
+            manifest_key(&dir, &dir.join("configs/a/vite.config.mjs"), "development"),
+            manifest_key(&dir, &dir.join("configs/b/vite.config.mjs"), "development")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

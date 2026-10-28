@@ -48,7 +48,7 @@ use crate::checker::{Ck, Loc};
 use crate::diag::dg;
 use crate::nodes::{fn_parts, key_text};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Kind {
     Function,
     Method,
@@ -114,8 +114,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 );
             }
         }
+        let next_same = next_same_member(&items);
         if !ambient_container {
-            self.check_implementations_followed_by_overloads(file, &items);
+            self.check_implementations_followed_by_overloads(file, &items, &next_same);
         }
         let mut i = 0;
         while i < items.len() {
@@ -155,18 +156,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             // the same member still makes the group's end an error (TS2516 when abstract).
             let last = group[group.len() - 1];
             let last_abstract = last.modifiers.contains(Modifiers::ABSTRACT);
-            let continued_later = !ambient
-                && items[j..]
-                    .iter()
-                    .flatten()
-                    .any(|d| d.name == a.name && d.kind == a.kind && d.is_static == a.is_static);
+            // Whether a declaration of the same member comes later (`j - 1` is the group's
+            // last declaration).
+            let declared_later = next_same[j - 1].is_some();
+            let continued_later = !ambient && declared_later;
             let abstract_group = (last_abstract || last.optional) && !continued_later;
             // A recovered body ends the member's declarations without an error.
-            let recovered_end = last.recovered_body
-                && !items[j..]
-                    .iter()
-                    .flatten()
-                    .any(|d| d.name == a.name && d.kind == a.kind && d.is_static == a.is_static);
+            let recovered_end = last.recovered_body && !declared_later;
             let mut implementation: Option<&FnDecl> = None;
             match next.filter(|_| !recovered_end) {
                 Some(b)
@@ -264,17 +260,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         &mut self,
         file: FileId,
         items: &[Option<FnDecl>],
+        next_same: &[Option<usize>],
     ) {
         for (k, a) in items.iter().enumerate() {
             let Some(a) = a else { continue };
             if !a.has_body || a.modifiers.contains(Modifiers::DECLARE) {
                 continue;
             }
-            let Some(b) = items[k + 1..]
-                .iter()
-                .flatten()
-                .find(|b| b.name == a.name && b.kind == a.kind && b.is_static == a.is_static)
-            else {
+            let Some(b) = next_same[k].and_then(|n| items[n].as_ref()) else {
                 continue;
             };
             if b.has_body || b.modifiers.contains(Modifiers::DECLARE) {
@@ -840,6 +833,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         let sr = self.return_type_of(s);
         skip(self, sr) || self.is_assignable(sr, tr)
     }
+}
+
+/// For each declaration, the index of the next declaration of the same member (name, kind
+/// and staticness) in the list: one backward pass, so no declaration scans the rest.
+fn next_same_member(items: &[Option<FnDecl>]) -> Vec<Option<usize>> {
+    let mut next = vec![None; items.len()];
+    let mut seen: FxHashMap<(&str, Kind, bool), usize> = FxHashMap::default();
+    for (k, d) in items.iter().enumerate().rev() {
+        if let Some(d) = d {
+            next[k] = seen.insert((d.name.as_str(), d.kind, d.is_static), k);
+        }
+    }
+    next
 }
 
 /// Whether `text` is only whitespace and comments.

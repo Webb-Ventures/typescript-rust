@@ -71,7 +71,7 @@ fn directive(text: &str) -> Option<(&'static str, &str)> {
 
 /// Approximate grapheme count: joiners, variation selectors, skin tones and combining
 /// marks extend the previous character.
-fn graphemes(s: &str) -> usize {
+pub(crate) fn graphemes(s: &str) -> usize {
     let mut n = 0;
     let mut join_next = false;
     for c in s.chars() {
@@ -80,8 +80,7 @@ fn graphemes(s: &str) -> usize {
             join_next = true;
             continue;
         }
-        let extends =
-            matches!(u, 0x300..=0x36f | 0xfe00..=0xfe0f | 0x1f3fb..=0x1f3ff | 0xe0020..=0xe007f);
+        let extends = matches!(u, 0x300..=0x36f | 0xfe00..=0xfe0f | 0x1f3fb..=0x1f3ff | 0xe0020..=0xe007f | 0xe0100..=0xe01ef);
         if !extends && !join_next {
             n += 1;
         }

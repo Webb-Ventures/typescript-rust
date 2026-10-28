@@ -7,15 +7,33 @@ use serde_json::Value;
 
 use crate::rule::{Category, Preset, Rule, RuleDef, RuleMeta};
 
+mod accessor_pairs;
+mod array_callback_return;
+mod arrow_body_style;
+mod block_scoped_var;
+mod camelcase;
+mod capitalized_comments;
+mod class_methods_use_this;
+mod complexity;
+mod consistent_return;
+mod consistent_this;
 mod constructor_super;
+mod curly;
 mod default_case;
 mod default_case_last;
 mod default_param_last;
+mod dot_notation;
 mod eqeqeq;
 mod for_direction;
+mod func_name_matching;
+mod func_names;
+mod func_style;
 mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
+mod id_denylist;
+mod id_length;
+mod id_match;
 mod import_consistent_type_specifier_style;
 mod import_default;
 mod import_dynamic_import_chunkname;
@@ -62,6 +80,7 @@ mod import_order;
 mod import_prefer_default_export;
 mod import_unambiguous;
 pub(crate) mod import_util;
+mod init_declarations;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_indentation;
@@ -136,9 +155,15 @@ mod jsdoc_ts_no_unnecessary_template_expression;
 mod jsdoc_ts_prefer_function_type;
 mod jsdoc_type_formatting;
 mod jsdoc_valid_types;
+mod logical_assignment_operators;
+mod max_classes_per_file;
 mod max_depth;
+mod max_lines;
+mod max_lines_per_function;
 mod max_nested_callbacks;
 mod max_params;
+mod max_statements;
+mod new_cap;
 mod no_alert;
 mod no_array_constructor;
 mod no_async_promise_executor;
@@ -164,6 +189,7 @@ mod no_dupe_class_members;
 mod no_dupe_else_if;
 mod no_dupe_keys;
 mod no_duplicate_case;
+mod no_duplicate_imports;
 mod no_else_return;
 mod no_empty;
 mod no_empty_character_class;
@@ -176,18 +202,27 @@ mod no_ex_assign;
 mod no_extend_native;
 mod no_extra_bind;
 mod no_extra_boolean_cast;
+mod no_extra_label;
 mod no_fallthrough;
 mod no_func_assign;
 mod no_global_assign;
+mod no_implicit_coercion;
+mod no_implicit_globals;
+mod no_implied_eval;
 mod no_import_assign;
+mod no_inline_comments;
+mod no_inner_declarations;
 mod no_invalid_regexp;
+mod no_invalid_this;
 mod no_irregular_whitespace;
 mod no_iterator;
 mod no_label_var;
 mod no_labels;
 mod no_lone_blocks;
 mod no_lonely_if;
+mod no_loop_func;
 mod no_loss_of_precision;
+mod no_magic_numbers;
 mod no_misleading_character_class;
 mod no_multi_assign;
 mod no_multi_str;
@@ -204,13 +239,16 @@ mod no_obj_calls;
 mod no_object_constructor;
 mod no_octal;
 mod no_octal_escape;
+mod no_param_reassign;
 mod no_plusplus;
 mod no_promise_executor_return;
 mod no_proto;
 mod no_prototype_builtins;
 mod no_redeclare;
 mod no_regex_spaces;
+mod no_restricted_exports;
 mod no_restricted_globals;
+mod no_restricted_imports;
 mod no_restricted_properties;
 mod no_restricted_syntax;
 mod no_return_assign;
@@ -219,17 +257,23 @@ mod no_self_assign;
 mod no_self_compare;
 mod no_sequences;
 mod no_setter_return;
+mod no_shadow;
 mod no_shadow_restricted_names;
 mod no_sparse_arrays;
 mod no_template_curly_in_string;
+mod no_ternary;
 mod no_this_before_super;
 mod no_throw_literal;
 mod no_unassigned_vars;
 mod no_undef;
 mod no_undef_init;
+mod no_undefined;
+mod no_underscore_dangle;
 mod no_unexpected_multiline;
+mod no_unmodified_loop_condition;
 mod no_unneeded_ternary;
 mod no_unreachable;
+mod no_unreachable_loop;
 mod no_unsafe_finally;
 mod no_unsafe_negation;
 mod no_unsafe_optional_chaining;
@@ -237,6 +281,7 @@ mod no_unused_expressions;
 mod no_unused_labels;
 mod no_unused_private_class_members;
 mod no_unused_vars;
+mod no_use_before_define;
 mod no_useless_assignment;
 mod no_useless_backreference;
 mod no_useless_call;
@@ -246,17 +291,37 @@ mod no_useless_concat;
 mod no_useless_constructor;
 mod no_useless_escape;
 mod no_useless_rename;
+mod no_useless_return;
 mod no_var;
 mod no_void;
+mod no_warning_comments;
 mod no_with;
+mod object_shorthand;
+mod one_var;
+mod operator_assignment;
+mod prefer_arrow_callback;
 mod prefer_const;
+mod prefer_destructuring;
+mod prefer_exponentiation_operator;
+mod prefer_named_capture_group;
 mod prefer_numeric_literals;
 mod prefer_object_has_own;
+mod prefer_object_spread;
+mod prefer_promise_reject_errors;
+mod prefer_regex_literals;
 mod prefer_rest_params;
 mod prefer_spread;
+mod prefer_template;
 mod preserve_caught_error;
 mod radix;
+mod require_atomic_updates;
+mod require_await;
+mod require_unicode_regexp;
 mod require_yield;
+mod sort_imports;
+mod sort_keys;
+mod sort_vars;
+mod strict;
 mod symbol_description;
 mod this_binding;
 mod ts_adjacent_overload_signatures;
@@ -265,12 +330,23 @@ mod ts_await_thenable;
 mod ts_ban_ts_comment;
 mod ts_ban_tslint_comment;
 mod ts_class_literal_property_style;
+mod ts_class_methods_use_this;
 mod ts_consistent_generic_constructors;
 mod ts_consistent_indexed_object_style;
+mod ts_consistent_return;
 mod ts_consistent_type_assertions;
 mod ts_consistent_type_definitions;
+mod ts_consistent_type_exports;
 mod ts_consistent_type_imports;
+mod ts_default_param_last;
 mod ts_dot_notation;
+mod ts_explicit_function_return_type;
+mod ts_explicit_member_accessibility;
+mod ts_explicit_module_boundary_types;
+mod ts_init_declarations;
+mod ts_max_params;
+mod ts_member_ordering;
+mod ts_method_signature_style;
 mod ts_no_array_constructor;
 mod ts_no_array_delete;
 mod ts_no_base_to_string;
@@ -290,8 +366,11 @@ mod ts_no_floating_promises;
 mod ts_no_for_in_array;
 mod ts_no_generated_empty_object_type;
 mod ts_no_implied_eval;
+mod ts_no_import_type_side_effects;
 mod ts_no_inferrable_types;
+mod ts_no_invalid_this;
 mod ts_no_invalid_void_type;
+mod ts_no_magic_numbers;
 mod ts_no_meaningless_void_operator;
 mod ts_no_misused_new;
 mod ts_no_misused_promises;
@@ -304,9 +383,13 @@ mod ts_no_non_null_assertion;
 mod ts_no_redeclare;
 mod ts_no_redundant_type_constituents;
 mod ts_no_require_imports;
+mod ts_no_restricted_types;
+mod ts_no_shadow;
 mod ts_no_this_alias;
 mod ts_no_unnecessary_boolean_literal_compare;
 mod ts_no_unnecessary_condition;
+mod ts_no_unnecessary_parameter_property_assignment;
+mod ts_no_unnecessary_qualifier;
 mod ts_no_unnecessary_template_expression;
 mod ts_no_unnecessary_type_arguments;
 mod ts_no_unnecessary_type_assertion;
@@ -322,15 +405,22 @@ mod ts_no_unsafe_enum_comparison;
 mod ts_no_unsafe_function_type;
 mod ts_no_unsafe_member_access;
 mod ts_no_unsafe_return;
+mod ts_no_unsafe_type_assertion;
 mod ts_no_unsafe_unary_minus;
 mod ts_no_unused_expressions;
+mod ts_no_unused_private_class_members;
 mod ts_no_unused_vars;
+mod ts_no_use_before_define;
 mod ts_no_useless_constructor;
 mod ts_no_useless_default_assignment;
+mod ts_no_useless_empty_export;
 mod ts_no_wrapper_object_types;
 mod ts_non_nullable_type_assertion_style;
 mod ts_only_throw_error;
+mod ts_parameter_properties;
 mod ts_prefer_as_const;
+mod ts_prefer_destructuring;
+mod ts_prefer_enum_initializers;
 mod ts_prefer_find;
 mod ts_prefer_for_of;
 mod ts_prefer_function_type;
@@ -340,15 +430,20 @@ mod ts_prefer_namespace_keyword;
 mod ts_prefer_nullish_coalescing;
 mod ts_prefer_optional_chain;
 mod ts_prefer_promise_reject_errors;
+mod ts_prefer_readonly;
 mod ts_prefer_reduce_type_parameter;
 mod ts_prefer_regexp_exec;
 mod ts_prefer_return_this_type;
 mod ts_prefer_string_starts_ends_with;
+mod ts_promise_function_async;
 mod ts_related_getter_setter_pairs;
+mod ts_require_array_sort_compare;
 mod ts_require_await;
 mod ts_restrict_plus_operands;
 mod ts_restrict_template_expressions;
 mod ts_return_await;
+mod ts_strict_boolean_expressions;
+mod ts_strict_void_return;
 mod ts_switch_exhaustiveness_check;
 mod ts_triple_slash_reference;
 mod ts_unbound_method;
@@ -741,6 +836,7 @@ mod unicorn_url_type;
 mod unicorn_util;
 mod use_isnan;
 mod valid_typeof;
+mod vars_on_top;
 mod yoda;
 
 /// Everything a rule module usually needs: `use super::prelude::*;`.
@@ -769,15 +865,33 @@ pub(crate) mod prelude {
 
 /// Every built-in rule.
 pub static ALL: &[&RuleDef] = &[
+    &accessor_pairs::RULE,
+    &arrow_body_style::RULE,
+    &consistent_return::RULE,
+    &consistent_this::RULE,
+    &block_scoped_var::RULE,
+    &camelcase::RULE,
+    &capitalized_comments::RULE,
+    &array_callback_return::RULE,
+    &class_methods_use_this::RULE,
+    &complexity::RULE,
     &constructor_super::RULE,
+    &curly::RULE,
     &default_case::RULE,
     &default_case_last::RULE,
     &default_param_last::RULE,
+    &dot_notation::RULE,
     &eqeqeq::RULE,
     &for_direction::RULE,
+    &func_name_matching::RULE,
+    &func_names::RULE,
+    &func_style::RULE,
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &id_denylist::RULE,
+    &id_length::RULE,
+    &id_match::RULE,
     &unicorn_iteration_fallback_style::RULE,
     &unicorn_no_invalid_file_input_accept::RULE,
     &unicorn_no_manually_wrapped_comments::RULE,
@@ -833,6 +947,7 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_named_export::RULE,
     &import_no_relative_parent_imports::RULE,
     &import_unambiguous::RULE,
+    &init_declarations::RULE,
     &import_no_extraneous_dependencies::RULE,
     &import_order::RULE,
     &import_no_unused_modules::RULE,
@@ -861,8 +976,12 @@ pub static ALL: &[&RuleDef] = &[
     &import_named::RULE,
     &import_no_unresolved::RULE,
     &max_depth::RULE,
+    &max_lines::RULE,
+    &max_lines_per_function::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,
+    &max_statements::RULE,
+    &new_cap::RULE,
     &no_alert::RULE,
     &no_array_constructor::RULE,
     &no_async_promise_executor::RULE,
@@ -889,6 +1008,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_dupe_else_if::RULE,
     &no_dupe_keys::RULE,
     &no_duplicate_case::RULE,
+    &no_duplicate_imports::RULE,
     &no_else_return::RULE,
     &no_empty::RULE,
     &no_empty_character_class::RULE,
@@ -901,18 +1021,27 @@ pub static ALL: &[&RuleDef] = &[
     &no_extend_native::RULE,
     &no_extra_bind::RULE,
     &no_extra_boolean_cast::RULE,
+    &no_extra_label::RULE,
     &no_fallthrough::RULE,
     &no_func_assign::RULE,
     &no_global_assign::RULE,
+    &no_implicit_coercion::RULE,
+    &no_implicit_globals::RULE,
+    &no_implied_eval::RULE,
     &no_import_assign::RULE,
+    &no_inline_comments::RULE,
+    &no_inner_declarations::RULE,
     &no_invalid_regexp::RULE,
+    &no_invalid_this::RULE,
     &no_irregular_whitespace::RULE,
     &no_iterator::RULE,
     &no_label_var::RULE,
     &no_labels::RULE,
     &no_lone_blocks::RULE,
     &no_lonely_if::RULE,
+    &no_loop_func::RULE,
     &no_loss_of_precision::RULE,
+    &no_magic_numbers::RULE,
     &no_misleading_character_class::RULE,
     &no_multi_assign::RULE,
     &no_multi_str::RULE,
@@ -929,13 +1058,16 @@ pub static ALL: &[&RuleDef] = &[
     &no_object_constructor::RULE,
     &no_octal::RULE,
     &no_octal_escape::RULE,
+    &no_param_reassign::RULE,
     &no_plusplus::RULE,
     &no_promise_executor_return::RULE,
     &no_proto::RULE,
     &no_prototype_builtins::RULE,
     &no_redeclare::RULE,
     &no_regex_spaces::RULE,
+    &no_restricted_exports::RULE,
     &no_restricted_globals::RULE,
+    &no_restricted_imports::RULE,
     &no_restricted_properties::RULE,
     &no_return_assign::RULE,
     &no_script_url::RULE,
@@ -943,17 +1075,23 @@ pub static ALL: &[&RuleDef] = &[
     &no_self_compare::RULE,
     &no_sequences::RULE,
     &no_setter_return::RULE,
+    &no_shadow::RULE,
     &no_shadow_restricted_names::RULE,
     &no_sparse_arrays::RULE,
     &no_template_curly_in_string::RULE,
+    &no_ternary::RULE,
     &no_this_before_super::RULE,
     &no_throw_literal::RULE,
     &no_unassigned_vars::RULE,
     &no_undef::RULE,
     &no_undef_init::RULE,
+    &no_undefined::RULE,
+    &no_underscore_dangle::RULE,
     &no_unexpected_multiline::RULE,
+    &no_unmodified_loop_condition::RULE,
     &no_unneeded_ternary::RULE,
     &no_unreachable::RULE,
+    &no_unreachable_loop::RULE,
     &no_unsafe_finally::RULE,
     &no_unsafe_negation::RULE,
     &no_unsafe_optional_chaining::RULE,
@@ -961,6 +1099,7 @@ pub static ALL: &[&RuleDef] = &[
     &no_unused_labels::RULE,
     &no_unused_private_class_members::RULE,
     &no_unused_vars::RULE,
+    &no_use_before_define::RULE,
     &no_useless_assignment::RULE,
     &no_useless_backreference::RULE,
     &no_useless_call::RULE,
@@ -970,29 +1109,60 @@ pub static ALL: &[&RuleDef] = &[
     &no_useless_constructor::RULE,
     &no_useless_escape::RULE,
     &no_useless_rename::RULE,
+    &no_useless_return::RULE,
     &no_var::RULE,
     &no_void::RULE,
+    &no_warning_comments::RULE,
     &no_with::RULE,
+    &object_shorthand::RULE,
+    &operator_assignment::RULE,
+    &one_var::RULE,
+    &prefer_arrow_callback::RULE,
     &prefer_const::RULE,
+    &prefer_exponentiation_operator::RULE,
+    &prefer_named_capture_group::RULE,
+    &prefer_destructuring::RULE,
     &prefer_numeric_literals::RULE,
     &prefer_object_has_own::RULE,
+    &prefer_object_spread::RULE,
+    &prefer_promise_reject_errors::RULE,
+    &prefer_regex_literals::RULE,
     &prefer_rest_params::RULE,
     &prefer_spread::RULE,
+    &prefer_template::RULE,
     &preserve_caught_error::RULE,
     &radix::RULE,
+    &require_atomic_updates::RULE,
+    &require_await::RULE,
+    &require_unicode_regexp::RULE,
     &require_yield::RULE,
+    &sort_imports::RULE,
+    &sort_keys::RULE,
+    &sort_vars::RULE,
+    &strict::RULE,
     &ts_array_type::RULE,
     &ts_adjacent_overload_signatures::RULE,
     &ts_await_thenable::RULE,
     &ts_ban_ts_comment::RULE,
     &ts_consistent_generic_constructors::RULE,
     &ts_consistent_indexed_object_style::RULE,
+    &ts_consistent_return::RULE,
     &ts_consistent_type_assertions::RULE,
     &ts_ban_tslint_comment::RULE,
     &ts_class_literal_property_style::RULE,
+    &ts_class_methods_use_this::RULE,
     &ts_consistent_type_definitions::RULE,
+    &ts_consistent_type_exports::RULE,
     &ts_consistent_type_imports::RULE,
+    &ts_default_param_last::RULE,
     &ts_dot_notation::RULE,
+    &ts_explicit_function_return_type::RULE,
+    &ts_explicit_member_accessibility::RULE,
+    &ts_explicit_module_boundary_types::RULE,
+    &ts_init_declarations::RULE,
+    &ts_max_params::RULE,
+    &ts_member_ordering::RULE,
+    &ts_method_signature_style::RULE,
     &ts_no_array_constructor::RULE,
     &ts_no_base_to_string::RULE,
     &ts_no_array_delete::RULE,
@@ -1012,8 +1182,11 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_for_in_array::RULE,
     &ts_no_generated_empty_object_type::RULE,
     &ts_no_implied_eval::RULE,
+    &ts_no_import_type_side_effects::RULE,
     &ts_no_inferrable_types::RULE,
+    &ts_no_invalid_this::RULE,
     &ts_no_invalid_void_type::RULE,
+    &ts_no_magic_numbers::RULE,
     &ts_no_meaningless_void_operator::RULE,
     &ts_no_misused_new::RULE,
     &ts_no_misused_promises::RULE,
@@ -1026,9 +1199,13 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_redeclare::RULE,
     &ts_no_redundant_type_constituents::RULE,
     &ts_no_require_imports::RULE,
+    &ts_no_restricted_types::RULE,
+    &ts_no_shadow::RULE,
     &ts_no_this_alias::RULE,
     &ts_no_unnecessary_boolean_literal_compare::RULE,
     &ts_no_unnecessary_condition::RULE,
+    &ts_no_unnecessary_parameter_property_assignment::RULE,
+    &ts_no_unnecessary_qualifier::RULE,
     &ts_no_unnecessary_type_assertion::RULE,
     &ts_no_unnecessary_template_expression::RULE,
     &ts_no_unnecessary_type_arguments::RULE,
@@ -1044,15 +1221,22 @@ pub static ALL: &[&RuleDef] = &[
     &ts_no_unsafe_function_type::RULE,
     &ts_no_unsafe_member_access::RULE,
     &ts_no_unsafe_return::RULE,
+    &ts_no_unsafe_type_assertion::RULE,
     &ts_no_unsafe_unary_minus::RULE,
     &ts_no_unused_expressions::RULE,
+    &ts_no_unused_private_class_members::RULE,
     &ts_no_unused_vars::RULE,
+    &ts_no_use_before_define::RULE,
     &ts_no_useless_constructor::RULE,
     &ts_no_useless_default_assignment::RULE,
+    &ts_no_useless_empty_export::RULE,
     &ts_no_wrapper_object_types::RULE,
     &ts_non_nullable_type_assertion_style::RULE,
     &ts_only_throw_error::RULE,
+    &ts_parameter_properties::RULE,
     &ts_prefer_as_const::RULE,
+    &ts_prefer_destructuring::RULE,
+    &ts_prefer_enum_initializers::RULE,
     &ts_prefer_find::RULE,
     &ts_prefer_function_type::RULE,
     &ts_prefer_for_of::RULE,
@@ -1062,6 +1246,7 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_nullish_coalescing::RULE,
     &ts_prefer_optional_chain::RULE,
     &ts_prefer_promise_reject_errors::RULE,
+    &ts_prefer_readonly::RULE,
     &ts_require_await::RULE,
     &ts_restrict_plus_operands::RULE,
     &ts_restrict_template_expressions::RULE,
@@ -1070,8 +1255,12 @@ pub static ALL: &[&RuleDef] = &[
     &ts_prefer_regexp_exec::RULE,
     &ts_prefer_return_this_type::RULE,
     &ts_prefer_string_starts_ends_with::RULE,
+    &ts_promise_function_async::RULE,
     &ts_related_getter_setter_pairs::RULE,
+    &ts_require_array_sort_compare::RULE,
     &ts_return_await::RULE,
+    &ts_strict_boolean_expressions::RULE,
+    &ts_strict_void_return::RULE,
     &ts_triple_slash_reference::RULE,
     &ts_unbound_method::RULE,
     &ts_unified_signatures::RULE,
@@ -1079,6 +1268,7 @@ pub static ALL: &[&RuleDef] = &[
     &symbol_description::RULE,
     &use_isnan::RULE,
     &valid_typeof::RULE,
+    &vars_on_top::RULE,
     &yoda::RULE,
     &jsdoc_check_access::RULE,
     &jsdoc_check_alignment::RULE,
@@ -1138,6 +1328,8 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_ts_prefer_function_type::RULE,
     &jsdoc_type_formatting::RULE,
     &jsdoc_valid_types::RULE,
+    &logical_assignment_operators::RULE,
+    &max_classes_per_file::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,

@@ -46,6 +46,11 @@ pub(crate) struct Tx<'a> {
     /// Value bindings by name (built on the first namespace body; see
     /// `namespace::param_name`).
     pub value_bindings_by_name: Option<FxHashMap<Atom, Vec<BindingId>>>,
+    /// Statement list → the statements in it that declare each name, built on first use by
+    /// `namespace::member_is_value` (import alias targets are resolved once per alias).
+    pub decl_index: std::cell::RefCell<FxHashMap<NodeList, crate::namespace::DeclIndex>>,
+    /// `const` declaring identifier → its folded value (`enums::const_value`).
+    pub const_values: std::cell::RefCell<FxHashMap<NodeId, Option<crate::enums::Value>>>,
     /// Evaluated enums of this file, by binding.
     pub enums: FxHashMap<BindingId, EnumInfo>,
     /// Whether a member receiver chain starts at an import binding.
@@ -80,6 +85,9 @@ pub(crate) struct Tx<'a> {
     /// Generated `accessor` storage names (`_a`, `_b`, ...) when private names are lowered:
     /// counted across the file, apart from temporaries (observed).
     pub storage_count: u32,
+    /// A construct the TypeScript transform cannot lower correctly yet, even at a target
+    /// that has its syntax: the file is refused (TSR2003, `TransformResult::unlowered`).
+    pub refused: Option<(Span, &'static str)>,
     /// `_c = () => { ... }` capturing the computed keys of the class being transformed
     /// that use `this`/`super` (`class::class_body` places it), and statements for a class
     /// declaration to go before it.
@@ -87,6 +95,8 @@ pub(crate) struct Tx<'a> {
     pub class_pre_stmts: Vec<NodeId>,
     /// The same names from ES2022, counted per class (`class::class_body` saves it).
     pub class_storage_count: u32,
+    /// The `accessor` storage names the class being transformed has made so far.
+    pub class_storage_names: Vec<Atom>,
     /// Private names written in the source (`#x`), for unique `accessor` storage names;
     /// collected on first use from the nodes the parser made (`source_nodes`).
     pub source_private_names: Option<rustc_hash::FxHashSet<Atom>>,
@@ -179,6 +189,8 @@ pub(crate) fn run(
         taken: FxHashSet::default(),
         ns_stack: Vec::new(),
         value_bindings_by_name: None,
+        decl_index: Default::default(),
+        const_values: Default::default(),
         enums: FxHashMap::default(),
         enum_import_roots: FxHashMap::default(),
         ns_declared: FxHashSet::default(),
@@ -193,7 +205,9 @@ pub(crate) fn run(
         decorator_storages: Vec::new(),
         static_descriptor_fns: Vec::new(),
         storage_count: 0,
+        refused: None,
         class_storage_count: 0,
+        class_storage_names: Vec::new(),
         class_key_capture: None,
         class_pre_stmts: Vec::new(),
         source_private_names: None,
@@ -232,7 +246,9 @@ pub(crate) fn run(
     }
     crate::cjs::finish_helper_import(&mut tx);
     drop_marker_for_helper_import(&mut tx);
+    let refused = tx.refused.take();
     let unlowered: Vec<(Span, &'static str)> = using
+        .or(refused)
         .or_else(|| crate::downlevel::unlowered(&*tx.ast, src, opts))
         .into_iter()
         .collect();
@@ -695,6 +711,11 @@ impl<'a> Tx<'a> {
         // No new statement list: an enum or namespace here is still in the enclosing one's
         // scope (`label: enum E {}` at the top writes `var E;`, observed).
         self.stmt(id, &mut out);
+        self.place_sub_stmt(id, out);
+    }
+
+    /// Puts the statements `id` became (`out`) in its single-statement slot.
+    fn place_sub_stmt(&mut self, id: NodeId, mut out: Vec<NodeId>) {
         match out.len() {
             1 if out[0] == id => {}
             1 => replace(self.ast, id, out[0]),
@@ -958,7 +979,27 @@ impl<'a> Tx<'a> {
                 out.push(id);
             }
             Node::Labeled { body, .. } => {
-                self.sub_stmt(body);
+                let mut inner = Vec::new();
+                self.stmt(body, &mut inner);
+                // `outer: for (var x = 0;;)` exporting `x` from CommonJS: the declaration and
+                // its export move before the label, which stays on the loop (a block in
+                // between would make `continue outer` a SyntaxError).
+                if inner.len() > 1
+                    && inner.last() == Some(&body)
+                    && matches!(
+                        self.kind(body),
+                        NodeKind::For
+                            | NodeKind::ForIn
+                            | NodeKind::ForOf
+                            | NodeKind::While
+                            | NodeKind::DoWhile
+                            | NodeKind::Labeled
+                    )
+                {
+                    out.extend(&inner[..inner.len() - 1]);
+                } else {
+                    self.place_sub_stmt(body, inner);
+                }
                 out.push(id);
             }
             Node::Switch { disc, cases } => {
@@ -2023,47 +2064,58 @@ impl<'a> Tx<'a> {
         if self.sc.has_jsx {
             crate::jsx::read_pragmas(self);
         }
-        let mut released = vec![false; aliases.len()];
-        loop {
-            let mut changed = false;
-            for (i, &id) in aliases.iter().enumerate() {
-                if released[i] {
-                    continue;
-                }
-                let Node::ImportEquals {
-                    modifiers,
-                    type_only,
-                    name,
-                    module_ref,
-                } = self.n(id)
-                else {
-                    continue;
-                };
-                let exported = modifiers.contains(Modifiers::EXPORT);
-                let dropped = type_only
-                    || (!exported && !self.binding_used(name) && !self.jsx_needs(name))
-                    || (exported && self.alias_of_type(id, module_ref));
-                if !dropped {
-                    continue;
-                }
-                released[i] = true;
-                let mut root = module_ref;
-                while let Node::QualifiedName { left, .. } = self.n(root) {
-                    root = left;
-                }
-                if let Some(b) = self.sc.binding_of_ref(root)
-                    && matches!(
-                        self.sc.binding(b).kind,
-                        crate::scope::BindingKind::Import | crate::scope::BindingKind::ImportEquals
-                    )
-                {
-                    let binding = &mut self.sc.bindings[b as usize];
-                    binding.refs = binding.refs.saturating_sub(1);
-                    changed = true;
-                }
+        // A dropped alias releases its target's reference, which may drop the alias it
+        // names in turn (`import A1 = A0;` with `A1` unused drops `A0`): a worklist, so a
+        // chain is released in one pass whatever its order.
+        let mut by_binding: FxHashMap<BindingId, usize> = FxHashMap::default();
+        for (i, &id) in aliases.iter().enumerate() {
+            if let Node::ImportEquals { name, .. } = self.n(id)
+                && let Some(&b) = self.sc.decl_of.get(&name)
+            {
+                by_binding.insert(b, i);
             }
-            if !changed {
-                break;
+        }
+        let mut released = vec![false; aliases.len()];
+        let mut work: Vec<usize> = (0..aliases.len()).rev().collect();
+        while let Some(i) = work.pop() {
+            if released[i] {
+                continue;
+            }
+            let id = aliases[i];
+            let Node::ImportEquals {
+                modifiers,
+                type_only,
+                name,
+                module_ref,
+            } = self.n(id)
+            else {
+                continue;
+            };
+            let exported = modifiers.contains(Modifiers::EXPORT);
+            let dropped = type_only
+                || (!exported && !self.binding_used(name) && !self.jsx_needs(name))
+                || (exported && self.alias_of_type(id, module_ref));
+            if !dropped {
+                continue;
+            }
+            released[i] = true;
+            let mut root = module_ref;
+            while let Node::QualifiedName { left, .. } = self.n(root) {
+                root = left;
+            }
+            if let Some(b) = self.sc.binding_of_ref(root)
+                && matches!(
+                    self.sc.binding(b).kind,
+                    crate::scope::BindingKind::Import | crate::scope::BindingKind::ImportEquals
+                )
+            {
+                let binding = &mut self.sc.bindings[b as usize];
+                binding.refs = binding.refs.saturating_sub(1);
+                if let Some(&j) = by_binding.get(&b)
+                    && !released[j]
+                {
+                    work.push(j);
+                }
             }
         }
     }

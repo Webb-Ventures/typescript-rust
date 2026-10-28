@@ -97,7 +97,8 @@ from the documented plugin API (no Vite code).
   / `@vitejs/plugin-react*` only run their `config` hooks; JSX options from the resolved config
   (`oxc.jsx.importSource`/`runtime`, `esbuild.jsx*`) configure `TsTransform`, and Fast Refresh
   is ours.
-- **Manifest cache** (`ts_r_cache` namespace `dev-plugins`, key: config and the local files
+- **Manifest cache** (`ts_r_cache` namespace `dev-plugins`, key: the config's root-relative
+  path (so `--config a/vite.config.mjs` and `b/vite.config.mjs` with the same text differ), the config and the local files
   it imports (relative specifiers, transitively) + `package.json` + lockfile contents +
   sidecar script; plugin transforms are cached under the same key): plugin names, hooks
   present, JSX options. No hooks left
@@ -142,7 +143,8 @@ from the documented plugin API (no Vite code).
 `GuardTransform` wraps the TS transform: files importing `@ts-r.dev/guard` are expanded by
 `ts_r_guard::Expander` first, validators inlined per file exactly as in `ts-r-run` (record
 0007); guard errors (TSR1501, ...) go to the error overlay with their location. Cache id
-suffix `+ts-r-guard/1/<explain>/<max-depth>/<max-validator-kb>` plus `/<Type>=<module>#<export>` per refinement. `Transform::deps` reports the program's other sources (the files
+suffix `+ts-r-guard/1/<explain>/<max-depth>/<max-validator-kb>` plus `/<Type>=<module>#<export>` per refinement. `Transform::deps` reports the TS transform's own deps first (the file's tsconfig
+chain, `ts_r_transform::hmr`), then the program's other sources (the files
 the validators were generated from), so editing only a type re-emits and hot-updates every
 module that parses it. The expansion `deps` computes is memoized per path and source hash and
 handed to the `transform` that follows (one expansion per change); when the source is

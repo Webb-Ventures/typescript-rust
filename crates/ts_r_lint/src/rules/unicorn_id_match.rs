@@ -31,7 +31,7 @@ pub static RULE: RuleDef = RuleDef {
 };
 
 #[derive(Debug)]
-struct IdMatch {
+pub(crate) struct IdMatch {
     pattern: String,
     regex: RegexOpt,
     class_fields: bool,
@@ -93,13 +93,54 @@ fn inside_object_pattern(t: &EsTree<'_>, n: u32) -> bool {
 }
 
 /// A reference to a configured (or `/* global */`) variable not declared in the file.
-fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_global_reference(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let sem = cx.semantic();
     match sem.reference_at(id).map(|r| sem.reference(r).resolution) {
         Some(Resolution::Global) => true,
         Some(Resolution::Symbol(s)) => sem.symbol(s).flags.contains(SymbolFlags::COMMENT_GLOBAL),
         _ => false,
     }
+}
+
+/// ESLint's `isImportAttributeKey`: a key of an import attribute, or of the options object
+/// of a dynamic `import()` (at any depth through property values).
+pub(crate) fn is_import_attribute_key(t: &EsTree<'_>, n: u32) -> bool {
+    let mut n = n;
+    for _ in 0..1000 {
+        let Some(parent) = t.parent(n) else {
+            return false;
+        };
+        match t.ty(parent) {
+            "ImportAttribute" => return t.node_field(parent, "key") == Some(n),
+            "Property" if !is_true(t, parent, "computed") => {
+                let key = t.node_field(parent, "key") == Some(n);
+                let shorthand_value = t.node_field(parent, "value") == Some(n)
+                    && is_true(t, parent, "shorthand")
+                    && !is_true(t, parent, "method");
+                let Some(obj) = t.parent(parent).filter(|&o| t.ty(o) == "ObjectExpression") else {
+                    return false;
+                };
+                if !(key || shorthand_value) {
+                    return false;
+                }
+                let Some(op) = t.parent(obj) else {
+                    return false;
+                };
+                match t.ty(op) {
+                    "ImportExpression" => return t.node_field(op, "options") == Some(obj),
+                    "Property" if t.node_field(op, "value") == Some(obj) => {
+                        match t.node_field(op, "key") {
+                            Some(k) => n = k,
+                            None => return false,
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 impl IdMatch {
@@ -129,7 +170,7 @@ impl IdMatch {
             Some(parent)
         };
         if is_global_reference(cx, t.nodes[n as usize].ast)
-            || (pty == "ImportAttribute" && t.node_field(parent, "key") == Some(n))
+            || is_import_attribute_key(t, n)
             || pty == "MetaProperty"
         {
             return false;

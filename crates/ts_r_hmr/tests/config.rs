@@ -688,6 +688,41 @@ fn worker_constructor_urls_classic_workers_and_excluded_deps() {
     );
 }
 
+/// `new Worker(new URL(...), /* @vite-ignore */ opts)`: the worker's type is unknown, so its
+/// URL says `type=ignore` (as Vite's) and its file gets the env module's code inline, not an
+/// `import` a classic worker can't run (`vite: packages/vite/src/node/plugins/worker.ts`).
+#[test]
+fn ignored_worker_options_get_the_env_code_inline() {
+    let app = TempDir::new("cfg-worker-ignore");
+    app.write(
+        "src/a.js",
+        "const opts = {}\nnew Worker(new URL('./w.js', import.meta.url), /* @vite-ignore */ opts)\n",
+    );
+    app.write("src/w.js", "self.onmessage = () => {}\n");
+    let mut config = base_config(&app);
+    config.define = vec![("__APP_VERSION__".to_owned(), "\"1.2.3\"".to_owned())];
+    let server = DevServer::start(config).expect("server starts");
+    let (_, _, a) = get(&server, "/src/a.js");
+    assert!(
+        a.contains("new URL('/src/w.js?worker_file&type=ignore', import.meta.url)"),
+        "{a}"
+    );
+    let (status, _, w) = get(&server, "/src/w.js?worker_file&type=ignore");
+    assert_eq!(status, 200, "{w}");
+    assert!(!w.contains("import "), "{w}");
+    assert!(
+        w.starts_with("const __tsr_defines = {\"__APP_VERSION__\": \"1.2.3\"}"),
+        "{w}"
+    );
+    assert!(w.ends_with("}\n;\nself.onmessage = () => {}\n"), "{w}");
+    // With no defines there is nothing to put in.
+    let app = TempDir::new("cfg-worker-ignore-none");
+    app.write("src/w.js", "self.onmessage = () => {}\n");
+    let server = DevServer::start(base_config(&app)).expect("server starts");
+    let (_, _, w) = get(&server, "/src/w.js?worker_file&type=ignore");
+    assert_eq!(w, "self.onmessage = () => {}\n");
+}
+
 /// A base with a space is printed as a URL (`/foo%20bar/`), as Vite prints it.
 #[test]
 fn server_url_encodes_the_base() {

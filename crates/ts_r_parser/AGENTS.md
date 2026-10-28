@@ -353,7 +353,8 @@ Files:
   `',' expected` at `>`). A declaration named `await` gets no TS1359 there: the checker
   reports TS1262 (topLevelAwaitErrors.12). Parameter decorators are read in the await
   context outside the function (`param_decorator_await`), as in tsc. The second parse only
-  happens in these cases.
+  happens in these cases: a property name after `.`/`?.` (`obj.await`) means the same under
+  either goal, so it does not count (`member_name_await_does_not_trigger_module_reparse`).
 - **Class static blocks** are parsed with `Ctx::AWAIT | Ctx::STATIC_BLOCK`: `await` is an
   operator (`await;` is TS1109) and each await expression is TS18037; `return` is a
   deferred TS18041. Functions, arrows, field initializers and module blocks clear

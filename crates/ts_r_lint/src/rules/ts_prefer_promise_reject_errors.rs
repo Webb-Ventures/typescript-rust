@@ -16,11 +16,13 @@ pub static RULE: RuleDef = RuleDef {
 };
 
 #[derive(Debug)]
-struct PreferPromiseRejectErrors {
+pub(crate) struct PreferPromiseRejectErrors {
     allow: Vec<Specifier>,
     allow_empty: bool,
     any: bool,
     unknown: bool,
+    /// ESLint's `prefer-promise-reject-errors`: syntax only (`couldBeError`), global `Promise`.
+    pub(crate) core: bool,
 }
 
 impl FromOptions for PreferPromiseRejectErrors {
@@ -31,6 +33,7 @@ impl FromOptions for PreferPromiseRejectErrors {
             allow_empty: bool_field(o, "allowEmptyReject", false),
             any: bool_field(o, "allowThrowingAny", false),
             unknown: bool_field(o, "allowThrowingUnknown", false),
+            core: false,
         })
     }
 }
@@ -61,6 +64,14 @@ impl PreferPromiseRejectErrors {
             }
             return;
         };
+        if self.core {
+            if !super::no_throw_literal::could_be_error(ast, arg, 0)
+                || cx.is_global_ref(arg, "undefined")
+            {
+                cx.report_node(call, MSG).id("rejectAnError");
+            }
+            return;
+        }
         if matches!(cx.node(arg), Node::Spread { .. }) {
             return;
         }
@@ -96,6 +107,12 @@ impl Rule for PreferPromiseRejectErrors {
                 if !is_reject {
                     return;
                 }
+                if self.core {
+                    if cx.is_global_ref(obj, "Promise") {
+                        self.check_call(cx, node, args);
+                    }
+                    return;
+                }
                 let ti = cx.types();
                 let obj = skip_parens(ast, obj);
                 let promise_class = ti
@@ -117,7 +134,13 @@ impl Rule for PreferPromiseRejectErrors {
             }
             Node::New { callee, args, .. } => {
                 let ti = cx.types();
-                if !ti
+                if self.core {
+                    if !matches!(cx.node(callee), Node::Ident { .. })
+                        || !cx.is_global_ref(callee, "Promise")
+                    {
+                        return;
+                    }
+                } else if !ti
                     .type_at(skip_parens(ast, callee))
                     .is_some_and(|t| is_promise_constructor(ti, t))
                 {

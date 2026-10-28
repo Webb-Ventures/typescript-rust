@@ -603,6 +603,48 @@ fn a_query_import_after_a_plain_one_is_a_module_of_its_own_in_commonjs() {
 }
 
 #[test]
+fn query_imports_of_a_required_es_module_are_modules_of_their_own() {
+    // In a typeless package `t.ts` (ES syntax) is `require()`d, so its imports share that
+    // CommonJS compilation; each query still makes a module of its own, as under tsx.
+    let files = [
+        ("package.json", "{}"),
+        (
+            "main.cts",
+            "const a = require('./t.ts');\nimport('./t.ts?q=1').then((b) => import('./t.ts?q=2').then((c) => console.log(a.n, b.n, c.n)));\n",
+        ),
+        (
+            "t.ts",
+            "const g = globalThis as { hits?: number };\ng.hits = (g.hits ?? 0) + 1;\nexport const n: number = g.hits;\nconsole.log('t', import.meta.url.split('/').pop());\n",
+        ),
+    ];
+    let Some(out) = run("query-shared-cjs", &files, &["main.cts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "t t.ts\nt t.ts?q=1\nt t.ts?q=2\n1 2 3\n");
+}
+
+#[test]
+fn commonjs_with_a_hashbang_gets_its_injected_lines_after_it() {
+    // A queried `require()` sets the real `__filename` after the hashbang (which must stay
+    // first), and so does the `require` swap of CommonJS an ES module imports.
+    let dep = "#!/usr/bin/env node\nexports.v = __filename.split(/[\\\\/]/).pop();\n";
+    let files = [
+        ("package.json", "{}"),
+        ("main.cts", "console.log(require('./dep.cts?q=1').v);\n"),
+        ("esm.mts", "import d from './dep.cts';\nconsole.log(d.v);\n"),
+        ("dep.cts", dep),
+    ];
+    let Some(out) = run("hashbang-cjs", &files, &["main.cts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "dep.cts\n");
+    let Some(out) = run("hashbang-cjs-esm", &files, &["esm.mts"]) else {
+        return;
+    };
+    assert_eq!(stdout(&out), "dep.cts\n");
+}
+
+#[test]
 fn require_through_an_imports_map_finds_typescript() {
     let files = [
         ("package.json", r##"{ "imports": { "#e.js": "./e.js" } }"##),

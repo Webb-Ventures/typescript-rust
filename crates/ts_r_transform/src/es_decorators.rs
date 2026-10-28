@@ -338,7 +338,7 @@ fn lower(
     p.members = tx.new_list(&members);
     set_parts(tx, cls, p);
 
-    crate::class::class_body(tx, cls);
+    let key_capture = crate::class::class_body_detached(tx, cls);
     let p = parts(tx, cls).expect("class");
     let class_decorators: Vec<NodeId> = decorator_exprs(tx, p.decorators)
         .into_iter()
@@ -658,6 +658,11 @@ fn lower(
             let init = array.then(|| tx.array(&[], at));
             body.push(let_decl(tx, name, init, at));
         }
+    }
+    // The capture of computed keys using `this` (`_c = () => { _a = this.k; };`) runs in
+    // the IIFE (an arrow: same `this`), where its temporaries are declared.
+    if let Some(c) = key_capture {
+        body.push(tx.expr_stmt(c, at));
     }
     if class_decorated {
         let local = tx.ident_atom(binding, at);
@@ -1752,6 +1757,14 @@ fn is_anonymous_fn(tx: &Tx, mut e: NodeId) -> bool {
 }
 
 /// True if `e` is `super.x` or `super[k]`.
+/// `e` without the parentheses around it (`(super.x) = 1` writes `super.x`).
+fn skip_parens(tx: &Tx, mut e: NodeId) -> NodeId {
+    while let Node::Paren { expr } = tx.n(e) {
+        e = expr;
+    }
+    e
+}
+
 fn is_super_prop(tx: &Tx, e: NodeId) -> bool {
     matches!(tx.n(e), Node::Member { obj, optional: false, .. } | Node::Index { obj, optional: false, .. }
         if tx.kind(obj) == NodeKind::Super)
@@ -1792,13 +1805,23 @@ impl StaticSuper {
             sup,
             temps: Vec::new(),
         };
-        s.walk(tx, value, false);
-        let temps = std::mem::take(&mut s.temps);
+        s.scoped(tx, value)
+    }
+
+    /// Rewrites `value`, an expression that is a scope for temporaries of its own (a field
+    /// initializer, a parameter default); returns `(() => { var _a; return v; })()` when it
+    /// needs any, else `value`. The result never contains the slot `value`, so the caller
+    /// may `replace` that slot with it.
+    fn scoped(&mut self, tx: &mut Tx, value: NodeId) -> NodeId {
+        let saved = std::mem::take(&mut self.temps);
+        self.walk(tx, value, false);
+        let temps = std::mem::replace(&mut self.temps, saved);
         if temps.is_empty() {
             return value;
         }
         let at = tx.at(value);
-        let ret = return_of(tx, value, at);
+        let moved = clone_node(tx.ast, value);
+        let ret = return_of(tx, moved, at);
         let body = scope_body(tx, temps, &[ret], at);
         let arrow = tx.mk(
             Node::Arrow {
@@ -1917,11 +1940,11 @@ impl StaticSuper {
                     let get = super_get(tx, n, this, sup, &mut stack);
                     replace(tx.ast, n, get);
                 }
-                Node::Assign { left, .. } if is_super_prop(tx, left) => {
+                Node::Assign { left, .. } if is_super_prop(tx, skip_parens(tx, left)) => {
                     let out = self.write(tx, n, discard);
                     replace(tx.ast, n, out);
                 }
-                Node::Update { arg, .. } if is_super_prop(tx, arg) => {
+                Node::Update { arg, .. } if is_super_prop(tx, skip_parens(tx, arg)) => {
                     let out = self.write(tx, n, discard);
                     replace(tx.ast, n, out);
                 }
@@ -1986,7 +2009,7 @@ impl StaticSuper {
         };
         let saved = std::mem::take(&mut self.temps);
         for p in tx.items(params) {
-            self.walk(tx, p, false);
+            self.param(tx, p);
         }
         let concise = flags.contains(FnFlags::EXPRESSION_BODY);
         self.walk(tx, body, false);
@@ -2017,6 +2040,42 @@ impl StaticSuper {
                 body,
             },
         );
+    }
+
+    /// A parameter: its defaults and computed keys run in the parameter scope, which cannot
+    /// see the body's `var`, so each one that needs temporaries gets a scope of its own.
+    fn param(&mut self, tx: &mut Tx, p: NodeId) {
+        let mut stack = vec![p];
+        let mut exprs = Vec::new();
+        while let Some(n) = stack.pop() {
+            match tx.n(n) {
+                Node::Param { pattern, init, .. } => {
+                    exprs.extend(init);
+                    stack.push(pattern);
+                }
+                Node::ObjectPattern { props: items } | Node::ArrayPattern { elements: items } => {
+                    stack.extend(tx.items(items).into_iter().rev());
+                }
+                Node::BindingProperty { key, value, init } => {
+                    exprs.extend(init);
+                    stack.extend(value);
+                    stack.push(key);
+                }
+                Node::AssignPattern { left, right } => {
+                    exprs.push(right);
+                    stack.push(left);
+                }
+                Node::Rest { arg } => stack.push(arg),
+                Node::ComputedKey { expr } => exprs.push(expr),
+                _ => {}
+            }
+        }
+        for e in exprs {
+            let ne = self.scoped(tx, e);
+            if ne != e {
+                replace(tx.ast, e, ne);
+            }
+        }
     }
 
     /// The key of `super.x` / `super[k]` (`"x"` / `k`), its reads visited.
@@ -2100,14 +2159,14 @@ impl StaticSuper {
                 left,
                 right,
             } => {
-                let key = self.key(tx, left);
+                let key = self.key(tx, skip_parens(tx, left));
                 self.walk(tx, right, false);
                 let (value, result) = self.result(tx, right, discard, at);
                 let set = self.reflect(tx, "Reflect.set", key, Some(value), at);
                 Self::with_result(tx, set, result, at)
             }
             Node::Assign { op, left, right } => {
-                let (k1, k2) = self.key_twice(tx, left);
+                let (k1, k2) = self.key_twice(tx, skip_parens(tx, left));
                 // Logical assignments too: tsc 7 stores `Reflect.get(..) ?? v` without
                 // short-circuiting the write (observed).
                 let bop = crate::downlevel::compound_op(op);
@@ -2119,7 +2178,7 @@ impl StaticSuper {
                 Self::with_result(tx, set, result, at)
             }
             Node::Update { op, prefix, arg } => {
-                let (k1, k2) = self.key_twice(tx, arg);
+                let (k1, k2) = self.key_twice(tx, skip_parens(tx, arg));
                 let result = (!discard).then(|| self.temp(tx));
                 let t = self.temp(tx);
                 let get = self.reflect(tx, "Reflect.get", k2, None, at);

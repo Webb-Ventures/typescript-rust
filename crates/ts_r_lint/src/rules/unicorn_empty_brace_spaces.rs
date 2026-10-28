@@ -53,6 +53,12 @@ impl Rule for EmptyBraceSpaces {
         if !inside.ends_with('{') || open == close {
             return;
         }
+        // The `{` found must be the brace itself, not the end of a comment's text
+        // (`{ // {` and a newline): no comment may reach past it.
+        let before = ast.comments.partition_point(|c| c.span.start < close);
+        if before > 0 && ast.comments[before - 1].span.end >= open {
+            return;
+        }
         let gap = Span::new(open, close);
         cx.report(gap, "Do not add spaces between braces.")
             .id("empty-brace-spaces")

@@ -297,7 +297,9 @@ terms. The fourslash tests are the oracle.
   `.mts`/`.cts` files with their extension; elsewhere they keep it only behind a wildcard
   target (`#*` -> `./src/*`) and only when the file does not already write `.js` endings.
 - `/// <reference path="|` lists files with their names as on disk; `types="|` lists type
-  roots' packages. Directory listings stop at 2000 entries and 64 ancestors.
+  roots' packages. Directory listings stop at 2000 entries and 64 ancestors; a pattern's
+  search below its target directory lists at most 4096 directories, each real path once (a
+  link back up is not followed again). Paths keep their root (`/`, `c:/`, `//server/`).
 
 ## Completion contexts (`tsr/features/complete.rs`)
 
@@ -394,7 +396,7 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   (`10| + 1` gets one).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
-  dot; after `?.` private names are not offered. Outside its class a protected instance
+  dot (after `?.`, `?.["a b"]` replacing both); after `?.` private names are not offered. Outside its class a protected instance
   member is read only through an instance of the deriving class (`this`, `super` or a
   `D` inside `D`); `super.|` in instance code lists methods only. An object literal that
   is an arrow argument's body with no contextual members (an unresolved overload) takes
@@ -516,6 +518,8 @@ starts), v7.0.2, in our words.
   `namespace a.b` documents `a` only. A property read through an index signature shows
   that signature's comment (the first applicable non-`string` index, else the `string`
   one). A comment with `@typedef`/`@callback` documents that type, not what follows it.
+  A declaration whose search found nothing is not searched again in the same lookup with
+  as much depth or less left (bases shared by many paths are visited once).
 
 ## Keywords and navigation (`tsr/features/keywords.rs`, `nav.rs`)
 
@@ -683,7 +687,9 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   through imports and qualified names, not through a variable holding the class), `this`
   of `new this()` in those classes' static members, and `super` of `super(...)` calls made
   by constructors (arrows in between allowed, not other functions or methods) of classes
-  extending one of them. `implements` does not count.
+  extending one of them. `implements` does not count. The chain of builds is walked once
+  over a base -> derived map. Rename on `constructor` (or a modifier of it) answers `null`:
+  tsc 7 renames only identifiers, literal names, private names and `this`.
 - **Doc comment paths** (`doc_links.rs`): each name of a `{@link A.B#c}` (also
   `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path, and each
   `@param x` name (not `x.y`, not an `@overload`'s: those up to its `@returns`), counts as a
@@ -722,9 +728,11 @@ module docs give them in full:
 - Index: top-level commas before the cursor (a spread tuple counts its fixed elements);
   count: commas plus one, zero for an empty list.
 - Candidates: the callee's signatures; the resolved one (only when it really applies:
-  arity, assignable arguments, type argument count) replaces its declaration and is
-  active. Otherwise the first candidate with a rest parameter or enough parameters, else the
-  longest, instantiated from written type arguments (default, constraint, `unknown`; `any`
+  arity of the value arguments, also inside the type argument list; assignable arguments;
+  type argument count) replaces its declaration and is active. Otherwise the first
+  candidate with a rest parameter or enough parameters for the list's count (type
+  arguments in a type argument list: `pickLongestCandidateSignature` in `tsc:
+  tsc/internal/checker/checker.go` uses the apparent count only there), else the longest, instantiated from written type arguments (default, constraint, `unknown`; `any`
   in JS) or from inference over the written arguments.
 - Rest tuples expand into parameters (a union of tuples into one signature each); unnamed
   elements take `name_i`, duplicates `_1`, `_2`. Labels print in quick-info mode, string

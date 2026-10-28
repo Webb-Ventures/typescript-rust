@@ -151,6 +151,9 @@ pub struct FileCtx<'a> {
     /// The file's indentation unit (`unicorn_util::indent_unit`), worked out on first use:
     /// it scans the whole file, and fixes ask for it once per report.
     pub(crate) indent_unit: OnceCell<String>,
+    /// Names of the globals the file writes to (`unicorn_util::is_modified_global`), worked
+    /// out on first use: it scans every reference, and rules ask once per global they see.
+    pub(crate) modified_globals: OnceCell<rustc_hash::FxHashSet<&'a str>>,
     /// The module resolution view of this file (eslint-plugin-import rules), on first use.
     modules: OnceCell<crate::modules::ModCtx>,
 }
@@ -188,6 +191,7 @@ impl<'a> FileCtx<'a> {
             exported,
             semantic: OnceCell::new(),
             indent_unit: OnceCell::new(),
+            modified_globals: OnceCell::new(),
             modules: OnceCell::new(),
         }
     }

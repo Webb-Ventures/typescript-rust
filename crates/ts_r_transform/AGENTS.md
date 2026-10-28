@@ -55,8 +55,13 @@ no `include` check; only when that config has `references` and doesn't include t
 first referenced config that does (`files`, else `include` (default `**/*`), minus `exclude`).
 Browser adjustments (ESM, at least ES2022, automatic JSX for `preserve`) are applied after.
 `map_options` changes every file's options and keeps the lookup; `TsTransform::new` uses
-one fixed set. `deps()` lists the config chain, so editing a tsconfig invalidates the cache.
-Parsed configs are cached and re-read when the config or one it extends changes.
+one fixed set. `deps()` lists every file the choice read or looked for: the nearer
+`tsconfig.json` candidates that are missing, the chosen config's chain, and each reference
+consulted (with its chain) up to the one chosen, so creating, deleting or editing any of them
+invalidates the cache. A cached nearest-config search is reused only while its config exists
+and its missing candidates are still missing. Parsed configs are cached and re-read when the
+config or one it extends changes. Wrappers (`ts-r-dev`'s `GuardTransform`, React Refresh)
+must forward `deps()`.
 
 ## Module layout
 
@@ -197,7 +202,10 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   `super.x` is read, as tsc does. Temporaries belong to their static block (a `var` first),
   arrow (body made a block) or field initializer (`(() => { var _a; return v; })()`), each
   named from `_a` again; a destructuring setter's parameter too (observed in
-  `esDecorators-class{Declaration,Expression}-classSuper.*`).
+  `esDecorators-class{Declaration,Expression}-classSuper.*`). A parameter default or
+  computed key of an arrow there cannot see the body's `var`, so each one needing
+  temporaries is wrapped like a field initializer; a parenthesized target
+  (`(super.x) = 1`, `(super.x)++`) is a write.
 - **Misplaced `accessor`** (an error) on a method, accessor, constructor or class stays when
   `accessor` fields are not lowered (ESNext), and an `accessor enum` gives `accessor var E;`
   at every target (autoAccessorDisallowedModifiers).
@@ -212,7 +220,11 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   (that order requests the helpers). A nested class that declares the same private name
   shadows it. Observed in tsc's `esDecorators-classDeclaration-classThisReference`,
   `esDecorators-classDeclaration-{fields,methods,accessors}-staticPrivate*`
-  baselines (no tsc source read).
+  baselines (no tsc source read). A nested class hides only the names it declares itself
+  (its heritage still sees ours). A `super` in a static private method or accessor would
+  lose its home object when moved into `function _C_m() {}`: the class's static privates
+  then stay native and the file is refused (TSR2003, `Tx::refused`; tsc's output for it is
+  not recorded).
 - **Named evaluation** (`transform.rs` `key_class_hint` / `expr_named`): an anonymous
   decorated class gets `__setFunctionName(_classThis, "n")` from where it is assigned:
   `x = class {}`, `let x = class {}`, an object literal key (identifier, string, number or
@@ -229,18 +241,23 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - **`accessor` storage names**: `#x_accessor_storage`, made unique against the private
   names in the source (`#x_1_accessor_storage`); other keys `#_a_accessor_storage`,
   `#_b_...`, numbered per class from ES2022 (across the file below it), apart from
-  temporaries.
+  temporaries. Every storage name is also unique in its class (`accessor _a` and
+  `accessor [k]`: `#_a_...` and `#_b_...`, `Tx::class_storage_names`).
 - **Computed keys using `this`/`super`** (ES2022+, captured into a static block): the
   capture runs in an arrow made before the class, `(_c = () => { _a = this.k; }, class {
   static { _c(); } })`, or a `_c = () => { ... };` statement before a declaration
-  (`Tx::class_key_capture`).
+  (`Tx::class_key_capture`). A TC39-decorated class keeps its node
+  (`class::class_body_detached`): the capture is a statement in the decorator IIFE, after
+  its temporaries and before the class.
 - **Bundler-only options**: `TransformOptions::default_class_name` names an anonymous
   `export default class` that ES2022 lowering must name (the bundler passes `<stem>_default`,
   esbuild's name); tsc never sets it (`None`).
 - **Static blocks the TypeScript transform synthesizes** for a static initializer or a key
   capture are listed in `Tx::inline_static`: below ES2022 they become a statement after the
   class (`C.x = 1;`, `_a = k`), source static blocks an IIFE. Push every such block there.
-- **Decorator metadata** (`decorators.rs`, `scope.rs`): a type reference asks
+- **Decorator metadata** (`decorators.rs`, `scope.rs`): a name in a serialized type is
+  the binding scope analysis resolved it to when it did (a local class shadowing an import
+  is not read through the import's module variable), else the module's. A type reference asks
   `EmitResolver::metadata_type` (the program emitter answers from the checker, see
   `../ts_r_emit/AGENTS.md`; per-file transpile answers `Syntactic`: what the file shows).
   Unions, intersections and a conditional type's two branches serialize to their members'
@@ -275,6 +292,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
   compares it with tsc's stored output (`<name>.tsc.js`) by AST shape. Fixture options are
   `// @option: value` header lines. `KNOWN_GAPS` lists fixtures tsc emits differently; it may
   only shrink.
+- `tests/review_regressions.rs`: code-review failure scenarios (panics, invalid output,
+  quadratic or exponential inputs) as tests.
 - Re-bless after adding a fixture (needs tsc 7):
   `scripts/limit.sh -- cargo run --release -p ts_r_transform --example oracle -- --bless crates/ts_r_transform/tests/fixtures`
   (`--stored` compares against the stored files without tsc).
@@ -337,8 +356,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - A module-scope `var` exported by an `export { }` list gets `exports.y = y;` after every
   declaration of it, nested ones included (`{ }`, `if`, `try`, labels: a single statement
   becomes a block); `for (var h = x;;)` moves the declaration and its export before the
-  loop, and `for (var n in o)` starts its body with `exports.n = n;`
-  (`cjs::nested_var_exports`; `topLevelVarHoistingCommonJS`).
+  loop (before its labels too: the label stays on the loop), and `for (var n in o)` starts
+  its body with `exports.n = n;` (`cjs::nested_var_exports`; `topLevelVarHoistingCommonJS`).
 - `verbatimModuleSyntax` keeps `export default I` of a type (an error).
 - `importHelpers` in a `.cts`/`.cjs` file under `module: preserve` uses
   `const tslib_1 = require("tslib")` (`TransformOptions::require_helpers`).
@@ -353,7 +372,9 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - A namespace or enum exported by an `export { }` list assigns every alias in its IIFE
   argument, on each of its declarations and whoever declared the name first:
   `(N || (exports.B = exports.N = N = {}))`, not `exports.N = N;` after it
-  (`cjs::list_aliases`; const enums keep the statement after).
+  (`cjs::list_aliases`; const enums keep the statement after). A directly exported one
+  adds them outside its own: `export enum E {} export { E as A }` is
+  `(E || (exports.A = exports.E = E = {}))`.
 - A namespace's IIFE parameter is `N_1` (the next unused `N_k`) when the body declares a
   value named `N` in any nested scope: a `const`, `var`, function, class, parameter, catch
   variable, inner namespace or enum, an `import N =` alias or a `declare const`; types,
@@ -367,7 +388,8 @@ operators, `.call`/`.bind` for calls and tags), `using.rs` (`using` / `await usi
 - An enum member initializer that names a same-file `const x = <constant>` (no type
   annotation, declared earlier) folds to the value (`A = base * 2` → `8`); a `const`
   declared later stays a reference (`enums::const_value`, `Scopes::const_inits`,
-  `isolatedDeclarationErrorsEnums`).
+  `isolatedDeclarationErrorsEnums`). Each constant is evaluated once (`Tx::const_values`),
+  and a folded string over 1 MiB stays an expression.
 - A namespace is instantiated by an exported `declare function` or a `declare namespace`
   holding a value (`export declare namespace I { const x: number; }`): the empty IIFE is
   kept. Types and type-only nested namespaces still make it a type (`uniqueSymbolsPropertyNames`).

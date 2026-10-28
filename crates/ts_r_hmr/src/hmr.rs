@@ -306,8 +306,9 @@ fn handle_change(
         g.node(id).url.clone()
     };
     server::forget_load(shared, Some(path));
-    let Ok(mut source) = server::module_source(shared, path, &own_url) else {
-        return;
+    let mut source = match server::module_source(shared, path, &own_url) {
+        Ok(s) => s,
+        Err(message) => return source_failed(shared, id, path, &own_url, message, out),
     };
     if source.is_empty() {
         // Truncated but not yet written (a save that truncates, then writes): wait up to
@@ -321,10 +322,10 @@ fn handle_change(
                 break;
             }
         }
-        let Ok(again) = server::module_source(shared, path, &own_url) else {
-            return;
+        source = match server::module_source(shared, path, &own_url) {
+            Ok(s) => s,
+            Err(message) => return source_failed(shared, id, path, &own_url, message, out),
         };
-        source = again;
     }
     let hash = Key::of(&source);
     timing.read += t.elapsed();
@@ -463,8 +464,9 @@ fn reprepare(
         return;
     }
     let t = Instant::now();
-    let Ok(source) = server::module_source(shared, &file, &url) else {
-        return;
+    let source = match server::module_source(shared, &file, &url) {
+        Ok(s) => s,
+        Err(message) => return source_failed(shared, id, &file, &url, message, out),
     };
     let hash = Key::of(&source);
     timing.read += t.elapsed();
@@ -802,6 +804,40 @@ fn mark_invalidation_chain(shared: &Shared, out: &mut Outcome, first: &str) {
     for u in &mut out.updates {
         u["firstInvalidatedBy"] = json!(first);
     }
+}
+
+/// A changed module's source can't be read. A file that is gone is a deletion the watcher
+/// reports on its own; a file that is there but fails to load (a plugin `load` hook threw)
+/// is a module error, shown like a transform's, and the module retries on the next request.
+fn source_failed(
+    shared: &Shared,
+    id: ModuleId,
+    file: &std::path::Path,
+    url: &str,
+    message: String,
+    out: &mut Outcome,
+) {
+    if !file.is_file() {
+        return;
+    }
+    shared
+        .graph
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .node_mut(id)
+        .fail();
+    report_error(
+        shared,
+        &ModuleError {
+            message,
+            file: file.to_path_buf(),
+            url: url.to_owned(),
+            loc: None,
+            frame: String::new(),
+        },
+    );
+    out.files.push(url.to_owned());
+    out.errored = true;
 }
 
 /// Broadcasts an error and remembers it for clients that connect later.

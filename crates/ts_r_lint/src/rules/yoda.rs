@@ -75,7 +75,7 @@ impl Rule for Yoda {
     }
 }
 
-fn is_literal(ast: &Ast, id: NodeId) -> bool {
+pub(crate) fn is_literal(ast: &Ast, id: NodeId) -> bool {
     matches!(
         ast.node(skip_parens(ast, id)),
         Node::StringLit { .. }
@@ -248,7 +248,7 @@ fn static_name<'a>(ast: &'a Ast, src: &'a str, id: NodeId) -> Option<std::borrow
     member_name(ast, src, id)
 }
 
-fn same_literal(ast: &Ast, a: NodeId, b: NodeId) -> bool {
+pub(crate) fn same_literal(ast: &Ast, a: NodeId, b: NodeId) -> bool {
     match (*ast.node(a), *ast.node(b)) {
         (
             Node::RegexLit {

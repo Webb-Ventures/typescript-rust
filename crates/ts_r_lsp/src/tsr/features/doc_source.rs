@@ -20,6 +20,7 @@
 
 use super::jsdoc::{self, JsDoc, Tag};
 use super::quick_info::call_of;
+use std::collections::HashMap;
 use ts_r_ast::{Node, NodeId};
 use ts_r_binder::{SymbolFlags, meaning};
 use ts_r_checker::members::SigKind;
@@ -182,10 +183,26 @@ fn declaration_node(ck: &Ck<'_, '_>, d: Loc) -> Loc {
     d
 }
 
-fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
-    if depth > MAX_DEPTH {
+/// Declarations whose documentation search found nothing, each with the smallest depth it
+/// was searched at. Shared base types are reached along many paths (`interface D extends
+/// B1, B2` where both extend `A`); a miss is not searched again with less depth left, so
+/// one lookup visits each declaration a bounded number of times.
+type Misses = HashMap<Loc, u32>;
+
+fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32, misses: &mut Misses) -> Option<Found> {
+    if depth > MAX_DEPTH || misses.get(&d).is_some_and(|&at| at <= depth) {
         return None;
     }
+    let found = search(ck, d, depth, misses);
+    if found.is_none() {
+        let at = misses.entry(d).or_insert(depth);
+        *at = (*at).min(depth);
+    }
+    found
+}
+
+/// [`doc_or_tag`] without the record of misses.
+fn search(ck: &mut Ck<'_, '_>, d: Loc, depth: u32, misses: &mut Misses) -> Option<Found> {
     let d = declaration_node(ck, d);
     if let Some(raw) = own_raw(ck, d) {
         return Some(Found::Doc(jsdoc::parse(&raw), d));
@@ -194,7 +211,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
     match *c.node(d) {
         Node::Param { pattern, .. } => {
             let host = host_of(ck, d)?;
-            let doc = match doc_or_tag(ck, host, depth + 1)? {
+            let doc = match doc_or_tag(ck, host, depth + 1, misses)? {
                 Found::Doc(doc, at) => (doc, at),
                 Found::Tag(..) => return None,
             };
@@ -210,7 +227,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
         Node::TypeParam { name, .. } => {
             let host = host_of(ck, d)?;
             let name = ident_text(ck, Loc::new(d.file, name))?;
-            return match doc_or_tag(ck, host, depth + 1)? {
+            return match doc_or_tag(ck, host, depth + 1, misses)? {
                 Found::Doc(doc, at) => doc.template(&name).cloned().map(|t| Found::Tag(t, at)),
                 Found::Tag(..) => None,
             };
@@ -220,7 +237,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
             if let Node::VarDecl { decls, .. } = *c.node(p)
                 && c.ast(d.file).list(decls).first() == Some(&d.node)
             {
-                return doc_or_tag(ck, p, depth + 1);
+                return doc_or_tag(ck, p, depth + 1, misses);
             }
         }
         // `{ a }` / `{ a: b }`: the documentation of property `a` of the destructured type.
@@ -247,7 +264,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
                     _ => false,
                 };
                 if init {
-                    return doc_or_tag(ck, p, depth + 1);
+                    return doc_or_tag(ck, p, depth + 1, misses);
                 }
             }
         }
@@ -267,7 +284,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
             .find(|&x| is_function_like(c.node(x)));
         if let Some(f) = first
             && f != d
-            && let Some(found) = doc_or_tag(ck, f, depth + 1)
+            && let Some(found) = doc_or_tag(ck, f, depth + 1, misses)
         {
             return Some(found);
         }
@@ -286,7 +303,7 @@ fn doc_or_tag(ck: &mut Ck<'_, '_>, d: Loc, depth: u32) -> Option<Found> {
     for b in ck.base_types(container).iter() {
         if let Some(prop) = ck.property_of_type(*b, &name)
             && let Some(vd) = ck.c.value_decl(prop)
-            && let Some(found) = doc_or_tag(ck, vd, depth + 1)
+            && let Some(found) = doc_or_tag(ck, vd, depth + 1, misses)
         {
             return Some(found);
         }
@@ -429,7 +446,7 @@ fn render(ck: &mut Ck<'_, '_>, found: Found, decl: Loc) -> String {
 
 /// The documentation of declaration `d` as markdown.
 fn documentation_of(ck: &mut Ck<'_, '_>, d: Loc) -> String {
-    match doc_or_tag(ck, d, 0) {
+    match doc_or_tag(ck, d, 0, &mut Misses::new()) {
         Some(found) => render(ck, found, d),
         None => String::new(),
     }

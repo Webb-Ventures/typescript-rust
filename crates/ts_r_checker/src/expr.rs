@@ -519,9 +519,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 type_args,
                 ..
             } => {
-                // `import<T>` is TS1326 (from the parser), and its type arguments are still
-                // resolved (importWithTypeArguments: TS2304 for `T`).
-                if let Some(ta) = type_args {
+                // `import<T>` is TS1326 (from the parser). Without call parentheses its type
+                // arguments are still resolved (importWithTypeArguments: TS2304 for `T`); on
+                // a call, `import<Missing>("m")` and `import< <T>() => T>("m")`, tsc reports
+                // only TS1326 and never looks at them.
+                if let Some(ta) = type_args
+                    && matches!(ast.node(arg), Node::Missing {})
+                {
                     self.type_args_from_node(Some(at(ta)), false);
                 }
                 // `import()` under verbatimModuleSyntax and `module: commonjs` is a grammar

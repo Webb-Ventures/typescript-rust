@@ -140,6 +140,22 @@ pub(crate) fn lower(
     if map.is_empty() {
         return vars;
     }
+    // A method moved out of the class into `function _D_m() {}` loses its home object, so a
+    // `super` in it would be a SyntaxError: the members stay native and the file is refused
+    // (TSR2003), as below ES2022 (`downlevel::es2022`).
+    if let Some(at) = members
+        .iter()
+        .copied()
+        .find_map(|m| moved_super(tx, m, &map))
+    {
+        if tx.refused.is_none() {
+            tx.refused = Some((
+                tx.span(at),
+                "'super' in a static private method of a decorated class",
+            ));
+        }
+        return Vec::new();
+    }
 
     // The members: fields become static blocks, functions move into one block.
     let mut out = Vec::with_capacity(members.len() + 1);
@@ -231,6 +247,36 @@ pub(crate) fn lower(
     }
     *members = out;
     vars
+}
+
+/// The first `super` in the body or parameters of `m` if it is one of the static private
+/// methods or accessors that move out of the class. Arrows and a nested class's heritage
+/// and computed keys share the method's `super`; other functions and members have their own.
+fn moved_super(tx: &Tx, m: NodeId, map: &FxHashMap<Atom, Member>) -> Option<NodeId> {
+    let Node::MethodDef { key, value, .. } = tx.n(m) else {
+        return None;
+    };
+    if !is_ours(tx, key, map) || map[&private_of(tx, key)?].kind == Kind::Field {
+        return None;
+    }
+    let Node::FunctionExpr { params, body, .. } = tx.n(value) else {
+        return None;
+    };
+    let mut stack: Vec<NodeId> = tx.items(params);
+    stack.extend(body);
+    while let Some(n) = stack.pop() {
+        match tx.n(n) {
+            Node::Super {} => return Some(n),
+            Node::FunctionDecl { .. } | Node::FunctionExpr { .. } | Node::StaticBlock { .. } => {}
+            Node::MethodDef { key, .. } | Node::PropertyDef { key, .. } => {
+                if tx.kind(key) == NodeKind::ComputedKey {
+                    stack.push(key);
+                }
+            }
+            _ => tx.ast.for_each_child(n, |c| stack.push(c)),
+        }
+    }
+    None
 }
 
 fn private_of(tx: &Tx, key: NodeId) -> Option<Atom> {
@@ -343,31 +389,66 @@ fn compound(op: AssignOp) -> Option<BinaryOp> {
     })
 }
 
-/// True if the class declares one of `map`'s private names (it shadows ours inside).
-fn shadows(tx: &Tx, class: NodeId, map: &FxHashMap<Atom, Member>) -> bool {
+/// The private names of `map` that `class` declares itself (they mean its own inside it).
+fn shadowed(tx: &Tx, class: NodeId, map: &FxHashMap<Atom, Member>) -> Vec<Atom> {
     let members = match tx.n(class) {
         Node::ClassDecl { members, .. } | Node::ClassExpr { members, .. } => members,
-        _ => return false,
+        _ => return Vec::new(),
     };
-    tx.items(members).iter().any(|&m| match tx.n(m) {
-        Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } => is_ours(tx, key, map),
-        _ => false,
-    })
+    let mut out = Vec::new();
+    for m in tx.items(members) {
+        if let Node::PropertyDef { key, .. } | Node::MethodDef { key, .. } = tx.n(m)
+            && let Some(n) = private_of(tx, key)
+            && map.contains_key(&n)
+            && !out.contains(&n)
+        {
+            out.push(n);
+        }
+    }
+    out
 }
 
 /// Rewrites the uses of `map`'s names under `root` in source order, so helpers are asked
 /// for in that order (explicit stack: no recursion).
 fn rewrite(tx: &mut Tx, root: NodeId, map: &FxHashMap<Atom, Member>, brand: Atom) {
-    let mut stack = vec![root];
-    let children = |tx: &Tx, n: NodeId, stack: &mut Vec<NodeId>| {
+    // Each entry is a node and the names in scope there: a nested class that declares some
+    // of ours gets a map without them (its heritage is still evaluated outside).
+    let mut maps: Vec<FxHashMap<Atom, Member>> = vec![map.clone()];
+    let mut stack: Vec<(NodeId, usize)> = vec![(root, 0)];
+    let children = |tx: &Tx, n: NodeId, scope: usize, stack: &mut Vec<(NodeId, usize)>| {
         let from = stack.len();
-        tx.ast.for_each_child(n, |c| stack.push(c));
+        tx.ast.for_each_child(n, |c| stack.push((c, scope)));
         stack[from..].reverse();
     };
-    while let Some(n) = stack.pop() {
+    while let Some((n, scope)) = stack.pop() {
+        let map = &maps[scope];
         let at = tx.at(n);
         match tx.n(n) {
-            Node::ClassDecl { .. } | Node::ClassExpr { .. } if shadows(tx, n, map) => {}
+            Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }
+                if !shadowed(tx, n, map).is_empty() =>
+            {
+                let hidden = shadowed(tx, n, map);
+                let mut inner = map.clone();
+                for h in &hidden {
+                    inner.remove(h);
+                }
+                let heritage = tx.items(heritage);
+                let inner_scope = if inner.is_empty() {
+                    None
+                } else {
+                    maps.push(inner);
+                    Some(maps.len() - 1)
+                };
+                let from = stack.len();
+                tx.ast.for_each_child(n, |c| {
+                    if heritage.contains(&c) {
+                        stack.push((c, scope));
+                    } else if let Some(s) = inner_scope {
+                        stack.push((c, s));
+                    }
+                });
+                stack[from..].reverse();
+            }
             Node::Binary {
                 left,
                 op: BinaryOp::In,
@@ -377,7 +458,7 @@ fn rewrite(tx: &mut Tx, root: NodeId, map: &FxHashMap<Atom, Member>, brand: Atom
                 let b = tx.ident_atom(brand, at);
                 let c = tx.call(f, &[b, right], at);
                 replace(tx.ast, n, c);
-                stack.push(right);
+                stack.push((right, scope));
             }
             Node::Assign { left, op, right } if member_of(tx, left, map).is_some() => {
                 let Some((obj, m)) = member_of(tx, left, map) else {
@@ -398,10 +479,10 @@ fn rewrite(tx: &mut Tx, root: NodeId, map: &FxHashMap<Atom, Member>, brand: Atom
                     Some(v) => {
                         let s = set(tx, obj, m, v, brand, at);
                         replace(tx.ast, n, s);
-                        stack.push(right);
-                        stack.push(obj);
+                        stack.push((right, scope));
+                        stack.push((obj, scope));
                     }
-                    None => children(tx, n, &mut stack),
+                    None => children(tx, n, scope, &mut stack),
                 }
             }
             Node::Call {
@@ -420,7 +501,7 @@ fn rewrite(tx: &mut Tx, root: NodeId, map: &FxHashMap<Atom, Member>, brand: Atom
                 all.extend(tx.items(args));
                 let c = tx.call(f, &all, at);
                 replace(tx.ast, n, c);
-                stack.extend(tx.items(args).into_iter().rev());
+                stack.extend(tx.items(args).into_iter().rev().map(|a| (a, scope)));
             }
             Node::Update { arg, .. } if member_of(tx, arg, map).is_some() => {}
             Node::Member { .. } if member_of(tx, n, map).is_some() => {
@@ -429,9 +510,9 @@ fn rewrite(tx: &mut Tx, root: NodeId, map: &FxHashMap<Atom, Member>, brand: Atom
                 };
                 let g = get(tx, obj, m, brand, at);
                 replace(tx.ast, n, g);
-                stack.push(obj);
+                stack.push((obj, scope));
             }
-            _ => children(tx, n, &mut stack),
+            _ => children(tx, n, scope, &mut stack),
         }
     }
 }

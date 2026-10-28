@@ -66,10 +66,14 @@ BUILDINFO}`, design record 0012) that cache keys are built from.
 - `extends` specs are rebased one level at a time; `${configDir}` is substituted only as a
   prefix; package `extends` uses conditions node/require/types/default and real paths.
   A package with no `node_modules` copy is looked up in the nearest Yarn PnP
-  `.pnp.data.json` (`pnp.rs`: owner by longest `packageLocation`, its `packageDependencies`,
+  `.pnp.data.json` (`pnp.rs`: owner by longest `packageLocation`, whole directory names compared with the
+  file system's case rule, its `packageDependencies`,
   aliases, `fallbackPool`), then resolved as usual (`exports`, `tsconfig`). This goes past
   tsc 7, which has no PnP and reports TS6053; it only applies where tsc would fail, and
   matches esbuild (`TsconfigPackageJsonExportsYarnPnP`, `TsconfigStackOverflowYarnPnP`).
+  Every manifest read for that (whether it resolved the name or not, inherited from bases)
+  is listed in `ParsedConfig::pnp_manifest_paths`: tools that watch config inputs watch it
+  too, next to `extended_config_paths`.
 - **Malformed JSON is reported as tsc 7 reports it** (`jsonc.rs` module and `parse` docs;
   observed with `tsc -p`, 220 inputs in `tests/fixtures/malformed`). tsc parses the file as
   one expression, so: parse errors keep one per position (TS1005, TS1109 "Expression

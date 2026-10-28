@@ -179,14 +179,23 @@ fn pattern_keys(cx: &Ctx<'_, '_>, name: NodeId, declarator: NodeId) -> Option<Ve
 }
 
 /// A global the file writes to (`Array = x`) doesn't count as the built-in.
+/// The written names are collected once per file.
 pub(crate) fn is_modified_global(cx: &Ctx<'_, '_>, name: &str) -> bool {
-    let sem = cx.semantic();
-    let ast = cx.ast();
-    sem.references().iter().any(|r| {
-        r.is_write()
-            && !matches!(r.resolution, Resolution::Symbol(s) if !sem.symbol(s).flags.contains(SymbolFlags::COMMENT_GLOBAL))
-            && ast.atom(r.name) == name
-    })
+    cx.file
+        .modified_globals
+        .get_or_init(|| {
+            let sem = cx.semantic();
+            let ast = cx.file.ast;
+            sem.references()
+                .iter()
+                .filter(|r| {
+                    r.is_write()
+                        && !matches!(r.resolution, Resolution::Symbol(s) if !sem.symbol(s).flags.contains(SymbolFlags::COMMENT_GLOBAL))
+                })
+                .map(|r| ast.atom(r.name))
+                .collect()
+        })
+        .contains(name)
 }
 
 /// Strips parentheses and the TS wrappers values pass through.

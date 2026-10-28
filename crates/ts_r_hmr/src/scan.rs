@@ -1220,14 +1220,17 @@ impl Scanner<'_> {
     }
 
     /// The end of the call argument starting at `from` (before a top-level `,` or `)`,
-    /// trailing whitespace trimmed); strings, templates and comments are skipped.
+    /// trailing whitespace trimmed); strings, templates, regex literals and comments are
+    /// skipped (a `/` where an operand may start begins a regex, as in the main scan).
     fn argument_end(&self, from: usize) -> Option<usize> {
         let mut depth = 0usize;
         let mut p = from;
         let mut last = from;
+        let mut prev = Last::Start;
         while p < self.src.len() {
             let q = self.skip_trivia(p);
-            match self.peek(q) {
+            let c = self.peek(q);
+            match c {
                 0 => return None,
                 b',' | b')' if depth == 0 => return (last > from).then_some(last),
                 b'(' | b'[' | b'{' => depth += 1,
@@ -1235,19 +1238,50 @@ impl Scanner<'_> {
                 b'"' | b'\'' => {
                     p = self.string_end(q);
                     last = p;
+                    prev = Last::Value;
                     continue;
                 }
                 b'`' => {
-                    let mut i = q + 1;
-                    while i < self.src.len() && self.src[i] != b'`' {
-                        i += if self.src[i] == b'\\' { 2 } else { 1 };
-                    }
-                    p = (i + 1).min(self.src.len());
+                    p = self.template_end(q).unwrap_or(self.src.len());
                     last = p;
+                    prev = Last::Value;
+                    continue;
+                }
+                b'/' if matches!(prev, Last::Start | Last::Operator) => {
+                    let end = self.regex_end(q);
+                    prev = if end > q + 1 {
+                        Last::Value
+                    } else {
+                        Last::Operator
+                    };
+                    p = end;
+                    last = p;
+                    continue;
+                }
+                c if is_ident_start(c) => {
+                    let end = self.ident_end(q);
+                    prev = if prev != Last::Dot && REGEX_KEYWORDS.contains(&&self.src[q..end]) {
+                        Last::Operator
+                    } else {
+                        Last::Value
+                    };
+                    p = end;
+                    last = p;
+                    continue;
+                }
+                b'0'..=b'9' => {
+                    p = self.number_end(q);
+                    last = p;
+                    prev = Last::Value;
                     continue;
                 }
                 _ => {}
             }
+            prev = match c {
+                b')' | b']' | b'}' => Last::Value,
+                b'.' => Last::Dot,
+                _ => Last::Operator,
+            };
             p = q + 1;
             last = p;
         }
@@ -1503,6 +1537,22 @@ const o = { import: 1 };
             .map(|&(s, e)| &code[s as usize..e as usize])
             .collect();
         assert_eq!(exprs, vec!["`../files/${v}.json`", "`./${`a`}.svg`"]);
+        // A regex literal's `,` and `)` are not argument boundaries; a division is no regex.
+        let code = "import(/,/.test(location.hash) ? './a.js' : './b.js'); import(a / b, { with: {} }); import(x ? /\\)/ : y)";
+        let exprs: Vec<&str> = scan(code)
+            .hot
+            .dynamic_exprs
+            .iter()
+            .map(|&(s, e)| &code[s as usize..e as usize])
+            .collect();
+        assert_eq!(
+            exprs,
+            vec![
+                "/,/.test(location.hash) ? './a.js' : './b.js'",
+                "a / b",
+                "x ? /\\)/ : y"
+            ]
+        );
     }
 
     #[test]

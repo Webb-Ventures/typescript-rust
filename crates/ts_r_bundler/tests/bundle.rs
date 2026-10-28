@@ -3255,3 +3255,96 @@ fn keep_names_keeps_function_expression_names_when_compressing() {
     let r = run_build(&fs, o);
     assert!(file(&r, "/proj/out/main.js").contains("function named("));
 }
+
+/// A class's shorthand reference to itself keeps its key when the reference becomes `_C`:
+/// `{ C }` is `{ C: _C }`, not `{ _C }`.
+#[test]
+fn class_self_reference_in_shorthand_keeps_its_key() {
+    let fs = project(&[(
+        "main.js",
+        "class C { static f() { return { C }; } }\nconsole.log(C.f().C === C);\n",
+    )]);
+    let r = run_build(&fs, opts(&["main.js"]));
+    let out = file(&r, "/proj/out/main.js");
+    assert!(out.contains("var C = class _C"), "{out}");
+    assert!(out.contains("C: _C"), "{out}");
+    if have_node() {
+        assert_eq!(run_node("class_self_shorthand", &r, "main.js"), "true\n");
+    }
+}
+
+/// `[hash]` in `--entry-names` is filled in everywhere the name is used: another entry's
+/// `import()` of it, and each chunk's `sourceMappingURL` comment.
+#[test]
+fn hashed_entry_names_are_filled_in_imports_and_map_comments() {
+    let fs = project(&[
+        (
+            "a.js",
+            "import('./b.js').then((m) => console.log(m.x, '[hash]'));\n",
+        ),
+        ("b.js", "export const x = 1;\n"),
+    ]);
+    let mut o = opts(&["a.js", "b.js"]);
+    o.splitting = true;
+    o.entry_names = "[name]-[hash]".into();
+    o.sourcemap = ts_r_bundler::SourceMapMode::Linked;
+    let r = run_build(&fs, o);
+    let name = |stem: &str| {
+        r.outputs
+            .iter()
+            .map(|o| o.path.as_str())
+            .find(|p| p.starts_with(&format!("/proj/out/{stem}-")) && p.ends_with(".js"))
+            .unwrap_or_else(|| panic!("no {stem} output"))
+            .strip_prefix("/proj/out/")
+            .unwrap()
+            .to_owned()
+    };
+    let (a, b) = (name("a"), name("b"));
+    assert!(!a.contains("[hash]") && !b.contains("[hash]"), "{a} {b}");
+    let a_code = file(&r, &format!("/proj/out/{a}"));
+    assert!(a_code.contains(&format!("import(\"./{b}\")")), "{a_code}");
+    // User text that looks like the placeholder is untouched.
+    assert!(a_code.contains("'[hash]'"), "{a_code}");
+    for f in [&a, &b] {
+        let code = file(&r, &format!("/proj/out/{f}"));
+        assert!(
+            code.contains(&format!("//# sourceMappingURL={f}.map")),
+            "{code}"
+        );
+        assert!(
+            r.outputs
+                .iter()
+                .any(|o| o.path == format!("/proj/out/{f}.map"))
+        );
+    }
+    if have_node() {
+        assert_eq!(run_node("hashed_entry_names", &r, &a), "1 [hash]\n");
+    }
+}
+
+/// Transform mode with `--keep-names`: the helper takes a name no binding of the file uses
+/// (`__name2` next to a user's `__name`), in its prelude and in every call.
+#[test]
+fn keep_names_helper_avoids_the_files_names_in_transform_mode() {
+    let fs = project(&[(
+        "main.js",
+        "let __name = 1;\n(function () { function longFunctionName() {} console.log(longFunctionName.name, __name) })();\n",
+    )]);
+    let mut o = opts(&["main.js"]);
+    o.bundle = false;
+    o.format = None;
+    o.keep_names = true;
+    o.minify_identifiers = true;
+    let r = run_build(&fs, o);
+    let out = file(&r, "/proj/out/main.js");
+    assert!(out.contains("var __name2 = "), "{out}");
+    assert!(out.contains("__name2("), "{out}");
+    assert!(out.contains("let __name = 1"), "{out}");
+    assert!(!out.contains("var __name ="), "{out}");
+    if have_node() {
+        assert_eq!(
+            run_node("keep_names_helper_name", &r, "main.js"),
+            "longFunctionName 1\n"
+        );
+    }
+}

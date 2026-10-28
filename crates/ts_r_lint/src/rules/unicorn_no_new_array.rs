@@ -68,12 +68,16 @@ impl Rule for NoNewArray {
                 .suggest("spread", "Spread the argument.", fix);
             return;
         }
-        let fixable = static_kind(cx, inner, 0).is_some_and(|k| k != Kind::Number);
+        let budget = std::cell::Cell::new(MAX_STEPS);
+        let fixable = static_kind(cx, inner, 0, &budget).is_some_and(|k| k != Kind::Number);
         cx.report(span, message)
             .id("error")
             .fix_opt(fixable.then_some(fix));
     }
 }
+
+/// Nodes one [`static_kind`] evaluation may visit.
+const MAX_STEPS: u32 = 10_000;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
@@ -91,13 +95,23 @@ enum Kind {
 /// values, the last expression of a side-effect-free sequence, array and object literals of
 /// known values, `undefined`/`NaN`/`Infinity`, and `const` bindings declared before use.
 /// Anything with possible side effects, branches, member reads or calls is unknown.
-fn static_kind(cx: &Ctx<'_, '_>, e: NodeId, depth: u32) -> Option<Kind> {
-    if depth > 32 {
+///
+/// `const` initializers are evaluated again at each use, so `budget` caps the nodes one
+/// evaluation visits: `const a1 = (a0, a0), a2 = (a1, a1), ...` would double the work per
+/// line. Past it the value is unknown.
+fn static_kind(
+    cx: &Ctx<'_, '_>,
+    e: NodeId,
+    depth: u32,
+    budget: &std::cell::Cell<u32>,
+) -> Option<Kind> {
+    if depth > 32 || budget.get() == 0 {
         return None;
     }
+    budget.set(budget.get() - 1);
     let ast = cx.ast();
     let e = skip_wrappers(ast, e);
-    let next = |id| static_kind(cx, id, depth + 1);
+    let next = |id| static_kind(cx, id, depth + 1, budget);
     Some(match *ast.node(e) {
         Node::NumberLit { .. } => Kind::Number,
         Node::BigIntLit { .. } => Kind::BigInt,
@@ -156,11 +170,11 @@ fn static_kind(cx: &Ctx<'_, '_>, e: NodeId, depth: u32) -> Option<Kind> {
             }
         }
         Node::Seq { exprs } => {
-            let exprs = ast.list(exprs);
-            for &x in exprs {
-                next(x)?;
+            let mut last = None;
+            for &x in ast.list(exprs) {
+                last = Some(next(x)?);
             }
-            next(*exprs.last()?)?
+            last?
         }
         Node::ArrayLit { elements } => {
             for &el in ast.list(elements) {

@@ -164,7 +164,17 @@ impl Lower<'_, '_> {
             cur = first.node;
             super_base = Some(first.node);
         } else {
+            // `(super.f)?.()`: the parenthesized access becomes `(_super.f)` too, and a call
+            // on it still passes `this`, not the `_super` object.
+            let inner = self.skip_parens(cur);
+            let paren_super = inner != cur
+                && self.super_ctx().is_some()
+                && matches!(self.n(inner), Node::Member { obj, .. } | Node::Index { obj, .. }
+                    if self.n(obj) == Node::Super {});
             self.visit(cur);
+            if paren_super {
+                super_base = Some(self.skip_parens(cur));
+            }
         }
         let mut open: Option<NodeId> = None;
         let last = links.len().saturating_sub(1);

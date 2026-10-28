@@ -4899,6 +4899,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                         );
                     }
                 }
+                Node::ImportCall {
+                    type_args: Some(ta),
+                    arg,
+                    ..
+                } if !matches!(ast.node(arg), Node::Missing {}) => {
+                    // `import<A>("m")` is only TS1326: tsc never looks at the type arguments
+                    // of an import call (a bare `import<T>` still resolves them).
+                    ast.for_each_child(n, |c| {
+                        if c != ta {
+                            stack.push(c);
+                        }
+                    });
+                    continue;
+                }
                 Node::TemplateLitType { .. } => {
                     // Resolving reports a union that is too large (TS2590).
                     let _ = self.type_from_node(Loc::new(file, n));
@@ -10155,17 +10169,32 @@ impl<'c, 'a> Ck<'c, 'a> {
 
 /// Whether an error at `d` in `sf` sits under a `// @ts-ignore` or `// @ts-expect-error`
 /// directive (for diagnostics reported outside a file's check, such as program merges).
+/// Reads the file's comments on every call: for many diagnostics, read them once with
+/// [`FileDirectives`].
 pub fn suppressed_by_directive(sf: &crate::program::SourceFile, d: &Diagnostic) -> bool {
-    if !d.is_error() {
-        return false;
+    d.is_error() && FileDirectives::of(sf).suppresses(sf, d)
+}
+
+/// The `@ts-ignore` / `@ts-expect-error` directives of one file, read from its comments
+/// once, for checking many diagnostics reported outside the file's check against them.
+#[derive(Debug, Default)]
+pub struct FileDirectives(Vec<(u32, Span, bool, bool)>);
+
+impl FileDirectives {
+    pub fn of(sf: &crate::program::SourceFile) -> FileDirectives {
+        FileDirectives(comment_directives(sf))
     }
-    let directives = comment_directives(sf);
-    !directives.is_empty()
-        && directive_for_line(sf, sf.lines().line_of(d.span.start), &directives).is_some()
+
+    /// [`suppressed_by_directive`] for `d` in `sf`, the file these were read from.
+    pub fn suppresses(&self, sf: &crate::program::SourceFile, d: &Diagnostic) -> bool {
+        d.is_error()
+            && !self.0.is_empty()
+            && directive_for_line(sf, sf.lines().line_of(d.span.start), &self.0).is_some()
+    }
 }
 
 /// The `@ts-ignore` / `@ts-expect-error` comments of `sf`: (line of the directive, span,
-/// is_expect, used).
+/// is_expect, used), in comment order (so by line).
 fn comment_directives(sf: &crate::program::SourceFile) -> Vec<(u32, Span, bool, bool)> {
     let ast = &sf.ast;
     let text = sf.text.as_str();
@@ -10220,7 +10249,9 @@ fn directive_for_line(
             return None;
         }
         l -= 1;
-        if let Some(i) = directives.iter().position(|d| d.0 == l) {
+        // In comment order, so by line: the first directive on line `l`.
+        let i = directives.partition_point(|d| d.0 < l);
+        if directives.get(i).is_some_and(|d| d.0 == l) {
             return Some(i);
         }
         let span = lines.line_span(l)?;

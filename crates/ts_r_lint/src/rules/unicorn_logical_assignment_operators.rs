@@ -28,9 +28,11 @@ pub static RULE: RuleDef = RuleDef {
 };
 
 #[derive(Debug)]
-struct LogicalAssignmentOperators {
+pub(crate) struct LogicalAssignmentOperators {
     never: bool,
     check_if: bool,
+    /// ESLint's core rule: a falsy `if` assignment gets the plain `||=` report.
+    core: bool,
 }
 
 impl FromOptions for LogicalAssignmentOperators {
@@ -39,6 +41,16 @@ impl FromOptions for LogicalAssignmentOperators {
         Ok(LogicalAssignmentOperators {
             never,
             check_if: !never && bool_field(obj_opt(opts, 1), "enforceForIfStatements", false),
+            core: false,
+        })
+    }
+}
+
+impl LogicalAssignmentOperators {
+    pub(crate) fn core(opts: &[Value]) -> Result<Self, String> {
+        Ok(LogicalAssignmentOperators {
+            core: true,
+            ..Self::from_options(opts)?
         })
     }
 }
@@ -73,6 +85,35 @@ fn is_reference(ast: &Ast, id: NodeId) -> bool {
     }
 }
 
+/// The core rule's `isReference`: an optional chain (`a?.b`) is not one.
+fn is_reference_core(ast: &Ast, id: NodeId, core: bool) -> bool {
+    is_reference(ast, id) && !(core && chain_has_optional(ast, skip_parens(ast, id)))
+}
+
+/// The core rule's `isInsideWithBlock`: `id` is in the body of a `with`.
+fn in_with_body(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let mut cur = id;
+    while let Some(p) = cx.parent(cur) {
+        if let Node::With { body, .. } = *cx.node(p)
+            && body == cur
+        {
+            return true;
+        }
+        cur = p;
+    }
+    false
+}
+
+/// The core rule's `isParenthesised`: a `(` before and a `)` after, which a call's own
+/// parentheses around its only argument also are.
+fn token_parenthesized(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    let src = cx.src();
+    let span = cx.span(id);
+    let before = skip_trivia_backward(cx.ast(), src, span.start as usize);
+    let after = skip_trivia_forward(src, span.end as usize);
+    before > 0 && src.as_bytes()[before - 1] == b'(' && src.as_bytes().get(after) == Some(&b')')
+}
+
 fn is_undefined_ref(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     let id = skip_parens(cx.ast(), id);
     is_undefined(cx.ast(), id) && !cx.is_shadowed(id, "undefined")
@@ -83,8 +124,12 @@ fn is_null(ast: &Ast, id: NodeId) -> bool {
 }
 
 /// `a === null` / `a === undefined` (either order): the reference and whether it is `null`.
-fn strict_nullish(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(NodeId, bool)> {
+fn strict_nullish(cx: &Ctx<'_, '_>, id: NodeId, core: bool) -> Option<(NodeId, bool)> {
     let ast = cx.ast();
+    let void0 = |id: NodeId| {
+        core && matches!(*ast.node(skip_parens(ast, id)), Node::Unary { op: UnaryOp::Void, arg }
+            if matches!(ast.node(skip_parens(ast, arg)), Node::NumberLit { value } if value.get() == 0.0))
+    };
     let Node::Binary {
         left,
         op: BinaryOp::StrictEq,
@@ -98,7 +143,7 @@ fn strict_nullish(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(NodeId, bool)> {
             if is_null(ast, n) {
                 return Some((r, true));
             }
-            if is_undefined_ref(cx, n) {
+            if is_undefined_ref(cx, n) || void0(n) {
                 return Some((r, false));
             }
         }
@@ -107,8 +152,9 @@ fn strict_nullish(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(NodeId, bool)> {
 }
 
 /// The tested reference and the operator the `if` amounts to.
-fn existence(cx: &Ctx<'_, '_>, test: NodeId) -> Option<(NodeId, &'static str)> {
+fn existence(cx: &Ctx<'_, '_>, test: NodeId, core: bool) -> Option<(NodeId, &'static str)> {
     let ast = cx.ast();
+    let is_reference = |ast: &Ast, id: NodeId| is_reference_core(ast, id, core);
     let test = skip_parens(ast, test);
     let (negated, base) = match *ast.node(test) {
         Node::Unary {
@@ -129,6 +175,22 @@ fn existence(cx: &Ctx<'_, '_>, test: NodeId) -> Option<(NodeId, &'static str)> {
     {
         return Some((skip_parens(ast, arg), "&&"));
     }
+    // `Boolean(a)`.
+    if core
+        && let Node::Call { callee, args, .. } = *ast.node(base)
+        && let [arg] = ast.list(args)
+        && cx.is_global_ref(callee, "Boolean")
+        && is_reference(ast, *arg)
+    {
+        return Some((skip_parens(ast, *arg), if negated { "||" } else { "&&" }));
+    }
+    let is_undefined_ref = |cx: &Ctx<'_, '_>, id: NodeId| {
+        is_undefined_ref(cx, id)
+            || (core
+                && matches!(*ast.node(skip_parens(ast, id)), Node::Unary { op: UnaryOp::Void, arg }
+                    if matches!(ast.node(skip_parens(ast, arg)), Node::NumberLit { value } if value.get() == 0.0)))
+    };
+    let strict_nullish = |cx: &Ctx<'_, '_>, id: NodeId| strict_nullish(cx, id, core);
     match *ast.node(test) {
         Node::Binary {
             left,
@@ -159,10 +221,13 @@ fn existence(cx: &Ctx<'_, '_>, test: NodeId) -> Option<(NodeId, &'static str)> {
 
 /// ESLint's `accessesSingleProperty`: `a.b`, `this.b`, `super.b`, or `a[k]` whose key is
 /// not itself a property access.
-fn accesses_single_property(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+fn accesses_single_property(cx: &Ctx<'_, '_>, id: NodeId, core: bool) -> bool {
     let ast = cx.ast();
     let id = skip_parens(ast, id);
-    if in_sloppy_with(cx, id) {
+    if core && in_with_body(cx, id) && !super::this_binding::is_strict(cx, id) {
+        return matches!(cx.node(id), Node::Ident { .. });
+    }
+    if !core && in_sloppy_with(cx, id) {
         return false;
     }
     let base = |obj: NodeId| {
@@ -211,6 +276,15 @@ fn report_with(
 }
 
 impl LogicalAssignmentOperators {
+    fn cannot_be_getter(&self, cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+        if !self.core {
+            return cannot_be_getter(cx, id);
+        }
+        let id = skip_parens(cx.ast(), id);
+        matches!(cx.node(id), Node::Ident { .. })
+            && (!in_with_body(cx, id) || super::this_binding::is_strict(cx, id))
+    }
+
     fn check_assign(&self, node: NodeId, cx: &mut Ctx<'_, '_>) {
         let ast = cx.ast();
         let src = cx.src();
@@ -253,7 +327,7 @@ impl LogicalAssignmentOperators {
                     edits[1..].to_vec(),
                 ));
             }
-            let as_fix = cannot_be_getter(cx, left);
+            let as_fix = self.cannot_be_getter(cx, left);
             report_with(
                 cx,
                 span,
@@ -284,9 +358,22 @@ impl LogicalAssignmentOperators {
         else {
             return;
         };
-        let Some(lop) = logical_op(lop) else {
+        let Some(lop_text) = logical_op(lop) else {
             return;
         };
+        // The core rule looks through `a || b || c` to its leftmost operand.
+        let (mut inner, mut ll, mut lr) = (r, ll, lr);
+        while self.core
+            && let Node::Binary {
+                left: l2,
+                op: op2,
+                right: r2,
+            } = *ast.node(ll)
+            && op2 == lop
+        {
+            (inner, ll, lr) = (ll, l2, r2);
+        }
+        let lop = lop_text;
         if !eslint_same_reference(ast, left, ll, true) {
             return;
         }
@@ -296,10 +383,10 @@ impl LogicalAssignmentOperators {
             let first = super::unicorn_text::paren_span(cx, lr).start;
             fix = Some(super::unicorn_util::with_edits(
                 Fix::replace(Span::at(eq_at), lop.to_owned()),
-                vec![(Span::new(cx.span(r).start, first), String::new())],
+                vec![(Span::new(cx.span(inner).start, first), String::new())],
             ));
         }
-        let as_fix = cannot_be_getter(cx, left);
+        let as_fix = self.cannot_be_getter(cx, left);
         report_with(
             cx,
             span,
@@ -332,7 +419,9 @@ impl LogicalAssignmentOperators {
         else {
             return;
         };
-        if !eslint_same_reference(ast, left, target, true) {
+        if !eslint_same_reference(ast, left, target, true)
+            || (self.core && !is_reference_core(ast, left, true))
+        {
             return;
         }
         let span = cx.span(node);
@@ -340,7 +429,11 @@ impl LogicalAssignmentOperators {
         let mut fix = None;
         if !has_comments(cx, span) {
             let parent = parent_skip_parens(ast, cx.file.parents, node);
-            let parenthesized = super::unicorn_text::is_parenthesized(cx, node);
+            let parenthesized = if self.core {
+                token_parenthesized(cx, node)
+            } else {
+                super::unicorn_text::is_parenthesized(cx, node)
+            };
             // Any parent but a statement, sequence, assignment, arrow or `yield` binds
             // tighter than the new assignment.
             let needs_outer = parent.is_some_and(|p| {
@@ -363,7 +456,8 @@ impl LogicalAssignmentOperators {
                 edits[1..].to_vec(),
             ));
         }
-        let as_fix = cannot_be_getter(cx, left);
+        let as_fix = self.cannot_be_getter(cx, left)
+            || (self.core && accesses_single_property(cx, left, true));
         report_with(
             cx,
             span,
@@ -402,7 +496,11 @@ impl LogicalAssignmentOperators {
         let Node::ExprStmt { expr } = *cx.node(body) else {
             return;
         };
-        let assign = expr;
+        let assign = if self.core {
+            skip_parens(ast, expr)
+        } else {
+            expr
+        };
         let Node::Assign {
             left: target,
             op: AssignOp::Assign,
@@ -411,7 +509,7 @@ impl LogicalAssignmentOperators {
         else {
             return;
         };
-        let Some((reference, operator)) = existence(cx, test) else {
+        let Some((reference, operator)) = existence(cx, test, self.core) else {
             return;
         };
         if !eslint_same_reference(ast, reference, target, true) {
@@ -453,14 +551,14 @@ impl LogicalAssignmentOperators {
                 ..
             }
         );
-        let as_fix = cannot_be_getter(cx, reference)
-            || (!test_is_logical && accesses_single_property(cx, reference));
+        let as_fix = self.cannot_be_getter(cx, reference)
+            || (!test_is_logical && accesses_single_property(cx, reference, self.core));
         let msg_for = |op: &str| {
             format!(
                 "'if' statement can be replaced with a logical operator assignment with operator {op}."
             )
         };
-        if operator == "||" {
+        if operator == "||" && !self.core {
             // Offered as both `||=` and `??=`.
             let r = cx
                 .report(

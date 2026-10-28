@@ -138,7 +138,11 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `css_modules` (local classes and keyframes, `:global`/`:local`, `composes` local, global
   and `from` a file; rules in that module's docs, from Vite's `plugins/css.ts` and
   postcss-modules' default naming): it exports the class map as its default and each name
-  that is a JS identifier as a named export, and `?inline` gives the scoped text. Scoped
+  that is a JS identifier as a named export, and `?inline` gives the scoped text. A
+  `composes: ... from` traversal reads and scopes each file once and puts its CSS in once,
+  where it is first composed (postcss-modules loads each composed file once); a cycle stops
+  and chains stop at depth 8 (`server.rs`, `ComposeWalk`), so layered files composing each
+  other are linear, not exponential. Scoped
   names hash only the URL and the name (`_<name>_<hash5>`, or `<hash6>_<name>` with
   `css.transformer: 'lightningcss'`, `DevConfig::css_module_naming`), so editing a rule keeps
   the page's class names: the module still self-accepts, where Vite updates its importers
@@ -238,9 +242,11 @@ are cached by content hash. Change `cache_id` when output for the same input can
   and post-plugin maps are composed (`sourcemap::compose`) into one map back to the original
   file (source renamed to its basename, `sourcesContent` filled); a hook that returns code
   without a map is skipped in the chain (treated as not moving text, as Vite does). Render-time edits
-  (import URLs, the line-1 hot/env prelude, `process.env.NODE_ENV`, glob expansions) never
-  add lines and shift the map's columns (`sourcemap::shift_for_edits`). The result is inlined
-  as a data URL.
+  (import URLs, the line-1 hot/env prelude, `process.env.NODE_ENV`, glob expansions, removed
+  import attributes, which keep their line breaks) never add lines and shift the map's columns
+  (`sourcemap::shift_for_edits`); the one prelude with line breaks, a worker's env part
+  (Vite's text, `import "/@vite/env"\n;\n`), moves every mapping down by its lines. The
+  result is inlined as a data URL.
 - **URLs are stored without `base`.** The graph, the HMR payloads (`path`, `acceptedPath`)
   and cached transforms are base-less; the base is added only when text leaves the server
   (`Shared::public_url`: rewritten imports, the client URL, the hot prelude, CSS-as-JS,
@@ -340,6 +346,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `transform` hooks too (pre on the source, post on the built-in step's CSS; the sidecar runs
   only normal-order hooks there), and their watch files join the stylesheet's dependencies.
   `load` runs for regular files when a `load` hook has no filter (`PluginHooks::load_files`).
+  Such a hook throwing for a file that exists is a module error (500 with the plugin's
+  message, the overlay, retried on the next request; on a hot update an `error` payload),
+  not a 404, which is only for a missing file.
 - **The transform cache is single-flight**: concurrent misses for one key run the transform
   once and the others wait for its result (`cache.rs`, `Flight`); a result whose watch files
   change its key is stored under the new key. The dependency scan shares `cached_transform`,
@@ -387,7 +396,9 @@ are cached by content hash. Change `cache_id` when output for the same input can
 - **`html.cspNonce`** (`DevConfig::csp_nonce`, `render::with_nonce`; observed on Vite's csp
   playground): a page gets `<meta property="csp-nonce" nonce="N" />` after the client script,
   and every `<script>`, `<style>` and `<link rel="stylesheet|modulepreload|preload">` without
-  a `nonce` gets `nonce="N"`. Script and style contents and comments are skipped.
+  a `nonce` attribute (with or without a value; found by parsing the tag's attributes, so
+  `nonce=` inside another attribute's quoted value doesn't count) gets `nonce="N"`. Script
+  and style contents and comments are skipped.
 - **Plugins are optional and cheap when absent.** Every hook call is skipped unless
   `PluginHost::hooks()` says some plugin has it (`Shared::plugin_hooks`, read once). With
   hooks, a module costs one batched `resolveId` call per stage, one `transform` call per stage
@@ -422,6 +433,8 @@ are cached by content hash. Change `cache_id` when output for the same input can
   globals unwrap `.value`, served through a `?vite-wasm-instance` module so a wasm file that
   imports another wasm's globals shares one instance. The glue is a graph module
   (`<file>?wasm-module.js` / `?wasm-instance.js`) so its imports hot-update like a script's.
+  Its own bindings are all `__tsr_`: an export named so is bound under `__tsr_wasmExport_N`
+  and exported under its name, so it can't collide with them.
   `?url` and a plain fetch serve the binary.
 - **Workers** (`worker.rs`, `vite: packages/vite/src/node/plugins/worker.ts`): `?worker` /
   `?sharedworker` imports export a function constructing `Worker`/`SharedWorker` on the file's
@@ -431,9 +444,12 @@ are cached by content hash. Change `cache_id` when output for the same input can
   `new Worker(new URL('./w.js', import.meta.url))` (and `SharedWorker`) is found by the
   scanner (`HotInfo::asset_url_workers`): the URL is never inlined and gets
   `?worker_file&type=classic`, or `type=module` when the options are an object literal with
-  `type: 'module'`; `/* @vite-ignore */` leaves it alone. A classic worker gets no hot or env
+  `type: 'module'` (`/* @vite-ignore */`: below). A classic worker gets no hot or env
   import prelude, and when it has non-literal dynamic imports an inline
-  `__vite__injectQuery` function is appended (it can't import the client).
+  `__vite__injectQuery` function is appended (it can't import the client). Options with
+  `/* @vite-ignore */` give `type=ignore` (as Vite's URL does); such a worker may be either
+  kind, so its file gets the env module's code inline (nothing when there are no defines)
+  instead of an `import` (`vite: packages/vite/src/node/plugins/worker.ts`).
 - **`optimizeDeps.exclude`** (`DevConfig::optimize_exclude`): a named package (or a subpath of
   it) is never pre-bundled: it resolves to its files and is served module by module.
 - **`DevServer::url()`** encodes the base (`encodeURI`), so a base with spaces or non-ASCII
@@ -559,7 +575,10 @@ wrapper ~0.6, browser ~2.4).
 - No `parse<T>` validator expansion here (`ts_r_dev` wraps the transform). React Fast Refresh
   and Vite config/plugin loading live in `ts_r_dev`. Plugin seam gaps: filtered `load` hooks
   aren't called for plain script, CSS, JSON or asset files; JSON and asset modules' watch
-  files aren't tracked; no `emitFile`; plugin source maps
+  files aren't tracked; a `.json` file's post `transform` hooks' output is served as they
+  return it, so an `import` a hook adds there is not resolved or rewritten (Vite runs import
+  analysis on it; a plugin module with a JSON id goes through the script pipeline and is
+  fine); no `emitFile`; plugin source maps
   are composed but asset/JSON modules carry no map; middlewares run only for requests no built-in route serves (and non-GET
   requests), with buffered bodies (no streaming/SSE); the dependency scan resolves through `resolveId` and aliases but doesn't look
   through plugin modules (their bare imports are found on request: re-batch + reload).

@@ -294,7 +294,7 @@ pub fn instance_module(info: &WasmInfo, url: &str) -> String {
     let mut locals = Vec::new();
     let mut exported = Vec::new();
     for (i, e) in info.exports.iter().enumerate() {
-        if is_declarable(&e.name) {
+        if own_binding(&e.name) {
             locals.push(e.name.clone());
             exported.push(e.name.clone());
         } else {
@@ -335,7 +335,7 @@ pub fn wrapper_module(info: &WasmInfo, instance: &str) -> String {
             continue;
         }
         let alias = format!("__tsr_wasmGlobal_{i}");
-        let (imported, binding) = if is_declarable(&e.name) {
+        let (imported, binding) = if own_binding(&e.name) {
             (e.name.clone(), e.name.clone())
         } else {
             (js(&e.name), format!("__tsr_wasmGlobalValue_{i}"))
@@ -371,6 +371,13 @@ fn simple_object(fields: &[String]) -> String {
 
 fn js(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_owned())
+}
+
+/// Whether an export can be bound under its own name in the glue modules: it can be a
+/// `const` binding and can't collide with the names they generate (all `__tsr_`), which
+/// such exports get instead, aliased back to the export's name.
+fn own_binding(name: &str) -> bool {
+    is_declarable(name) && !name.starts_with("__tsr_")
 }
 
 /// Whether `name` can be a `const` binding: an ASCII identifier that isn't reserved.
@@ -649,6 +656,39 @@ mod tests {
             "{plain}"
         );
         assert!(!instance_module(&WasmInfo::default(), "/a.wasm").contains("export "));
+
+        // Exports named like the glue's own bindings are aliased, not redeclared.
+        let clash = |name: &str, global: bool| Item {
+            name: name.to_owned(),
+            global,
+        };
+        let info = WasmInfo {
+            imports: vec![],
+            exports: vec![
+                clash("__tsr_wasmUrl", false),
+                clash("__tsr_wasmModule", false),
+                clash("__tsr_wasmExport_0", false),
+                clash("__tsr_wasmGlobal_0", true),
+            ],
+        };
+        let out = instance_module(&info, "/a.wasm");
+        assert!(
+            out.contains("const { \"__tsr_wasmUrl\": __tsr_wasmExport_0, \"__tsr_wasmModule\": __tsr_wasmExport_1, \"__tsr_wasmExport_0\": __tsr_wasmExport_2, \"__tsr_wasmGlobal_0\": __tsr_wasmExport_3 } = __tsr_wasmModule;"),
+            "{out}"
+        );
+        assert!(
+            out.contains("export { __tsr_wasmExport_0 as \"__tsr_wasmUrl\", __tsr_wasmExport_1 as \"__tsr_wasmModule\", __tsr_wasmExport_2 as \"__tsr_wasmExport_0\", __tsr_wasmExport_3 as \"__tsr_wasmGlobal_0\" };"),
+            "{out}"
+        );
+        let wrapper = wrapper_module(&info, "./a.wasm?vite-wasm-instance");
+        assert!(
+            wrapper.contains("import { \"__tsr_wasmGlobal_0\" as __tsr_wasmGlobal_3 }"),
+            "{wrapper}"
+        );
+        assert!(
+            wrapper.contains("export { __tsr_wasmGlobalValue_3 as \"__tsr_wasmGlobal_0\" };"),
+            "{wrapper}"
+        );
     }
 
     #[test]

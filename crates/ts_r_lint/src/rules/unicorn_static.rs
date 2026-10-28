@@ -309,17 +309,73 @@ fn key_of(v: &Static) -> Option<String> {
 }
 
 const MAX_DEPTH: u32 = 24;
+/// Nodes one [`static_value`] may evaluate: a `const` is evaluated again at each use, so
+/// `const a1 = [a0, a0], a2 = [a1, a1], ...` doubles the work per line.
+const MAX_STEPS: u32 = 100_000;
+/// Array elements, object entries and string bytes one [`static_value`] may produce in all:
+/// ten spreads of the previous array per line multiply the size by ten.
+const MAX_SIZE: usize = 1 << 21;
+
+/// What one evaluation may still spend (see [`MAX_STEPS`], [`MAX_SIZE`]).
+struct Budget {
+    steps: std::cell::Cell<u32>,
+    size: std::cell::Cell<usize>,
+}
+
+/// The nesting depth of an evaluation, and the budget it shares with the whole evaluation.
+#[derive(Clone, Copy)]
+struct Lvl<'b> {
+    depth: u32,
+    budget: &'b Budget,
+}
+
+impl Budget {
+    /// Charges what `v` holds directly (its parts were charged when they were produced).
+    fn charge(&self, v: &Static) -> bool {
+        let n = match v {
+            Static::Str(s) => s.len(),
+            Static::Array(items) => items.len(),
+            Static::Object(entries) => entries.len(),
+            _ => 0,
+        };
+        let left = self.size.get();
+        self.size.set(left.saturating_sub(n));
+        n <= left
+    }
+}
 
 /// ESLint's `getStaticValue`: the value of `id`, if known.
 pub(crate) fn static_value(cx: &Ctx<'_, '_>, id: NodeId) -> Option<Static> {
-    eval(cx, id, 0)
+    let budget = Budget {
+        steps: std::cell::Cell::new(MAX_STEPS),
+        size: std::cell::Cell::new(MAX_SIZE),
+    };
+    eval(
+        cx,
+        id,
+        Lvl {
+            depth: 0,
+            budget: &budget,
+        },
+    )
 }
 
-fn eval(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Option<Static> {
-    if depth > MAX_DEPTH {
+/// [`eval_node`] within the depth limit and the budget: past either the value is unknown.
+fn eval(cx: &Ctx<'_, '_>, id: NodeId, lvl: Lvl<'_>) -> Option<Static> {
+    let b = lvl.budget;
+    if lvl.depth > MAX_DEPTH || b.steps.get() == 0 || b.size.get() == 0 {
         return None;
     }
-    let d = depth + 1;
+    b.steps.set(b.steps.get() - 1);
+    let v = eval_node(cx, id, lvl)?;
+    b.charge(&v).then_some(v)
+}
+
+fn eval_node(cx: &Ctx<'_, '_>, id: NodeId, lvl: Lvl<'_>) -> Option<Static> {
+    let d = Lvl {
+        depth: lvl.depth + 1,
+        ..lvl
+    };
     let ast = cx.ast();
     match *ast.node(id) {
         Node::Paren { expr }
@@ -366,6 +422,10 @@ fn eval(cx: &Ctx<'_, '_>, id: NodeId, depth: u32) -> Option<Static> {
                         _ => return None,
                     },
                     _ => out.push(eval(cx, e, d)?),
+                }
+                // Stop growing as soon as the result could not be charged.
+                if out.len() > d.budget.size.get() {
+                    return None;
                 }
             }
             Some(Static::Array(out))
@@ -597,7 +657,7 @@ fn raw_template_text<'a>(cx: &Ctx<'a, '_>, element: NodeId) -> &'a str {
         .unwrap_or(text)
 }
 
-fn property_key(cx: &Ctx<'_, '_>, key: NodeId, depth: u32) -> Option<String> {
+fn property_key(cx: &Ctx<'_, '_>, key: NodeId, depth: Lvl<'_>) -> Option<String> {
     let ast = cx.ast();
     match *ast.node(key) {
         Node::ComputedKey { expr } => key_of(&eval(cx, expr, depth)?),
@@ -607,7 +667,7 @@ fn property_key(cx: &Ctx<'_, '_>, key: NodeId, depth: u32) -> Option<String> {
     }
 }
 
-fn arg_values(cx: &Ctx<'_, '_>, args: &[NodeId], depth: u32) -> Option<Vec<Static>> {
+fn arg_values(cx: &Ctx<'_, '_>, args: &[NodeId], depth: Lvl<'_>) -> Option<Vec<Static>> {
     let ast = cx.ast();
     let mut out = Vec::new();
     for &a in args {
@@ -619,7 +679,12 @@ fn arg_values(cx: &Ctx<'_, '_>, args: &[NodeId], depth: u32) -> Option<Vec<Stati
         } else {
             out.push(eval(cx, a, depth)?);
         }
+        if out.len() > depth.budget.size.get() {
+            return None;
+        }
     }
+    let b = depth.budget;
+    b.size.set(b.size.get().saturating_sub(out.len()));
     Some(out)
 }
 

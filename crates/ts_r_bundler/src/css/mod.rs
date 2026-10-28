@@ -17,7 +17,7 @@ pub mod print;
 
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use lexer::{T, Token};
 
@@ -262,6 +262,7 @@ pub fn parse_with(src: Arc<str>, mode: NameMode, modules: bool) -> Sheet {
             ..Sheet::default()
         },
         local_ids: FxHashMap::default(),
+        global_set: FxHashSet::default(),
         mode,
         depth: 0,
         compose_target: None,
@@ -320,6 +321,8 @@ struct Parser {
     i: usize,
     sheet: Sheet,
     local_ids: FxHashMap<String, u32>,
+    /// Members of `sheet.globals` (which keeps their order).
+    global_set: FxHashSet<String>,
     mode: NameMode,
     /// The class a `composes` in the current rule applies to (a nested rule whose selector
     /// is empty or `&` composes for its parent).
@@ -358,6 +361,13 @@ fn trim(v: &[Cv]) -> &[Cv] {
 impl Parser {
     fn text(&self, t: &Token) -> &str {
         t.text(&self.src)
+    }
+
+    /// Records a global class or ID name once, in order of first appearance.
+    fn global(&mut self, name: String) {
+        if self.global_set.insert(name.clone()) {
+            self.sheet.globals.push(name);
+        }
     }
 
     fn warn(&mut self, pos: u32, text: impl Into<String>) {
@@ -772,9 +782,7 @@ impl Parser {
                         }
                         Some(Cv::Tok(n)) if n.t == T::Ident => {
                             let name = lexer::unescape(self.text(n));
-                            if !self.sheet.globals.contains(&name) {
-                                self.sheet.globals.push(name);
-                            }
+                            self.global(name);
                             out.push(cv);
                         }
                         _ => out.push(cv),
@@ -782,9 +790,7 @@ impl Parser {
                 }
                 Cv::Tok(t) if t.t == T::IdHash && *mode == NameMode::Global => {
                     let name = lexer::unescape(&self.text(&t)[1..]);
-                    if !self.sheet.globals.contains(&name) {
-                        self.sheet.globals.push(name);
-                    }
+                    self.global(name);
                     out.push(cv);
                 }
                 Cv::Tok(t) if t.t == T::IdHash && *mode == NameMode::Local => {
@@ -1408,6 +1414,22 @@ mod tests {
         assert_eq!(s.records[1].spec, "c.png");
         let c = &s.imports[0].conditions;
         assert!(c.layer.is_some() && c.supports.is_some() && !c.media.is_empty());
+    }
+
+    /// Global names are collected once each, in order, with hash lookups: 50,000 distinct
+    /// classes used to cost 1.25 billion string comparisons.
+    #[test]
+    fn many_global_names_are_collected_once() {
+        let mut src = String::new();
+        for i in 0..50_000 {
+            src.push_str(&format!(".u{i:05}{{color:red}}"));
+        }
+        src.push_str(".u00000, #idx, #idx, #u00001 {}");
+        let s = p(&src, NameMode::Global);
+        assert_eq!(s.globals.len(), 50_001);
+        assert_eq!(s.globals[0], "u00000");
+        assert_eq!(s.globals[49_999], "u49999");
+        assert_eq!(s.globals[50_000], "idx");
     }
 
     #[test]

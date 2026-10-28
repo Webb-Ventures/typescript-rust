@@ -41,6 +41,10 @@ pub struct PnpManifest {
     fallback: bool,
     fallback_pool: Vec<(String, Option<Locator>)>,
     fallback_excluded: Vec<Locator>,
+    /// Paths compare ignoring case (the file system's `case_sensitive` is false).
+    case_sensitive: bool,
+    /// The manifest file (empty for one built by [`PnpManifest::from_json`]).
+    path: String,
 }
 
 impl PnpManifest {
@@ -54,7 +58,10 @@ impl PnpManifest {
                 if fs.file_exists(&file) {
                     let text = fs.read_file(&file)?;
                     let root = jsonc::parse(&text, &file).root?;
-                    return Some(Self::from_json(&root, &dir));
+                    let mut manifest = Self::from_json(&root, &dir);
+                    manifest.case_sensitive = fs.case_sensitive();
+                    manifest.path = file;
+                    return Some(manifest);
                 }
             }
             let parent = path::directory_of(&dir).to_owned();
@@ -66,7 +73,7 @@ impl PnpManifest {
     }
 
     /// Reads the manifest's JSON; `dir` is the directory it was found in. Malformed entries
-    /// are skipped.
+    /// are skipped. Paths compare case-sensitively (`find` uses the file system's rule).
     pub fn from_json(root: &Value, dir: &str) -> PnpManifest {
         let mut packages = Vec::new();
         for entry in root
@@ -125,15 +132,23 @@ impl PnpManifest {
                 .unwrap_or(false),
             fallback_pool: dependency_list(root.get("fallbackPool")),
             fallback_excluded,
+            case_sensitive: true,
+            path: String::new(),
         }
     }
 
-    /// The package that owns `file`: the longest `packageLocation` prefix of its path.
+    /// The manifest file it was read from, a configuration input for watchers.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// The package that owns `file`: the longest `packageLocation` prefix of its path,
+    /// compared with the file system's case rule.
     fn owner(&self, file: &str) -> Option<&Package> {
         let file = path::normalize(file);
         self.packages
             .iter()
-            .filter(|p| file.starts_with(&p.location) || format!("{file}/") == p.location)
+            .filter(|p| path::contains(&p.location, &file, self.case_sensitive))
             .max_by_key(|p| p.location.len())
     }
 
@@ -239,6 +254,34 @@ mod tests {
         assert_eq!(
             m.package_dir("app", "/w/tsconfig.json").as_deref(),
             Some("/w/packages/app/")
+        );
+    }
+
+    /// On a case-insensitive file system a config loaded as `/w/packages/APP/tsconfig.json`
+    /// is the `./packages/app/` package's, as the file system sees one file.
+    #[test]
+    fn owner_follows_file_system_case_sensitivity() {
+        let mut fs = MemoryFs::case_insensitive();
+        fs.add_file("/w/.pnp.data.json", DATA);
+        let m = PnpManifest::find(&fs, "/w/packages/APP").expect("manifest");
+        assert_eq!(
+            m.package_dir("cfg", "/w/packages/APP/tsconfig.json")
+                .as_deref(),
+            Some("/w/packages/cfg/")
+        );
+        assert_eq!(
+            m.package_dir("cfg", "/W/Packages/App").as_deref(),
+            Some("/w/packages/cfg/")
+        );
+        // Case-sensitive: `APP` is outside the package (the top level owns it).
+        let mut fs = MemoryFs::new();
+        fs.add_file("/w/.pnp.data.json", DATA);
+        let m = PnpManifest::find(&fs, "/w/packages/APP").expect("manifest");
+        assert_eq!(m.package_dir("cfg", "/w/packages/APP/tsconfig.json"), None);
+        // A prefix that is not a whole directory name is not inside the package.
+        assert_eq!(
+            m.package_dir("cfg", "/w/packages/apple/tsconfig.json"),
+            None
         );
     }
 

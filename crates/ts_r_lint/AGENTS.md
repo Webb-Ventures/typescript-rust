@@ -77,7 +77,8 @@ Files:
 - **Rules are stateless.** `Rule` objects are shared across threads and files; per-file state
   lives in locals of `run_file`, or is derived from `cx.file.parents` / `cx.semantic()`.
   Whole-file facts that many reports need are worked out once in a `FileCtx` `OnceCell`
-  (`semantic`, and `indent_unit` for the unicorn fixes), never per report.
+  (`semantic`, `indent_unit` for the unicorn fixes, `modified_globals` for
+  `unicorn_util::is_modified_global`), never per report.
 - **One walk per file.** Rules register node kinds in `kinds()` / `exit_kinds()`; whole-file
   rules use `run_file` and should walk only what they need.
 - **The semantic model is lazy** (`FileCtx::semantic`) and behind the `Semantic` trait.
@@ -149,13 +150,15 @@ Files:
   file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
   hash of the file's `import/*` settings.
 
-## Status (v1 lint round 9, `wip/v1-lint9`)
+## Status (v1 lint round 10, `wip/v1-lint10`)
 
-- 718 rules (134 core ESLint, 95 typescript-eslint, 74 eslint-plugin-jsdoc, 369
-  eslint-plugin-unicorn, 46 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  77,171 / 77,196 cases. The non-type-aware cases are 70,160 / 70,184 and the type-aware
-  cases 7,011 / 7,012 (2026-10-27); the type-aware failure is `unbound-method` on an
-  `Array` subclass's statics (design record 0006). The 24 others: import/no-unresolved 77/80 (3 cases need the
+- 814 rules (200 core ESLint, 125 typescript-eslint, 74 eslint-plugin-jsdoc, 369
+  eslint-plugin-unicorn, 46 eslint-plugin-import), 61 of them type-aware. Rule oracle:
+  90,430 / 90,461 cases. The non-type-aware cases are 82,432 / 82,463 and the type-aware
+  cases 7,998 / 7,998 (2026-10-27). The 31 failures: no-shadow 360/363 and
+  @typescript-eslint/no-shadow 238/239 (a `.d.ts` script's top-level declarations),
+  no-use-before-define 353/354, func-name-matching 192/193 (esutils' older Unicode tables),
+  prefer-object-spread 106/107 (an HTML-comment parse error), import/no-unresolved 77/80 (3 cases need the
   uppercase absolute path of the machine that recorded them), import/default 22/23 (its
   `FooES7` case needs espree's ecmaVersion parse error) and import/no-unused-modules 111/131
   (the 20 cases depend on state upstream's tests leave behind from earlier cases; linting
@@ -448,7 +451,9 @@ should-add-parentheses-to-expression-statement-expression,comments}.js`, `ast/` 
 - **escape-inline-tags**: an `@word` at the start of a description line or after whitespace
   is reported unless allowed, inside a markdown code span, or the scoped-package part of a
   `{@link @scope/pkg}`. Descriptions are scanned first, then each tag but `@example`, one
-  report per remaining occurrence; the fixer escapes with `\@` or backticks.
+  report per remaining occurrence, on the first of the tag's lines whose escape changes
+  something (a line whose only `@name` is in a code span is skipped); the fixer escapes with
+  `\@` or backticks. Code spans are worked out once per description.
 
 Round 3 adds 32 more rules (`src/rules/jsdoc_*.rs`; shared helpers in `src/jsdoc_util.rs`):
 `require-param-{name,type}`, `require-property-{name,type,description}`, `require-{returns,throws,yields}-{type,description}`,
@@ -564,6 +569,11 @@ description}.ts`, `src/util.ts`, `src/stringifier/index.ts`.
   else gets `parsedType: null`, as a type that fails to parse does. Children follow the type
   parser's visitor keys (`left`, `right`, `element`, `elements`); nested plain objects such
   as `meta.quote` / `meta.brackets` / `meta.dot` / `meta.separator` are attributes.
+- **Depth.** Selector nesting and `parse_type` nesting stop at 64 levels with an error
+  (selectors: an option error) or `parsedType: null`. Each combinator of a flat chain
+  (`a > b > c`) and each type suffix (`[]`, `.b`, `<B>`) counts as a level, because the
+  trees they build are walked and dropped recursively. Sibling selectors try candidates
+  lazily, in list order.
 
 Read to understand (not ported): esquery `dist/esquery.esm.js`; ESLint
 `lib/linter/esquery.js`, `lib/linter/source-code-traverser.js`. The type shapes come from
@@ -790,7 +800,10 @@ no type checker. Two modules answer the way the plugin does, so the rules stay a
   `Object.freeze`/`seal`/`preventExtensions` of a static value pass their argument through.
   `static_value_control_flow` also needs every binding on an evaluated path to be a `const`
   declared before the use. Evaluated children skip functions, classes, type nodes,
-  non-computed member names and plain property keys.
+  non-computed member names and plain property keys. A `const` is evaluated again at each
+  use, so one `static_value` call has a budget (100,000 nodes, 2^21 array elements, object
+  entries and string bytes produced); past it the value is unknown, never a huge
+  allocation. `unicorn/no-new-array`'s own `static_kind` has a 10,000-node budget.
 - **`unicorn_types.rs`: the guessing engine.** A `Checker` lists the target type names, the
   names known not to be it, aliases (`ReadonlyMap` is `Map`), target imports, constructor and
   call names, and hooks for node shapes, annotations, JSDoc types and static values. It
@@ -1047,8 +1060,9 @@ Read to understand (not ported): eslint-plugin-unicorn `rules/no-useless-recursi
   root types (`this` only outside class context), as the reference's default strict mode
   does; the rules call it with `class_context` false except valid-types.
   `parse_name_path(.., include_special)` and `parse_name` are the namepath and name
-  grammars. Recursion stops at depth 64 (`MAX_DEPTH`) with a failed parse; a regression
-  test checks deep nesting. Checked differentially against jsdoc-type-pratt-parser 8.0.0
+  grammars. Recursion stops at depth 64 (`MAX_DEPTH`) with a failed parse, and each infix
+  wrap (`A[][]`, `a.b.c`) counts as a level too, so `stringify` and the tree walks stay
+  shallow; a regression test checks deep nesting. Checked differentially against jsdoc-type-pratt-parser 8.0.0
   on 635 type strings (every type in the jsdoc oracle data plus hand-written ones): tree,
   stringify, namepath and name results agree in all 5715 comparisons (mode x entry point).
   `JsdocTree`'s selector view still uses its own smaller parser (`parse_type`); switching it
@@ -3100,3 +3114,359 @@ Read to understand (not ported): eslint-plugin-unicorn 79.0.0 `rules/comment-con
 and its `rules/utils/` helpers; eslint-plugin-jsdoc 63.3.3 `src/rules/typeFormatting.js`,
 `src/rules/checkExamples.js`; jsdoc-type-pratt-parser 8.0.0 `dist/index.cjs` (object
 parslet and stringify rules).
+
+## Core and typescript-eslint rules (round 10, lead)
+
+All pass their oracle data unless a count says otherwise.
+
+- Syntax and token rules: `dot-notation`, `no-implied-eval`, `prefer-promise-reject-errors`,
+  `require-await`, `max-params`, `@typescript-eslint/default-param-last`, `curly`,
+  `object-shorthand`, `prefer-template`, `prefer-arrow-callback`, `arrow-body-style`,
+  `func-names`, `no-ternary`, `no-extra-label`, `consistent-this`, `max-classes-per-file`,
+  `no-undefined`, `func-style`, `max-statements`, `complexity` (a class-field arrow is
+  "Method 'x'", its head running from the field to `(`), `no-inner-declarations`,
+  `sort-vars`, `strict`, `id-length`, `id-denylist`, `operator-assignment` (own `same_ref`;
+  the unicorn port missed 12 cases), `id-match` (reuses `unicorn_id_match::IdMatch`).
+- Global member calls: `prefer-exponentiation-operator` and `prefer-object-spread` (106/107:
+  the miss is an HTML-comment parse error) find `Math.pow(..)` / `Object.assign(..)` with
+  `global_member_calls`, as ESLint's ReferenceTracker does: also through `globalThis.X`,
+  parentheses and `?.`, and none when the global is written anywhere in the file. `joins`
+  is ESLint's `canTokensBeAdjacent`, negated.
+- `logical-assignment-operators` runs `unicorn_logical_assignment_operators.rs` with
+  `core: true` (leftmost operand only, no optional chains, `Boolean()` casts, `void 0`).
+- Comment and line rules: `no-warning-comments`, `no-inline-comments` (share
+  `is_directive`/`comment_value`), `max-lines`, `max-lines-per-function` (share
+  `line_starts`/`comment_only_lines`).
+- Code-path rules: `no-useless-return`, `consistent-return` (+ ts), `no-unreachable-loop`
+  (`Cfg.loops` records each loop's blocks and its continue target; a loop is reported when
+  no reachable block of its body goes back to it).
+- `@typescript-eslint/unbound-method` (218/218): `typeof C` keyed by symbol in the checker
+  (`sym_key`) now reports that symbol from `type_symbol`, and a class whose bases are
+  `Array`-like or a bound global counts as bound (`class Foo extends Array {}; Foo.isArray`).
+- Not done: `unicode-bom` (the CLI and the harness strip the BOM before linting, so the rule
+  would need a `has_bom` flag on the file), `jsdoc/check-examples`.
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/` `curly.js`, `object-shorthand.js`,
+`prefer-template.js`, `prefer-arrow-callback.js`, `arrow-body-style.js`, `func-names.js`,
+`no-useless-return.js`, `consistent-return.js`, `no-implied-eval.js`, `require-await.js`,
+`prefer-promise-reject-errors.js`, `no-unreachable-loop.js`, `prefer-exponentiation-operator.js`,
+`operator-assignment.js`, `prefer-object-spread.js`, `logical-assignment-operators.js`,
+`id-match.js`, `no-ternary.js`, `no-extra-label.js`, `consistent-this.js`,
+`max-classes-per-file.js`, `no-warning-comments.js`, `no-inline-comments.js`, `no-undefined.js`,
+`func-style.js`, `max-lines.js`, `max-statements.js`, `max-lines-per-function.js`,
+`complexity.js`, `no-inner-declarations.js`, `sort-vars.js`, `strict.js`, `id-length.js`,
+`id-denylist.js`, `utils/ast-utils.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/consistent-return.ts`, `unbound-method.ts`.
+
+## Core and typescript-eslint rules (round 10, h1)
+
+Scope rules over `cx.semantic()`; each runs once per file in `run_file`.
+
+- **`no-shadow`** (360/363) and **`@typescript-eslint/no-shadow`** (238/239) share
+  `no_shadow.rs`; `cx.rule_name()` picks the variant (ts: `hoist` defaults to
+  `functions-and-types`, enum shadows are `noEnumShadow`, type-import and static-generic
+  exemptions are narrower). Every non-global scope's symbols are looked up from the parent
+  scope; a missing or `/* global */` binding is a global (only with `builtinGlobals`).
+  Reports and "declared at" positions use ESTree's identifier range, which includes a
+  parameter's or declarator's type annotation (`no_shadow::name_span`). Not done: a `.d.ts`
+  without imports or exports is a script, so its top-level `function f(): void;` doesn't
+  shadow a configured global (4 cases).
+- **`no-use-before-define`** (353/354) and **`@typescript-eslint/no-use-before-define`**
+  (127/127) share `no_use_before_define.rs`; the two upstream rules differ (core: "separate
+  execution context" through static initializers, class-name ranges; ts: outer-scope options,
+  type references, named exports, which typescript-eslint also counts as type references).
+  Not done: `"use strict"; a(); { function a() {} }` (1 case: the block function resolves at
+  the top level in ESLint's scope analysis).
+- **`no-param-reassign`** (78/78): writes to a symbol whose first declaration is a
+  parameter; with `props`, member writes, updates, `delete` and `for-in/of` targets.
+- **`no-underscore-dangle`** (116/116), **`camelcase`** (204/204): syntactic checks plus the
+  references of declared, configured-global and undeclared names; camelcase skips call
+  arguments, default values, `import()` option keys and (with `ignoreDestructuring`) names
+  that repeat their key, and reports once per start position.
+- **`no-loop-func`** (96/96): a function scope's "through" references are worked out once
+  per file (each reference walks up to its binding's scope). Plain IIFEs in a loop count as
+  the loop's own code unless they name themselves.
+- **`block-scoped-var`** (106/106), **`vars-on-top`** (61/61).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-shadow.js`,
+`no-use-before-define.js`, `no-param-reassign.js`, `no-underscore-dangle.js`, `camelcase.js`,
+`no-loop-func.js`, `block-scoped-var.js`, `vars-on-top.js`, `utils/ast-utils.js`
+(`isImportAttributeKey`); typescript-eslint 8.71.1 `packages/eslint-plugin/src/rules/no-shadow.ts`,
+`no-use-before-define.ts`.
+
+### Round 10, h1 second batch
+
+- **`no-invalid-this`** (604/604) and **`@typescript-eslint/no-invalid-this`** (91/91) share
+  `no_invalid_this.rs`. `is_default_this_binding` honours a `@this` JSDoc tag and
+  `capIsConstructor`; `this_binding::is_strict` is never true before ES5 (ESLint's scope
+  analysis has no strict mode there).
+- **`class-methods-use-this`** (164/164) and the ts variant (119/119) share
+  `class_methods_use_this.rs`. A field's function is named and located like a method
+  ("method 'x'", from the field to the `(`); an `accessor` field is not (ESTree has
+  `AccessorProperty`).
+- **`init-declarations`** (81/81), ts (77/77): ts reports a declarator without an
+  initializer at its name only.
+- **`no-magic-numbers`** (205/205), ts (79/79): ESTree parents skip `Paren`/`ParenType`; a
+  literal is a `TSLiteralType` when its parent is a type node or a type slot.
+- **`new-cap`** (146/146).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-invalid-this.js`,
+`class-methods-use-this.js`, `init-declarations.js`, `no-magic-numbers.js`, `new-cap.js`,
+`utils/ast-utils.js` (`isDefaultThisBinding`, `hasJSDocThisTag`, `getFunctionNameWithKind`,
+`getFunctionHeadLoc`, `getStaticPropertyName`); typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/no-invalid-this.ts`, `class-methods-use-this.ts`,
+`init-declarations.ts`, `no-magic-numbers.ts`.
+
+### Round 10, h1 third batch
+
+- **`one-var`** (296/296): one pass over the file's declarations in source order, with a
+  per-scope record (`var`: nearest function, Program or static block; the rest: nearest
+  block, `for` or `switch`).
+- **`accessor-pairs`** (313/313) reuses `grouped_accessor_pairs`' key grouping, names and
+  head ranges, and `no_setter_return::is_descriptor`. Computed token keys skip parentheses.
+- **`prefer-regex-literals`** (251/251): global `RegExp` (or `globalThis.RegExp`, ...)
+  calls with static strings; suggestions escape line terminators and `/` through the regex
+  parser's character nodes. Modifier groups need ES2025. `regex.rs` now rejects `&&&` in
+  `v` classes.
+- **`no-implicit-globals`** (227/227): script global-scope declarations, unresolved plain
+  writes in sloppy code, and writes to read-only globals; `/* exported */` and writable
+  globals are exempt.
+- **`func-name-matching`** (192/193). Not done: `'ᢅ'` is an identifier to Rust's
+  `is_alphabetic` but not to esutils' older Unicode tables (1 case).
+- **`no-implicit-coercion`** (141/141).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/one-var.js`,
+`accessor-pairs.js`, `prefer-regex-literals.js`, `no-implicit-globals.js`,
+`func-name-matching.js`, `no-implicit-coercion.js`, `utils/ast-utils.js`
+(`isPropertyDescriptor`, `canTokensBeAdjacent`, `getStaticPropertyName`).
+
+### Round 10, h1 fourth batch
+
+- **`capitalized-comments`** (178/178): `\p{L}` through the crate's regex engine; inline
+  and consecutive checks look at the nearest non-whitespace text around the comment.
+- **`require-unicode-regexp`** (78/78) and **`prefer-named-capture-group`** (57/57) share
+  `prefer_regex_literals::is_global_regexp`; constant arguments come from
+  `unicorn_static::static_value` (prefer-named-capture-group ignores identifiers, as
+  ESLint evaluates without a scope there).
+- **`require-atomic-updates`** (63/63): one forward pass over the function's CFG in reverse
+  postorder; DFS back edges carry no state (ESLint's segments only merge earlier ones).
+  The CFG evaluates `x += e` as `e` then `x`, so a compound direct update is outdated
+  when `e` itself suspends. Configured globals count as variables.
+- **`no-unmodified-loop-condition`** (40/40).
+- Not done: `jsdoc/imports-as-dependencies` (no oracle data).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/capitalized-comments.js`,
+`require-unicode-regexp.js`, `prefer-named-capture-group.js`, `require-atomic-updates.js`,
+`no-unmodified-loop-condition.js`, `utils/regular-expressions.js`
+(`isValidWithUnicodeFlag`), `shared/string-utils.js`.
+
+## typescript-eslint and core rules (round 10, h2)
+
+- **`@typescript-eslint/explicit-function-return-type`** (138/138) and
+  **`explicit-module-boundary-types`** (154/154) share the typed-context and higher-order
+  helpers in `ts_explicit_function_return_type.rs` (ESTree parents skip `Paren`; bodyless
+  functions are ESTree's `TSDeclareFunction` / `TSEmptyBodyFunctionExpression` and skipped,
+  except bodyless exported class methods). The boundary rule walks the file once: export
+  nodes are followed into declarations, classes, objects and same-scope writes of exported
+  names, then functions returned (at every level) by a checked function are checked.
+  `member_function_head_span` puts a class field's arrow from the member start (ESLint and
+  typescript-eslint); `function_head_span` keeps the arrow token there, as eslint-utils does
+  for unicorn. Accessor fields are not `PropertyDefinition`s for head locations.
+- **`@typescript-eslint/explicit-member-accessibility`** (63/63). Class members (not
+  `#private` ones) and parameter properties; heads start after decorators, the `public`
+  removal stops at the next token or comment. Member names follow `getNameFromMember`
+  (a computed identifier key is its name).
+- **`@typescript-eslint/method-signature-style`** (62/62). Works per interface or type
+  literal: method signatures are grouped by written key once (linear), so overloads become one
+  `(..) => .. & (..) => ..` property. No fix inside a namespace or when the return type
+  mentions `this`; `readonly` properties get a suggestion instead of a fix.
+- **`@typescript-eslint/parameter-properties`** (63/63). `parameter-property` mode works per
+  class: an uninitialized plain field, a plain constructor parameter and a leading
+  `this.x = x` statement of one name, with the same annotation text from its `:`.
+- **`@typescript-eslint/no-unused-private-class-members`** (99/99), its own analysis
+  (not the core rule's): one walk with a stack of `this` frames (class, class methods and
+  field functions, static blocks, functions whose `this` parameter names an enclosing
+  class). Reads count via `this.x`, `this.#x`, `#x in o`, `Class.x` for statics, an
+  unreassigned `const self = this`, parameters typed `Foo` / `typeof Foo`, and destructuring
+  `this`. A later member with the same key replaces the earlier one. Field initializers that
+  aren't functions see `this` as the instance, statics too (as upstream does).
+
+Read to understand (not ported): typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/explicit-function-return-type.ts`,
+`explicit-module-boundary-types.ts`, `src/util/explicitReturnTypeUtils.ts`,
+`getFunctionHeadLoc.ts`, `hasOverloadSignatures.ts`, `explicit-member-accessibility.ts`,
+`getMemberHeadLoc.ts`, `method-signature-style.ts`, `parameter-properties.ts`,
+`no-unused-private-class-members.ts`, `src/util/class-scope-analyzer/*`; ESLint 10.12.0
+`lib/rules/utils/ast-utils.js` (`getFunctionHeadLoc`).
+
+- `prefer-destructuring` / `@typescript-eslint/prefer-destructuring` (one implementation,
+  `ts` flag): the option matrix is `[declarator, assignment] x [array, object]`; ESLint reads
+  a per-node object with missing kinds off, typescript-eslint merges its own defaults (missing
+  kinds on), so both matrices are kept. `a?.b` is a chain, never reported. `using`
+  declarations are skipped. The ts rule skips annotated declarations unless
+  `enforceForDeclarationWithTypeAnnotation`, fixes only unannotated identifiers, and treats
+  `x[0]` on a non-iterable, non-any type as an object access (reported only with
+  `enforceForRenamedProperties`). The fix (`const {a} = o`) is dropped when it would lose a
+  comment.
+- `array-callback-return`: the callback is found by walking up through `&&`, `||`, `??`,
+  `?:` and `return` in a function that is itself called right away, to a call of a known
+  array method (argument 0), `*Array.from` (argument 1) or `Array.fromAsync` (argument 1, async
+  callbacks too). Generators are skipped. Every `return` in the callback counts, reachable or
+  not; "missing at the end" uses the CFG exit's reachability. `forEach` with `checkForEach`
+  reports value returns and expression bodies, with `wrapBraces` / `prependVoid` suggestions
+  (`allowVoid` accepts `void x`).
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/prefer-destructuring.js`,
+`lib/rules/array-callback-return.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/prefer-destructuring.ts`.
+
+## Core and typescript-eslint rules (round 10, h2, part 2)
+
+- `no-restricted-imports`: `paths` match the trimmed source exactly (`import x = require()`
+  sources are not trimmed). `patterns` `group`s follow node-ignore: case-insensitive unless
+  `caseSensitive`, a pattern without an inner `/` matches at any depth, a parent directory
+  that matches ignores everything below it, the last matching rule wins and `!` un-ignores;
+  each rule is a `config::glob::Glob`. `regex`, `importNamePattern` and
+  `allowImportNamePattern` run on `regex_exec` with the `u` flag (`iu` for `regex` unless
+  case-sensitive) and print as `/source/u`. Named reports go on the specifier; `export *`
+  reports go on the declaration's second token. `allowTypeImports` skips declarations whose
+  every specifier is `type` (or `import type`), and single `type` specifiers.
+- `no-duplicate-imports`: declarations are reduced to a shape (default, named, namespace,
+  `export *`, side effect, from the first named or namespace specifier) and two of them are
+  duplicates unless they could not be merged: namespace with named, `export *` with anything
+  but `export *` or a side effect, and (both `type`) default with named.
+  `allowSeparateTypeImports` compares only type with type and value with value.
+- `sort-imports`: one running "previous declaration" over every import in the file (top level
+  and `declare module` blocks), reset by a blank line with `allowSeparatedGroups`. A syntax
+  missing from `memberSyntaxSortOrder` ranks -1, as `indexOf` does. The member fix keeps the
+  text between members in place and is dropped when a comment sits between the braces.
+- `sort-keys`: per object literal (not assignment patterns); a spread or (with
+  `ignoreComputedKeys`) a computed key restarts the order. Names follow
+  `getStaticPropertyName`, plus `[ident]` as `ident`. Natural order ranks `-`, punctuation,
+  digits, upper case, lower case (ASCII), and compares digit runs that don't start with `0`
+  by value. A blank line counts only in whitespace outside comments.
+- `no-restricted-exports`: names come from export specifiers (the exported side), `export *
+  as`, and exported function (with a body), class and variable declarations (every bound
+  identifier). The pattern never matches `default`. `default` is restricted per
+  `restrictDefaultExports`: `direct` (`export default ...`), `named` (`export { x as default
+  }`), `defaultFrom` / `namedFrom` (re-exports, by the local name), `namespaceFrom`
+  (`export * as default from`).
+- `@typescript-eslint/strict-boolean-expressions`: no visited-node set. Each root (`if`,
+  loop and `?:` tests, the `!` operand, an `asserts x` argument, a `&&`/`||` that no
+  enclosing root reaches) walks down its `&&`/`||` chain: left operands are conditions, right
+  ones only when the whole chain is. Union members are reduced to variants (nullish, boolean,
+  truthy boolean, string, truthy string, number, truthy number, enum, object, any, never)
+  and the variant set picks the message. Array predicates (`filter`, `find`, `some`, ... on
+  arrays and tuples) check the callback's return types. Suggestions wrap the operand or, under
+  `!`, the negation, with operand parentheses for non-primary operands, outer parentheses
+  for a weak parent, and a leading `;` when the statement before has none.
+- `@typescript-eslint/member-ordering`: a member's candidate groups go from most to least
+  specific (`{access}-decorated-{kind}`, `{access}-{scope}-{kind}`, `{scope}-{kind}`,
+  `{access}-{kind}`, `{kind}`, with `readonly-*` also trying the plain kind), and its rank is
+  the first `memberTypes` entry naming one of them. Methods without a body (overloads) rank
+  -1 and are skipped; an unknown member kind ranks last. An object `default` config is merged
+  onto the default `memberTypes`; other configs are not. Alphabetical checks run within each
+  group, or (after a group-order report) within runs of adjacent same-rank members, where
+  typescript-eslint never adds the list's last member. A member is not reported out of order
+  when its initializer reads `this.x` of an initialized member it would move above.
+  `optionalityOrder` first checks the optional/required split, then orders each side.
+
+Read to understand (not ported): ESLint 10.12.0 `lib/rules/no-restricted-imports.js`,
+`lib/rules/no-duplicate-imports.js`, `lib/rules/sort-imports.js`, `lib/rules/sort-keys.js`,
+`lib/rules/no-restricted-exports.js`; typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/strict-boolean-expressions.ts`, `member-ordering.ts`,
+`src/util/getWrappingFixer.ts`, `assertionFunctionUtils.ts`,
+`isArrayMethodCallWithPredicate.ts`, `misc.ts`.
+The `group` matching follows gitignore as node-ignore applies it, and natural order follows
+the behaviour of the `natural-compare` package; neither package's source was read.
+
+## typescript-eslint rules (round 10, h2, part 3)
+
+- `@typescript-eslint/require-array-sort-compare`: its own rule, not the unicorn one (that
+  one is untyped and reports on the method name). Reports zero-argument `sort()` /
+  `toSorted()` calls when every union member of the constrained receiver type is an array.
+  `ignoreStringArrays` (default on) skips arrays and tuples whose type arguments all print
+  as `string`, through constraints, unions and intersections.
+- `@typescript-eslint/prefer-enum-initializers`: suggestions `= i`, `= i + 1` and
+  `= 'name'`, where the name is the member's source text.
+- `@typescript-eslint/no-useless-empty-export`: only the program's own statements count
+  (upstream's `TSModuleDeclaration` check never applies, because its body is a block, not a
+  list). Declaration files are skipped.
+- `@typescript-eslint/no-import-type-side-effects`: the fix deletes each `type ` up to the
+  imported name and inserts ` type` after `import`.
+- `@typescript-eslint/no-restricted-types`: keys are compared with whitespace removed.
+  Keywords (not `any`) match by keyword; references, `implements` entries and interface
+  `extends` entries match by name, and by their full text when they have type arguments;
+  `{}` and `[]` match when empty. An empty message or `fixWith` counts as none.
+- `@typescript-eslint/no-unnecessary-parameter-property-assignment`: within each class,
+  takes the constructor's assignments in source order: directly in its body, or in an arrow
+  called in place there. Nested functions and classes are skipped. A `this.x = x` (with
+  `=`, `&&=`, `||=` or `??=`, through `as` and `!`) is reported when `x` is a parameter
+  property and neither the parameter nor `this.x` was assigned earlier in the constructor,
+  and no field initializer assigns `this.x`.
+- `@typescript-eslint/no-unnecessary-qualifier`: `A.x` (a qualified name, or a member access
+  on identifiers only) inside the body of a namespace or enum that declares the qualifier's
+  symbol, following aliases. The accessed symbol is looked up as an export of the namespace
+  first, because `symbol_at` on `X.T` can return a local `T` that shadows it. The qualifier is
+  unnecessary when `x` alone names the same symbol in the enclosing scope. When the scope
+  lookup finds nothing, the member counts as in scope (a merged or augmented declaration),
+  unless it is an enum member. Only the outermost unnecessary access of a chain is reported.
+- `@typescript-eslint/consistent-type-exports`: a specifier is type-based when one of its
+  declarations is `type`-only, or when it has no value meaning. An alias is followed one hop
+  (an import or re-export in this file is resolved through its source module's export), then
+  through `resolve_alias`. An import or `export { x }` in another module counts as a value when
+  that module also declares `x` as a top-level value, because our checker doesn't merge the
+  two the way tsc does. `export *` is reported when the module's namespace type has no
+  properties. Names are listed as "A, B and C". `symbol_at` on a module specifier string now
+  returns the module's symbol (`typed/ck_types.rs`).
+- `@typescript-eslint/promise-function-async`: every call signature of the function's type
+  must return one of the promise names (`Promise` plus `allowedPromiseNames`), matched by the
+  symbol of the reference's target, through union and intersection members and base types.
+  Without a return type annotation, one matching union member is enough. `any` and `unknown`
+  never match; with `allowAny: false` they are reported without a fix. Getters, setters,
+  abstract methods and bodiless overloads are skipped. The head starts after a method's
+  decorators. The method fix puts `async ` before the key, or before a `*` or the `[` of a
+  computed key, with a leading space when the token before touches it.
+- `@typescript-eslint/no-unsafe-type-assertion`: checked in order: `unknown` to `any`; an
+  `any` going in (the expression is `any`, or a type argument of the same generic is, except
+  for `new X()` without type arguments); an `any` coming out (the same test, reversed);
+  then plain assignability. An object literal expression is widened first (`widened_type`,
+  new on `TypeInfo`) so its extra properties are not excess ones. When the target is a type
+  parameter, the message depends on its constraint chain: the chain ends with no
+  declaration (`V extends T`, `T` bare), or the original type is assignable to the constraint.
+- `@typescript-eslint/prefer-readonly`: each class is analysed on entry by its own walk,
+  which skips nested classes (they get their own walk). Candidates are non-`readonly`,
+  non-`accessor` private fields (or `#` fields) and private parameter properties, keyed by
+  name (identifier, string, number, numeric or `Symbol.x` computed key). A write is an
+  assignment to the member access, `delete`, `++`/`--`, or being a target of a destructuring
+  `=` through object and array literals and spreads. A parenthesized access is not a write,
+  as upstream. A write on the instance directly in the constructor (not in a function
+  inside it) doesn't count. The object's type relates to the class through its symbol or
+  bases (`typeof C` is the class side), the first union member, or intersection members.
+  The fix adds `: T` when the constructor writes a field whose literal initializer would
+  narrow it. For an enum type, `T` must name the same type from the field's scope (a block's
+  type alias is read from its type node). `type_symbol` now returns the symbol of `typeof C`,
+  `typeof f` and `typeof N` types (`typed/ck_types.rs`).
+- `@typescript-eslint/strict-void-return`: expressions are checked against their contextual
+  type (array elements, arrow expression bodies, assigned values, JSX attribute values,
+  object property values, `return` and variable initializers). A call or `new` argument is
+  also checked against the callbacks its parameter types allow across every signature: some
+  `void` with the rest nullish or `any` counts as void. Class fields and methods are checked
+  against the member of the same name on the base class's instance type (`extends`) or the
+  implemented type (`implements`). A computed key goes by its literal type there. An
+  accessor's own type is its property's. A function counts as void when every return type
+  member is `void`, `never` or `undefined` (and `any` with `allowReturnAny`). Otherwise the
+  report and suggestions depend on its form: a non-function value (`nonVoidFunc`), a
+  generator, an async function (add `void` or wrap the body in an async IIFE, removing
+  `async` and making a written return type `void`), an expression body (`void` added through the shared
+  `wrapping_fix` of strict-boolean-expressions), a non-`void` return annotation, or each
+  `return value` found through blocks, branches, loops, `switch` and `try`.
+
+Read to understand (not ported): typescript-eslint 8.71.1
+`packages/eslint-plugin/src/rules/require-array-sort-compare.ts`, `prefer-enum-initializers.ts`,
+`no-useless-empty-export.ts`, `no-import-type-side-effects.ts`, `no-restricted-types.ts`,
+`no-unnecessary-parameter-property-assignment.ts`, `no-unnecessary-qualifier.ts`,
+`consistent-type-exports.ts`, `promise-function-async.ts`, `no-unsafe-type-assertion.ts`,
+`prefer-readonly.ts`, `strict-void-return.ts`, `src/util/getMemberHeadLoc.ts`,
+`src/util/getBaseTypesOfClassMember.ts`, `src/util/walkStatements.ts`, and `src/util/misc.ts`
+(formatWordList).

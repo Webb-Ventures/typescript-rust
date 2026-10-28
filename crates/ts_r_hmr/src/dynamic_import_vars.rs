@@ -65,11 +65,18 @@ pub fn rewrite(code: &str, calls: &[TemplateImport], importer: &Path) -> Option<
             None => String::new(),
         }
     };
-    let mut edits = Vec::new();
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut calls: Vec<&TemplateImport> = calls.iter().collect();
+    calls.sort_by_key(|c| c.start);
     for call in calls {
         let (s, e) = (call.start as usize, call.end as usize);
         let (ts, te) = (call.template_start as usize, call.template_end as usize);
         if !(s <= ts && ts + 2 <= te && te <= e && e <= code.len()) {
+            continue;
+        }
+        // A call inside one already rewritten (`` import(`./a/${import(`./b/${x}.js`)}.js`) ``)
+        // stays as written inside the outer call's path: replacements never overlap.
+        if edits.last().is_some_and(|&(_, end, _)| s < end) {
             continue;
         }
         let Some(text) = code.get(ts + 1..te - 1) else {
@@ -277,10 +284,11 @@ fn extension(path: &str) -> &str {
 }
 
 /// `raw` (relative to `dir`) joined to `dir`, normalized and made relative to `dir` again,
-/// starting with `./` or `../`.
+/// starting with `./` or `../`. A segment holding a `${...}` substitution is kept as it is:
+/// the code inside it is not path text (`` ${f(`a/../b`)} `` has no `..` segment).
 fn normalized_relative(dir: &str, raw: &str) -> String {
     let mut joined: Vec<&str> = Vec::new();
-    for seg in dir.split('/').chain(raw.split('/')) {
+    for seg in dir.split('/').chain(template_segments(raw)) {
         match seg {
             "" | "." => {}
             ".." => {
@@ -299,6 +307,31 @@ fn normalized_relative(dir: &str, raw: &str) -> String {
     } else {
         format!("./{rel}")
     }
+}
+
+/// The template text split at the `/`s of its literal parts (not those inside a
+/// substitution).
+fn template_segments(raw: &str) -> Vec<&str> {
+    let b = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'$' if b.get(i + 1) == Some(&b'{') => {
+                i = substitution_end(b, i + 2).map_or(b.len(), |close| close + 1);
+            }
+            b'/' => {
+                out.push(&raw[start..i]);
+                i += 1;
+                start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    out.push(raw.get(start..).unwrap_or(""));
+    out
 }
 
 #[cfg(test)]
@@ -360,6 +393,15 @@ mod tests {
             normalized_relative("/root/src", "../../up/${x}.js"),
             "../../up/${x}.js"
         );
+        // Code inside a substitution is not path text.
+        assert_eq!(
+            normalized_relative("/root/src", "./dir/${fn(`a/../b`)}.js"),
+            "./dir/${fn(`a/../b`)}.js"
+        );
+        assert_eq!(
+            lookup("./dir/${fn(`a/../b`)}.js").as_deref(),
+            Some("(import.meta.glob(\"./dir/*.js\")), `./dir/${fn(`a/../b`)}.js`, 5")
+        );
     }
 
     #[test]
@@ -396,6 +438,24 @@ mod tests {
             "import __variableDynamicImportRuntimeHelper from \"/@id/__x00__vite/dynamic-import-helper.js\";const n = 'a';\nexport const m = __variableDynamicImportRuntimeHelper((import.meta.glob(\"./dir/*.js\")), `./dir/${n}.js`, 3);\nimport(`./x.js`);"
         );
         assert_eq!(r.edits.len(), 1);
+    }
+
+    /// The scanner reports a call and one nested in its substitution; only the outer one is
+    /// rewritten (the inner stays as written in its path), and nothing panics.
+    #[test]
+    fn nested_calls_do_not_overlap() {
+        let code = "import(`./outer/${import(`./inner/${name}.js`)}.js`)";
+        let calls = crate::scan::scan(code).template_imports;
+        assert_eq!(calls.len(), 2);
+        let r = rewrite(code, &calls, Path::new("/root/src/main.js")).unwrap();
+        assert_eq!(r.edits.len(), 1);
+        assert!(
+            r.code.ends_with(
+                "__variableDynamicImportRuntimeHelper((import.meta.glob(\"./outer/*.js\")), `./outer/${import(`./inner/${name}.js`)}.js`, 5)"
+            ),
+            "{}",
+            r.code
+        );
     }
 
     #[test]

@@ -1583,6 +1583,29 @@ mod tests {
             ),
             "function f(){}f=g,f(1);"
         );
+        // The initializer itself must be a function or arrow: a factory call (or any
+        // parenthesized expression) is not annotated, before the statement or the value.
+        assert_eq!(
+            run_with(
+                "const f = /* @__NO_SIDE_EFFECTS__ */ (factory()); f();",
+                false
+            ),
+            "const f=factory();f();"
+        );
+        assert_eq!(
+            run_with(
+                "/* @__NO_SIDE_EFFECTS__ */ const f = asyncFactory(); f();",
+                false
+            ),
+            "const f=asyncFactory();f();"
+        );
+        assert_eq!(
+            run_with(
+                "/* @__NO_SIDE_EFFECTS__ */ const f = async (y) => { s(y) }; f(1); f(k);",
+                false
+            ),
+            "const f=async y=>{s(y)};k;"
+        );
     }
 
     #[test]

@@ -16,8 +16,11 @@ pub static RULE: RuleDef = RuleDef {
     create: create_default::<RequireAwait>,
 };
 
+/// `core`: ESLint's `require-await` (no types; async generators and `''` names as it has them).
 #[derive(Default, Debug)]
-struct RequireAwait;
+pub(crate) struct RequireAwait {
+    pub(crate) core: bool,
+}
 
 impl Rule for RequireAwait {
     fn kinds(&self) -> &'static [NodeKind] {
@@ -43,7 +46,7 @@ impl Rule for RequireAwait {
             | Node::Arrow { flags, body, .. } => (flags, body),
             _ => return,
         };
-        if !flags.contains(FnFlags::ASYNC) {
+        if !flags.contains(FnFlags::ASYNC) || (self.core && flags.contains(FnFlags::GENERATOR)) {
             return;
         }
         let ast = cx.ast();
@@ -78,17 +81,18 @@ impl Rule for RequireAwait {
         let src = cx.src();
         let parents = cx.file.parents;
         let kind = function_name_with_kind(ast, src, parents, node);
-        // An empty name (`async ''() {}`) is left out.
-        let kind = kind
-            .strip_suffix(" ''")
-            .map_or(kind.clone(), str::to_string);
+        // An empty name (`async ''() {}`) is left out, except by the core rule.
+        let kind = match kind.strip_suffix(" ''") {
+            Some(k) if !self.core => k.to_string(),
+            _ => kind,
+        };
         let mut chars = kind.chars();
         let kind = match chars.next() {
             Some(c) => c.to_uppercase().chain(chars).collect::<String>(),
             None => kind,
         };
         let head = function_head_span(ast, src, parents, node);
-        let fix = remove_async_fix(cx, node, flags.contains(FnFlags::GENERATOR));
+        let fix = remove_async_fix(cx, node, flags.contains(FnFlags::GENERATOR), self.core);
         let r = cx
             .report(head, format!("{kind} has no 'await' expression."))
             .id("missingAwait");
@@ -176,7 +180,7 @@ impl Visitor for AwaitFinder<'_> {
 /// Removes `async` and the whitespace after it, unwraps a `Promise<T>` return type (or turns
 /// `AsyncGenerator` into `Generator`), and adds a `;` when the function would otherwise join
 /// the previous line.
-fn remove_async_fix(cx: &Ctx<'_, '_>, f: NodeId, generator: bool) -> Option<Fix> {
+fn remove_async_fix(cx: &Ctx<'_, '_>, f: NodeId, generator: bool, core: bool) -> Option<Fix> {
     let ast = cx.ast();
     let src = cx.src();
     let parents = cx.file.parents;
@@ -200,8 +204,24 @@ fn remove_async_fix(cx: &Ctx<'_, '_>, f: NodeId, generator: bool) -> Option<Fix>
     }
     let next = bytes.get(end).copied();
     let continues = matches!(next, Some(b'(' | b'[' | b'`'));
-    let semicolon = continues
-        && (needs_leading_semicolon(ast, src, parents, f) || after_unterminated_field(cx, holder));
+    let semicolon = if core {
+        // ESLint: `(` starting an expression statement, or a method whose key can continue
+        // the field before it (`[`, `*`, `in`, `instanceof`) after an initialized field.
+        let rest = &src[end..];
+        let method_continues = holder != f
+            && (rest.starts_with(['[', '*'])
+                || ["in", "instanceof"].iter().any(|w| {
+                    rest.strip_prefix(w).is_some_and(|r| {
+                        !r.starts_with(|c: char| c == '$' || ts_r_lexer::is_id_part(c))
+                    })
+                }));
+        (next == Some(b'(') && needs_leading_semicolon(ast, src, parents, f))
+            || (method_continues && after_unterminated_field(cx, holder, true))
+    } else {
+        continues
+            && (needs_leading_semicolon(ast, src, parents, f)
+                || after_unterminated_field(cx, holder, false))
+    };
     let mut fix = Fix::replace(Span::new(at, end as u32), if semicolon { ";" } else { "" });
     let return_type = match *cx.node(f) {
         Node::FunctionDecl { return_type, .. }
@@ -235,8 +255,9 @@ fn remove_async_fix(cx: &Ctx<'_, '_>, f: NodeId, generator: bool) -> Option<Fix>
     Some(fix)
 }
 
-/// `holder` is a class member after a field declaration that does not end with `;`.
-fn after_unterminated_field(cx: &Ctx<'_, '_>, holder: NodeId) -> bool {
+/// `holder` is a class member after a field declaration (`initialized`: with a value) that
+/// does not end with `;`.
+fn after_unterminated_field(cx: &Ctx<'_, '_>, holder: NodeId, initialized: bool) -> bool {
     let Some(class) = cx.parent(holder) else {
         return false;
     };
@@ -251,7 +272,7 @@ fn after_unterminated_field(cx: &Ctx<'_, '_>, holder: NodeId) -> bool {
     let Some(&prev) = i.checked_sub(1).and_then(|j| list.get(j)) else {
         return false;
     };
-    matches!(cx.node(prev), Node::PropertyDef { .. })
+    matches!(cx.node(prev), Node::PropertyDef { value, .. } if !initialized || value.is_some())
         && !cx.span(prev).text(cx.src()).trim_end().ends_with(';')
 }
 
