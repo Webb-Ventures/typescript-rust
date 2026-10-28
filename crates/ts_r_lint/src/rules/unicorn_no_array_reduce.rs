@@ -17,13 +17,15 @@
 //! whose single returned expression can be inlined with its parameters renamed.
 
 use super::prelude::*;
+use super::unicorn_ast::linebreak;
 use super::unicorn_static::has_side_effect as static_has_side_effect;
-use super::unicorn_text::{is_same_reference, paren_text};
+use super::unicorn_text::paren_text;
 use super::unicorn_types::{
     is_known_bigint_typed_array, is_known_non_number, should_skip_known_non_array_receiver,
 };
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::{available_name, trailing_comment_same_line};
 use super::unicorn_util::{has_optional_chain, skip_wrappers};
-use super::unicorn_util_h4::{available_name, linebreak, trailing_comment_same_line};
 use crate::semantic::{DeclKind, RefFlags, ScopeId, SymbolId};
 use ts_r_ast::{Ast, BinaryOp, FnFlags, KeywordTypeKind, MethodKind, VarKind};
 
@@ -132,7 +134,7 @@ fn is_not_function(ast: &Ast, id: NodeId) -> bool {
 
 /// `getFunctionReturnExpression`: a concise arrow body, or the argument of a body that is
 /// only `return x;` (parentheses skipped).
-fn return_expression(ast: &Ast, f: NodeId) -> Option<NodeId> {
+pub(crate) fn return_expression(ast: &Ast, f: NodeId) -> Option<NodeId> {
     let body = match *ast.node(f) {
         Node::Arrow { flags, body, .. } => {
             if flags.contains(FnFlags::EXPRESSION_BODY) {
@@ -183,7 +185,7 @@ fn param_ident(ast: &Ast, p: NodeId) -> Option<NodeId> {
 }
 
 /// `[].prop` or `Array.prototype.prop`, `prop` in `props`.
-fn is_array_prototype_property(ast: &Ast, id: NodeId, props: &[&str]) -> bool {
+pub(crate) fn is_array_prototype_property(ast: &Ast, id: NodeId, props: &[&str]) -> bool {
     let Node::Member {
         obj,
         optional: false,

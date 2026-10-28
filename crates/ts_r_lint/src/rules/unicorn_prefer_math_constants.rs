@@ -7,7 +7,7 @@
 //! reported with a suggestion to write the constant.
 
 use super::prelude::*;
-use super::unicorn_util_h1::is_type_slot;
+use super::unicorn_util::is_type_slot;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

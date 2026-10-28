@@ -340,6 +340,9 @@ pub struct ProblemPos {
     pub rule: Option<&'static str>,
     pub pos: u32,
     pub line: u32,
+    /// Shown at ESLint column 0 (its 0-based column -1): before everything on its line, so
+    /// no line directive of that line and no block directive starting there covers it.
+    pub before_line: bool,
 }
 
 /// Result of applying directives to a file's problems.
@@ -388,7 +391,7 @@ pub fn apply_directives(
         .collect();
     block.sort_by_key(|&i| directives[i].pos);
     let mut order: Vec<usize> = (0..problems.len()).collect();
-    order.sort_by_key(|&i| problems[i].pos);
+    order.sort_by_key(|&i| (problems[i].pos, !problems[i].before_line));
 
     let mut all_disabled: Option<usize> = None;
     let mut rule_disabled: Vec<(String, usize, usize)> = Vec::new(); // (rule, dir, idx)
@@ -397,7 +400,10 @@ pub fn apply_directives(
     let mut bi = 0;
     for &pi in &order {
         let p = problems[pi];
-        while bi < block.len() && directives[block[bi]].pos <= p.pos {
+        while bi < block.len()
+            && (directives[block[bi]].pos < p.pos
+                || (!p.before_line && directives[block[bi]].pos == p.pos))
+        {
             let di = block[bi];
             let d = &directives[di];
             match d.kind {
@@ -446,6 +452,7 @@ pub fn apply_directives(
                 d.kind,
                 DirectiveKind::DisableLine | DirectiveKind::DisableNextLine
             ) || d.line != p.line
+                || p.before_line
             {
                 continue;
             }
@@ -676,6 +683,7 @@ mod tests {
                 rule: Some(rule),
                 pos,
                 line: lines.line_of(pos),
+                before_line: false,
             }
         };
         let problems = [at("x;", "a"), at("y;", "b"), at("y;", "a"), at("z;", "b")];
@@ -691,5 +699,25 @@ mod tests {
         );
         assert_eq!(out.suppressed, [true, true, false, false]);
         assert!(out.unused.is_empty());
+    }
+
+    #[test]
+    fn column_zero_problems_precede_their_line() {
+        // ESLint's column -1 (`unicorn/no-abusive-eslint-disable`) lies before a line's
+        // directives, so neither a blanket line directive nor a block one starting at the
+        // line's start silences it.
+        let src = "/* eslint-disable */\nx; // eslint-disable-line\n";
+        let c = parse(src);
+        let lines = LineIndex::new(src);
+        let p = |pos: u32, before_line: bool| ProblemPos {
+            rule: Some("r"),
+            pos,
+            line: lines.line_of(pos),
+            before_line,
+        };
+        let line2 = src.find("x;").unwrap() as u32;
+        let problems = [p(0, true), p(line2, true), p(0, false), p(line2, false)];
+        let out = apply_directives(&c.directives, &problems, src, None, &|_| true, true);
+        assert_eq!(out.suppressed, [false, true, true, true]);
     }
 }

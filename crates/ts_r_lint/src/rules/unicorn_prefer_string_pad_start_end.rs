@@ -12,10 +12,10 @@ use super::unicorn_static::{
     static_value_control_flow, static_value_no_side_effects,
 };
 use super::unicorn_text::{
-    has_comment_in, has_unparenthesized_optional_chain, is_same_reference, needs_semicolon,
-    paren_text,
+    has_comment_in, has_unparenthesized_optional_chain, needs_semicolon, paren_text,
 };
 use super::unicorn_types::{is_boolean, is_known_non_string, is_number};
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::skip_wrappers;
 use crate::semantic::DeclKind;
 

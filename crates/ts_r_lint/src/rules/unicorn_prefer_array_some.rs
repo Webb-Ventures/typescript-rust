@@ -21,11 +21,12 @@
 //! Receivers known not to be indexed collections are skipped.
 
 use super::prelude::*;
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_text::paren_span;
 use super::unicorn_types::{is_indexed_collection, is_known_non_indexed_collection};
-use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
+use super::unicorn_util::{
     is_boolean_context, is_global_boolean_call, is_side_effect_free_function,
-    is_value_not_function, method_call_of, needs_semicolon, parent_through_parens,
+    is_value_not_function, method_call_of, parent_through_parens,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -109,7 +110,7 @@ fn check_find(cx: &mut Ctx<'_, '_>, node: NodeId) {
         return;
     }
     let method = ident_name(ast, prop).unwrap_or_default();
-    let call_range = parenthesized_span(cx, node);
+    let call_range = paren_span(cx, node);
     let drops_comments = compare.is_some_and(|b| {
         !ast.comments_in(Span::new(call_range.end, cx.span(b).end))
             .is_empty()
@@ -269,7 +270,7 @@ fn find_index_fix(
 ) -> Option<Fix> {
     let ast = cx.ast();
     let src = cx.src();
-    let left_end = parenthesized_span(cx, skip_parens(ast, left)).end;
+    let left_end = paren_span(cx, skip_parens(ast, left)).end;
     let op_start = skip_trivia_forward(src, left_end as usize) as u32;
     if !src[op_start as usize..].starts_with(op_text) {
         return None;
@@ -390,12 +391,12 @@ fn check_filter(cx: &mut Ctx<'_, '_>, node: NodeId) {
         return;
     }
     let end = cx.span(node).end;
-    let filter_end = parenthesized_span(cx, filter_call).end;
+    let filter_end = paren_span(cx, filter_call).end;
     let fix = ast
         .comments_in(Span::new(filter_end, end))
         .is_empty()
         .then(|| {
-            let length_end = parenthesized_span(cx, length).end;
+            let length_end = paren_span(cx, length).end;
             Fix::replace(ast.span(filter_prop), "some")
                 .and(Span::new(filter_end, cx.span(length).end), "")
                 .and(Span::new(length_end, end), "")

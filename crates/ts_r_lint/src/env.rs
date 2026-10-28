@@ -135,6 +135,9 @@ pub struct LintEnv {
     /// Set when the lib comes from the file's tsconfig (`parserOptions.project` /
     /// `projectService`); the engine resolves it per file into `lib`.
     pub project_lib: Option<Arc<ProjectLib>>,
+    /// ESLint's `cwd` (the CLI's working directory): `unicorn/filename-case` checks the
+    /// directory names of a file's path relative to it. `None` checks the filename only.
+    pub cwd: Option<Arc<str>>,
 }
 
 impl LintEnv {
@@ -162,6 +165,7 @@ impl Default for LintEnv {
             settings: Arc::new(serde_json::Value::Null),
             lib: None,
             project_lib: None,
+            cwd: None,
         }
     }
 }

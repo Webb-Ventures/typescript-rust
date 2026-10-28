@@ -6,6 +6,7 @@
 #![allow(dead_code)] // A shared toolkit: each rule uses part of it.
 
 use super::prelude::*;
+pub(crate) use super::unicorn_util::is_same_reference;
 use ts_r_ast::Ast;
 
 /// The node has its own parentheses.
@@ -106,6 +107,30 @@ pub(crate) fn needs_parens_at_expression_start(
     }
     let mut node = replaced;
     for _ in 0..10_000 {
+        // The replaced node is a whole statement: the text starts it.
+        if matches!(
+            ast.node(node),
+            Node::ExprStmt { .. }
+                | Node::Block { .. }
+                | Node::Empty {}
+                | Node::If { .. }
+                | Node::For { .. }
+                | Node::ForIn { .. }
+                | Node::ForOf { .. }
+                | Node::While { .. }
+                | Node::DoWhile { .. }
+                | Node::Return { .. }
+                | Node::Break { .. }
+                | Node::Continue { .. }
+                | Node::Throw { .. }
+                | Node::Labeled { .. }
+                | Node::Switch { .. }
+                | Node::Try { .. }
+                | Node::Debugger {}
+                | Node::With { .. }
+        ) {
+            return !regexp;
+        }
         let Some(parent) = cx.parent(node) else {
             return false;
         };
@@ -476,95 +501,6 @@ pub(crate) fn static_string_value(ast: &Ast, id: NodeId) -> Option<String> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-fn unwrap_chain_and_ts(ast: &Ast, mut id: NodeId) -> NodeId {
-    loop {
-        match *ast.node(id) {
-            Node::Paren { expr }
-            | Node::As { expr, .. }
-            | Node::Satisfies { expr, .. }
-            | Node::NonNull { expr }
-            | Node::TypeAssertion { expr, .. }
-            | Node::Instantiation { expr, .. } => id = expr,
-            _ => return id,
-        }
-    }
-}
-
-/// The static property name of a member access (`a.b`, `a["b"]`, ``a[`b`]``, `a[1]`).
-fn static_member_name(ast: &Ast, id: NodeId) -> Option<String> {
-    match *ast.node(id) {
-        Node::Member { prop, .. } => match *ast.node(prop) {
-            Node::Ident { name } => Some(ast.atom(name).to_owned()),
-            _ => None,
-        },
-        Node::Index { index, .. } => {
-            let index = skip_parens(ast, index);
-            match *ast.node(index) {
-                Node::NumberLit { value } => Some(number_to_string(value.get())),
-                _ => static_string_value(ast, index),
-            }
-        }
-        _ => None,
-    }
-}
-
-/// `isSameReference`: the two expressions name the same value (`a`, `this.x`, `a["b"]` and
-/// `a.b`, equal literals).
-pub(crate) fn is_same_reference(cx: &Ctx<'_, '_>, a: NodeId, b: NodeId) -> bool {
-    same_reference(cx.ast(), a, b, 0)
-}
-
-fn same_reference(ast: &Ast, a: NodeId, b: NodeId, depth: u32) -> bool {
-    if depth > 200 {
-        return false;
-    }
-    let a = unwrap_chain_and_ts(ast, a);
-    let b = unwrap_chain_and_ts(ast, b);
-    if let Some(s) = static_string_value(ast, a) {
-        return static_string_value(ast, b).as_deref() == Some(s.as_str());
-    }
-    match (*ast.node(a), *ast.node(b)) {
-        (Node::This {}, Node::This {}) | (Node::Super {}, Node::Super {}) => true,
-        (Node::Ident { name: x }, Node::Ident { name: y })
-        | (Node::PrivateName { name: x }, Node::PrivateName { name: y }) => {
-            ast.atom(x) == ast.atom(y)
-        }
-        (Node::NumberLit { value: x }, Node::NumberLit { value: y }) => x.get() == y.get(),
-        (Node::BigIntLit { value: x }, Node::BigIntLit { value: y }) => {
-            parse_bigint(ast.atom(x)) == parse_bigint(ast.atom(y))
-        }
-        (Node::BoolLit { value: x }, Node::BoolLit { value: y }) => x == y,
-        (Node::NullLit {}, Node::NullLit {}) => true,
-        (
-            Node::RegexLit {
-                pattern: p1,
-                flags: f1,
-            },
-            Node::RegexLit {
-                pattern: p2,
-                flags: f2,
-            },
-        ) => ast.atom(p1) == ast.atom(p2) && ast.atom(f1) == ast.atom(f2),
-        (
-            Node::Member { obj: o1, .. } | Node::Index { obj: o1, .. },
-            Node::Member { obj: o2, .. } | Node::Index { obj: o2, .. },
-        ) => {
-            if let Some(name) = static_member_name(ast, a) {
-                return same_reference(ast, o1, o2, depth + 1)
-                    && static_member_name(ast, b).as_deref() == Some(name.as_str());
-            }
-            match (*ast.node(a), *ast.node(b)) {
-                (Node::Member { prop: p1, .. }, Node::Member { prop: p2, .. })
-                | (Node::Index { index: p1, .. }, Node::Index { index: p2, .. }) => {
-                    same_reference(ast, o1, o2, depth + 1) && same_reference(ast, p1, p2, depth + 1)
-                }
-                _ => false,
-            }
-        }
-        _ => false,
     }
 }
 

@@ -4,7 +4,7 @@
 
 use super::prelude::*;
 use super::unicorn_ast::method_call;
-use super::unicorn_util_h2::direct_or_single_use_const;
+use super::unicorn_util::direct_or_single_use_const;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

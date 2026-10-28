@@ -16,9 +16,10 @@
 
 use super::prelude::*;
 use super::unicorn_static::has_side_effect;
+use super::unicorn_text::paren_span;
 use super::unicorn_types::is_known_non_indexed_collection;
-use super::unicorn_util::{joins_previous_statement, parenthesized_span, skip_wrappers};
-use super::unicorn_util_h4::indent_before;
+use super::unicorn_util::indent_before;
+use super::unicorn_util::{joins_previous_statement, skip_wrappers};
 use std::borrow::Cow;
 use ts_r_ast::Ast;
 
@@ -474,7 +475,7 @@ impl NoUselessLengthCheck {
         if kind == VarKind::Var {
             return false;
         }
-        let range = parenthesized_span(cx, right);
+        let range = paren_span(cx, right);
         let mut names = Vec::new();
         for &d in ast.list(decls) {
             if let Node::VarDeclarator { name, .. } = *ast.node(d) {

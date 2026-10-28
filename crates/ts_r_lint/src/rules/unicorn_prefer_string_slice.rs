@@ -19,10 +19,11 @@
 use super::prelude::*;
 use super::unicorn_static::{Static, static_value_no_side_effects};
 use super::unicorn_text::{
-    has_comment_in, has_possible_side_effect, is_parenthesized, is_same_reference, paren_span,
-    paren_text, static_string_value,
+    has_comment_in, has_possible_side_effect, is_parenthesized, paren_span, paren_text,
+    static_string_value,
 };
 use super::unicorn_types::is_known_non_string;
+use super::unicorn_util::is_same_reference;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

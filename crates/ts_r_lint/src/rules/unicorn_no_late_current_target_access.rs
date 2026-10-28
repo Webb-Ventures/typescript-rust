@@ -131,7 +131,7 @@ const EVENTS: &[&str] = &[
     "WheelEvent",
 ];
 
-static EVENT: Checker = Checker {
+pub(crate) static EVENT: Checker = Checker {
     target_names: EVENTS,
     target_imports: &[("react", REACT_EVENTS)],
     target_namespace_imports: &[("react", REACT_EVENTS)],
@@ -140,7 +140,7 @@ static EVENT: Checker = Checker {
 };
 
 /// `e`, `event`, `evt` or a lowercase-first identifier ending in `Event`.
-fn is_event_name(name: &str) -> bool {
+pub(crate) fn is_event_name(name: &str) -> bool {
     if matches!(name, "e" | "event" | "evt") {
         return true;
     }
@@ -158,7 +158,7 @@ fn is_function(ast: &Ast, id: NodeId) -> bool {
     )
 }
 
-fn enclosing_function(cx: &Ctx<'_, '_>, node: NodeId) -> Option<NodeId> {
+pub(crate) fn enclosing_function(cx: &Ctx<'_, '_>, node: NodeId) -> Option<NodeId> {
     let mut cur = cx.parent(node)?;
     while !is_function(cx.ast(), cur) {
         cur = cx.parent(cur)?;
@@ -167,7 +167,7 @@ fn enclosing_function(cx: &Ctx<'_, '_>, node: NodeId) -> Option<NodeId> {
 }
 
 /// The suspension points (`await`, `yield`, `for await`) in `root`, outside nested functions.
-fn suspension_points(ast: &Ast, root: NodeId, out: &mut Vec<NodeId>) {
+pub(crate) fn suspension_points(ast: &Ast, root: NodeId, out: &mut Vec<NodeId>) {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         match ast.node(id) {
@@ -188,7 +188,7 @@ fn suspension_points(ast: &Ast, root: NodeId, out: &mut Vec<NodeId>) {
 }
 
 /// `child` is a part of `loop` that runs on every iteration.
-fn is_repeated_part(ast: &Ast, lp: NodeId, child: NodeId) -> bool {
+pub(crate) fn is_repeated_part(ast: &Ast, lp: NodeId, child: NodeId) -> bool {
     match *ast.node(lp) {
         Node::For {
             test, update, body, ..

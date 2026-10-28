@@ -15,8 +15,9 @@
 //! (it is then evaluated once up front), and dropped when the callback holds a comment.
 
 use super::prelude::*;
+use super::unicorn_static::has_side_effect;
+use super::unicorn_text::is_parenthesized;
 use super::unicorn_types::should_skip_known_non_array_receiver;
-use super::unicorn_util_h5::{has_side_effect, is_parenthesized};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -108,7 +109,7 @@ pub(crate) fn simple_array_search(
         }
         Fix::replace(ast.span(prop), replacement).and(cx.span(callback), text)
     });
-    let side_effect = has_side_effect(cx, value);
+    let side_effect = has_side_effect(cx.ast(), value);
     let (error, suggestion) = message_ids(method);
     let message = match method {
         "findIndex" => {

@@ -10,9 +10,8 @@
 //! when a comment follows the `}` on its line or a `//` comment would swallow code after it.
 
 use super::prelude::*;
-use super::unicorn_util_h4::{
-    indent_before, linebreak, switch_case_head, trailing_comment_same_line,
-};
+use super::unicorn_ast::linebreak;
+use super::unicorn_util::{indent_before, switch_case_head, trailing_comment_same_line};
 use ts_r_ast::{Ast, CommentKind};
 
 pub static RULE: RuleDef = RuleDef {

@@ -6,7 +6,8 @@
 //! the call's value is unused (`append` returns `undefined`).
 
 use super::prelude::*;
-use super::unicorn_util_h5::{is_value_not_dom_node, is_value_not_usable};
+use super::unicorn_ast::is_value_not_usable;
+use super::unicorn_util::is_value_not_dom_node;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

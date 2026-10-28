@@ -18,7 +18,7 @@
 
 use super::prelude::*;
 use super::unicorn_util::{space_around_keyword, with_edits};
-use super::unicorn_util_h5::{utils_function_head_span, utils_function_name_with_kind};
+use super::unicorn_util::{utils_function_head_span, utils_function_name_with_kind};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

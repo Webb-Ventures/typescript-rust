@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use ts_r_ast::{Ast, NodeId, NodeKind, ParentMap, SourceKind, Visitor, Walk, walk};
+use ts_r_ast::{Ast, Node, NodeId, NodeKind, ParentMap, SourceKind, Visitor, Walk, walk};
 use ts_r_span::{LineIndex, Span};
 
 use crate::diagnostic::{Diagnostic, Severity};
@@ -251,6 +251,21 @@ pub fn is_ts_only_in_js_error(code: u32) -> bool {
     (8000..9000).contains(&code)
 }
 
+/// A malformed escape inside a template literal type (a missing hex digit, an unterminated
+/// or out-of-range `\u{…}`, a legacy octal or `\8`/`\9`; TS1125, TS1198, TS1199, TS1487,
+/// TS1488): typescript-eslint's parser doesn't fail on it.
+fn is_template_type_escape(ast: &Ast, d: &ts_r_diagnostics::Diagnostic) -> bool {
+    matches!(d.code, 1125 | 1198 | 1199 | 1487 | 1488)
+        && (1..=ast.node_count() as u32)
+            .filter_map(NodeId::from_raw)
+            .any(|id| {
+                matches!(ast.node(id), Node::TemplateLitType { .. }) && {
+                    let s = ast.span(id);
+                    s.start <= d.span.start && d.span.end <= s.end
+                }
+            })
+}
+
 /// Lints an already parsed file (the checker program's own parse when types are on, so
 /// type queries can use node ids). `parse_errors` are the parser's diagnostics; the first
 /// error makes the file fatal. Type-aware rules run only when `types` is available.
@@ -264,10 +279,9 @@ pub fn lint_parsed(
     parse_errors: &[ts_r_diagnostics::Diagnostic],
 ) -> FileResult {
     let lines = LineIndex::new(src);
-    if let Some(first) = parse_errors
-        .iter()
-        .find(|d| d.is_error() && !is_ts_only_in_js_error(d.code))
-    {
+    if let Some(first) = parse_errors.iter().find(|d| {
+        d.is_error() && !is_ts_only_in_js_error(d.code) && !is_template_type_escape(ast, d)
+    }) {
         return FileResult {
             diagnostics: vec![Diagnostic {
                 rule: None,
@@ -419,6 +433,7 @@ pub fn lint_parsed(
             rule: d.rule,
             pos: d.span.start,
             line: lines.line_of(d.span.start),
+            before_line: d.loc.is_some_and(|l| l.column == 0),
         })
         .collect();
     let skipped = &cfg.skipped_rules;

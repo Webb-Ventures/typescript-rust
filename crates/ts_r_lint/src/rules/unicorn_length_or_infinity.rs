@@ -7,8 +7,8 @@
 
 use super::prelude::*;
 use super::unicorn_ast::{contains_node, method_call, remove_argument};
-use super::unicorn_text::is_same_reference;
 use super::unicorn_types::should_skip_known_non_array_receiver;
+use super::unicorn_util::is_same_reference;
 
 fn description(cx: &Ctx<'_, '_>, arg: NodeId, object: NodeId) -> Option<String> {
     let ast = cx.ast();

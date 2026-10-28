@@ -13,7 +13,7 @@
 use super::prelude::*;
 use super::unicorn_ast::{method_call, no_spread_in};
 use super::unicorn_text::{expression_text, has_comment_in, paren_span};
-use super::unicorn_util_h1::{evaluates_node, is_direct_eval_call};
+use super::unicorn_util::{evaluates_node, is_direct_eval_call};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

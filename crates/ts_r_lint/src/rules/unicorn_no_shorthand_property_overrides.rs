@@ -13,7 +13,8 @@
 
 use super::prelude::*;
 use super::unicorn_static::{Static, static_value};
-use super::unicorn_util_h1::{static_string, unwrap_ts};
+use super::unicorn_text::static_string_value;
+use super::unicorn_util::skip_wrappers;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -398,18 +399,18 @@ fn has_important(value: &str) -> bool {
 }
 
 fn is_static_style_value(cx: &Ctx<'_, '_>, ast: &Ast, value: NodeId) -> bool {
-    let value = unwrap_ts(ast, value);
+    let value = skip_wrappers(ast, value);
     let numeric = match *ast.node(value) {
         Node::Unary {
             op: UnaryOp::Plus | UnaryOp::Minus,
             arg,
-        } => unwrap_ts(ast, arg),
+        } => skip_wrappers(ast, arg),
         _ => value,
     };
     if let Node::NumberLit { .. } = ast.node(numeric) {
         return matches!(static_value(cx, numeric), Some(Static::Num(n)) if n.is_finite());
     }
-    static_string(ast, value).is_some_and(|s| {
+    static_string_value(ast, value).is_some_and(|s| {
         !s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
             .is_empty()
             && !has_important(&s)
@@ -441,7 +442,7 @@ impl Rule for NoShorthandPropertyOverrides {
         let Node::JsxExprContainer { expr: Some(expr) } = *ast.node(value) else {
             return;
         };
-        let Node::ObjectLit { props } = *ast.node(unwrap_ts(ast, expr)) else {
+        let Node::ObjectLit { props } = *ast.node(skip_wrappers(ast, expr)) else {
             return;
         };
         // (name, last key, last value) in first-occurrence order.

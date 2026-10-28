@@ -6,7 +6,7 @@
 use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_text::{paren_span, would_remove_comments};
-use super::unicorn_util_h2::remove_method_call;
+use super::unicorn_util::remove_method_call;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -47,7 +47,15 @@ impl Rule for PreferArrayLastMethods {
         let (method, reversing_method) = (call.name, rev.name);
         let prop = cx.span(call.prop);
         let fix = (!would_remove_comments(cx, cx.span(reversing), &[paren_span(cx, rev.obj)]))
-            .then(|| remove_method_call(cx, reversing, Fix::replace(prop, replacement)));
+            .then(|| remove_method_call(cx, reversing))
+            .flatten()
+            .map(|removal| {
+                let mut fix = Fix::replace(prop, replacement);
+                for e in removal.edits {
+                    fix = fix.and(e.span, e.text);
+                }
+                fix
+            });
         let report = cx
             .report(
                 prop,

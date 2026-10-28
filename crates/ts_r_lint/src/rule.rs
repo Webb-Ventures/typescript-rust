@@ -148,6 +148,9 @@ pub struct FileCtx<'a> {
     /// Names from `/* exported */` comments.
     pub exported: &'a [String],
     semantic: OnceCell<LocalSemantic<'a>>,
+    /// The file's indentation unit (`unicorn_util::indent_unit`), worked out on first use:
+    /// it scans the whole file, and fixes ask for it once per report.
+    pub(crate) indent_unit: OnceCell<String>,
 }
 
 impl fmt::Debug for FileCtx<'_> {
@@ -182,6 +185,7 @@ impl<'a> FileCtx<'a> {
             comment_globals,
             exported,
             semantic: OnceCell::new(),
+            indent_unit: OnceCell::new(),
         }
     }
 

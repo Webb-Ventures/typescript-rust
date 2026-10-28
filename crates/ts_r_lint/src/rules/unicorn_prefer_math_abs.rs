@@ -7,10 +7,9 @@
 //! `this`, when no comment would be lost.
 
 use super::prelude::*;
-use super::unicorn_text::{
-    is_parenthesized, is_same_reference, paren_span, paren_text, would_remove_comments,
-};
+use super::unicorn_text::{is_parenthesized, paren_span, paren_text, would_remove_comments};
 use super::unicorn_types::{BIGINT_MIXED_UNION, binding_annotation, is_bigint_with};
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::{skip_wrappers, space_around_keyword, with_edits};
 use ts_r_ast::Ast;
 

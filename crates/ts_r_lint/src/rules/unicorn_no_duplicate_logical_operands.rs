@@ -7,7 +7,8 @@
 //! operand (it would change `this` or the reference) or when a comment would be lost.
 
 use super::prelude::*;
-use super::unicorn_text::{is_same_reference, paren_span, paren_text, static_string_value};
+use super::unicorn_text::{paren_span, paren_text, static_string_value};
+use super::unicorn_util::is_same_reference;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

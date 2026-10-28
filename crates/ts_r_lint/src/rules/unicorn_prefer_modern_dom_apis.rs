@@ -15,10 +15,13 @@
 //!   replaced by `p.replaceChildren();`.
 
 use super::prelude::*;
+use super::unicorn_ast::is_value_not_usable;
+use super::unicorn_text::member_object_needs_parens;
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::Checker;
-use super::unicorn_util_h5::{
-    is_same_reference, is_value_not_dom_node, is_value_not_usable, member_object_needs_parens,
-    method_call_of, needs_semicolon, static_string, would_remove_comments,
+use super::unicorn_util::{
+    is_same_reference, is_value_not_dom_node, method_call_of, static_string,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -36,14 +39,14 @@ pub static RULE: RuleDef = RuleDef {
 #[derive(Debug, Default)]
 struct PreferModernDomApis;
 
-fn is_window_global(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+pub(crate) fn is_window_global(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
     ["globalThis", "self", "window"]
         .iter()
         .any(|n| cx.is_global_ref(id, n))
 }
 
 /// The syntax-only receiver check of unicorn's `shouldReportReplaceChildrenReceiver`.
-static REPLACE_CHILDREN_RECEIVER: Checker = Checker {
+pub(crate) static REPLACE_CHILDREN_RECEIVER: Checker = Checker {
     class_syntax: true,
     target_names: &[
         "Document",

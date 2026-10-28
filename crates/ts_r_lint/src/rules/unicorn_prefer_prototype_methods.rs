@@ -15,8 +15,8 @@
 //! No fix when a comment is inside the replaced node.
 
 use super::prelude::*;
+use super::unicorn_util::static_member_name;
 use super::unicorn_util::{is_global_object, space_around_keyword, with_edits};
-use super::unicorn_util_h5::static_member_name;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

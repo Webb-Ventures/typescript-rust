@@ -10,7 +10,7 @@
 use super::prelude::*;
 use super::unicorn_ast::{method_call, would_remove_comments};
 use super::unicorn_types::is_known_non_indexed_collection;
-use super::unicorn_util_h1::{is_outermost_logical, is_same_reference, logical_operands};
+use super::unicorn_util::{is_outermost_logical, is_same_reference, logical_operands};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

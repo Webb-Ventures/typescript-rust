@@ -4,7 +4,7 @@
 //! the clause, unless its test has a side effect or a comment is inside it.
 
 use super::prelude::*;
-use super::unicorn_util_h4::{has_side_effect, is_typescript_path, switch_case_head};
+use super::unicorn_util::{has_side_effect_with, is_typescript_path, switch_case_head};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -73,7 +73,7 @@ impl Rule for NoUselessSwitchCase {
                 continue;
             }
             let span = cx.span(case);
-            let suggest = !test.is_some_and(|t| has_side_effect(ast, t, false, false))
+            let suggest = !test.is_some_and(|t| has_side_effect_with(ast, t, false, false))
                 && ast.comments_in(span).is_empty();
             let head = switch_case_head(cx, case);
             let r = cx

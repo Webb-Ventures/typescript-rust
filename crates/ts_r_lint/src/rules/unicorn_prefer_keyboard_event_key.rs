@@ -24,7 +24,7 @@
 
 use super::prelude::*;
 use super::unicorn_types::{Checker, Guess};
-use super::unicorn_util_h5::{method_call_of, parent_through_parens};
+use super::unicorn_util::{method_call_of, parent_through_parens};
 use crate::semantic::SymbolId;
 
 pub static RULE: RuleDef = RuleDef {

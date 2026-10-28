@@ -2,7 +2,7 @@
 //! name), on our AST: parentheses around the callee are transparent, as in ESTree.
 
 use super::prelude::*;
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_text::paren_span;
 use ts_r_ast::Ast;
 
 /// `obj.name(args)`: a call whose callee (through parentheses) is a non-computed member
@@ -370,7 +370,7 @@ pub(crate) fn remove_argument(cx: &Ctx<'_, '_>, call: NodeId, index: usize) -> O
         Node::Call { args, .. } | Node::New { args, .. } => ast.list(args),
         _ => return None,
     };
-    let arg = parenthesized_span(cx, *args.get(index)?);
+    let arg = paren_span(cx, *args.get(index)?);
     let (mut start, mut end) = (arg.start, arg.end);
     let comma_after = || {
         let at = skip_trivia_forward(src, arg.end as usize);

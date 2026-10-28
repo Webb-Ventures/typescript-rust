@@ -4,7 +4,7 @@
 //! length checks compare the receiver with `isSameReference`.
 
 use super::prelude::*;
-use super::unicorn_text::is_same_reference;
+use super::unicorn_util::is_same_reference;
 use super::unicorn_util::skip_wrappers;
 use ts_r_ast::Ast;
 

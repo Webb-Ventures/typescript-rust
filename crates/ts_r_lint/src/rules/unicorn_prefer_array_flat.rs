@@ -17,11 +17,11 @@
 //! needed.
 
 use super::prelude::*;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::needs_semicolon;
 use super::unicorn_types::is_known_non_array;
+use super::unicorn_util::{method_call_of, node_matches_path};
 use super::unicorn_util::{space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    member_object_text, method_call_of, needs_semicolon, node_matches_path,
-};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

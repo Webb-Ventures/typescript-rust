@@ -475,6 +475,7 @@ impl ConfigFile {
             settings: Arc::new(Value::Object(settings)),
             lib: None,
             project_lib: None,
+            cwd: opts.cwd.clone(),
         };
         let env = self.with_lib(env, &lang);
         let reg = opts.registry;
@@ -595,6 +596,8 @@ pub struct ResolveOptions {
     /// `--rule` filter used by tests and the oracle (`None` = all).
     pub only_rules: Option<Vec<String>>,
     pub notes: Mutex<Vec<String>>,
+    /// The working directory rules see as ESLint's `cwd` ([`LintEnv::cwd`]).
+    pub cwd: Option<Arc<str>>,
 }
 
 impl ResolveOptions {
@@ -607,6 +610,7 @@ impl ResolveOptions {
             report_unused_override: None,
             only_rules: None,
             notes: Mutex::new(Vec::new()),
+            cwd: None,
         }
     }
     fn note(&self, s: String) {

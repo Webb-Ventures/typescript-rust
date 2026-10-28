@@ -22,8 +22,8 @@
 use super::prelude::*;
 use super::unicorn_text::{is_parenthesized, needs_parens_at_expression_start, paren_text};
 use super::unicorn_types::{TYPED_ARRAYS, is_array, is_known_non_array};
+use super::unicorn_util::{fix_of, keyword_argument_parent, parenthesize_keyword_argument};
 use super::unicorn_util::{in_unparenthesized_new_callee, skip_wrappers, space_around_keyword};
-use super::unicorn_util_h4::{fix_of, keyword_argument_parent, parenthesize_keyword_argument};
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

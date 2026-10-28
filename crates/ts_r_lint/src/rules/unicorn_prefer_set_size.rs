@@ -8,12 +8,13 @@
 //! than `x`.
 
 use super::prelude::*;
+use super::unicorn_ast::is_left_hand_side;
+use super::unicorn_text::member_object_needs_parens;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::needs_semicolon;
 use super::unicorn_types::is_set;
+use super::unicorn_util::{in_unparenthesized_new_callee, member_on_needs_new_parens};
 use super::unicorn_util::{space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    in_unparenthesized_new_callee, is_left_hand_side, member_object_needs_parens,
-    member_object_text, member_on_needs_new_parens, needs_semicolon,
-};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

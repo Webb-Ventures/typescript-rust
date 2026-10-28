@@ -5,7 +5,7 @@
 //! removed with its comma, unless a comment sits there.
 
 use super::prelude::*;
-use super::unicorn_util::parenthesized_span;
+use super::unicorn_text::paren_span;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {
@@ -95,7 +95,7 @@ impl Rule for ExplicitTimerDelay {
             if matches!(ast.node(first), Node::Spread { .. }) {
                 return;
             }
-            let end = parenthesized_span(cx, first).end;
+            let end = paren_span(cx, first).end;
             cx.report(
                 cx.span(node),
                 format!("`{name}` should have an explicit delay argument."),
@@ -110,10 +110,7 @@ impl Rule for ExplicitTimerDelay {
         if !is_zero(ast, delay, 0) {
             return;
         }
-        let range = Span::new(
-            parenthesized_span(cx, first).end,
-            parenthesized_span(cx, delay).end,
-        );
+        let range = Span::new(paren_span(cx, first).end, paren_span(cx, delay).end);
         let fix = ast
             .comments_in(range)
             .is_empty()

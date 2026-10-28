@@ -19,14 +19,22 @@
 //! inherited names are left alone.
 
 use super::prelude::*;
+use super::unicorn_ast::is_left_hand_side;
+use super::unicorn_ast::is_value_not_usable;
+use super::unicorn_ast::linebreak;
+use super::unicorn_ast::remove_statements;
 use super::unicorn_static::{is_global_ident, static_value};
+use super::unicorn_text::has_possible_side_effect;
+use super::unicorn_text::has_unparenthesized_optional_chain;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_text::paren_text;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::Checker;
-use super::unicorn_util_h5::{
-    escape_string, has_possible_side_effect, has_unparenthesized_optional_chain,
-    in_unparenthesized_new_callee, indent_before, is_identifier_name, is_left_hand_side,
-    is_parenthesized, is_value_not_usable, linebreak, member_object_text, method_call_of,
-    needs_semicolon, parent_through_parens, parenthesized_text, remove_statement, static_string,
-    would_remove_comments,
+use super::unicorn_util::{
+    escape_string, in_unparenthesized_new_callee, indent_before, is_identifier_name,
+    method_call_of, parent_through_parens, static_string,
 };
 use crate::semantic::RefFlags;
 use ts_r_ast::{AssignOp, BinaryOp, UnaryOp, VarKind};
@@ -57,7 +65,7 @@ impl FromOptions for DomNodeDataset {
 }
 
 /// unicorn's `isKnownNonDomNode`.
-static DOM_NODE: Checker = Checker {
+pub(crate) static DOM_NODE: Checker = Checker {
     target_names: &[
         "CharacterData",
         "Document",
@@ -113,9 +121,7 @@ impl Rule for DomNodeDataset {
                 right,
             } => {
                 let right = skip_parens(cx.ast(), right);
-                if static_string(cx.ast(), left).is_some()
-                    && is_whole_dataset_access(cx.ast(), right)
-                {
+                if static_string(cx.ast(), left).is_some() && is_whole_dataset_access(cx, right) {
                     has_attribute(cx, node, left, right);
                 }
             }
@@ -126,7 +132,7 @@ impl Rule for DomNodeDataset {
                 {
                     let target = skip_parens(ast, target);
                     if ident_name(ast, obj) == Some("Object")
-                        && is_whole_dataset_access(ast, target)
+                        && is_whole_dataset_access(cx, target)
                         && static_string(ast, key).is_some()
                     {
                         has_attribute(cx, node, key, target);
@@ -155,8 +161,8 @@ fn is_dataset_access(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
 }
 
 /// A `x.dataset` that ends no optional chain (ESTree wraps `x?.dataset` in a chain node).
-fn is_whole_dataset_access(ast: &ts_r_ast::Ast, id: NodeId) -> bool {
-    is_dataset_access(ast, id) && !has_unparenthesized_optional_chain(ast, id)
+fn is_whole_dataset_access(cx: &Ctx<'_, '_>, id: NodeId) -> bool {
+    is_dataset_access(cx.ast(), id) && !has_unparenthesized_optional_chain(cx, id)
 }
 
 fn dataset_object(ast: &ts_r_ast::Ast, dataset: NodeId) -> (NodeId, bool) {
@@ -325,7 +331,7 @@ fn dataset_fix(
     let callee = skip_parens(ast, callee);
     let optional = matches!(*cx.node(callee), Node::Member { optional: true, .. });
     if method == "setAttribute"
-        && (has_unparenthesized_optional_chain(ast, callee) || !is_value_not_usable(cx, call))
+        && (has_unparenthesized_optional_chain(cx, callee) || !is_value_not_usable(cx, call))
     {
         return None;
     }
@@ -361,7 +367,7 @@ fn dataset_fix(
         match method {
             "setAttribute" => {
                 let value = args[1];
-                let value_text = parenthesized_text(cx, value);
+                let value_text = paren_text(cx, value);
                 if needs_parens_for_in(cx, value, call) {
                     format!("{access} = ({value_text})")
                 } else {
@@ -495,7 +501,7 @@ fn declarator(cx: &mut Ctx<'_, '_>, node: NodeId) {
         return;
     };
     let dataset = skip_parens(ast, init);
-    if !is_whole_dataset_access(ast, dataset) {
+    if !is_whole_dataset_access(cx, dataset) {
         return;
     }
     let is_ident = matches!(ast.node(name), Node::Ident { .. });
@@ -567,7 +573,7 @@ fn declarator(cx: &mut Ctx<'_, '_>, node: NodeId) {
         }
         let object = member_object_text(cx, obj, obj);
         let span = cx.span(declaration);
-        let separator = format!(";{}{}", linebreak(cx), indent_before(cx, span.start));
+        let separator = format!(";{}{}", linebreak(cx.src()), indent_before(cx, span.start));
         let text = simple
             .iter()
             .map(|(key, value)| {
@@ -668,7 +674,7 @@ fn inline_fix(cx: &Ctx<'_, '_>, decl: NodeId, name: NodeId, dataset: NodeId) -> 
         return None;
     }
     let object = member_object_text(cx, obj, obj);
-    let mut fix = remove_statement(cx, declaration);
+    let mut fix = remove_statements(cx, declaration, declaration, false);
     for (member, key) in members {
         let quote = match *cx.node(member) {
             Node::Index { index, .. } => key_quote(cx, index),
@@ -762,7 +768,7 @@ fn member(cx: &mut Ctx<'_, '_>, node: NodeId) {
                 parent_span,
                 format!(
                     "{object_text}{chain}setAttribute({attribute}, {})",
-                    parenthesized_text(cx, right)
+                    paren_text(cx, right)
                 ),
             )
         });

@@ -7,7 +7,7 @@
 use super::prelude::*;
 use super::unicorn_ast::is_left_hand_side;
 use super::unicorn_static::{is_global_ident, static_value};
-use super::unicorn_util_h1::unwrap_ts;
+use super::unicorn_util::skip_wrappers;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -35,7 +35,7 @@ impl Rule for NoGlobalObjectPropertyAssignment {
             Node::Index { obj, index, .. } => (obj, Some(index)),
             _ => return,
         };
-        let obj = unwrap_ts(ast, obj);
+        let obj = skip_wrappers(ast, obj);
         let Some(name) = ident_name(ast, obj) else {
             return;
         };

@@ -9,9 +9,8 @@
 use super::prelude::*;
 use super::unicorn_ast::contains_node;
 use super::unicorn_static::{Static, static_value_control_flow};
-use super::unicorn_text::{
-    is_parenthesized, is_same_reference, needs_semicolon, paren_span, paren_text,
-};
+use super::unicorn_text::{is_parenthesized, needs_semicolon, paren_span, paren_text};
+use super::unicorn_util::is_same_reference;
 use ts_r_ast::Ast;
 
 pub static RULE: RuleDef = RuleDef {

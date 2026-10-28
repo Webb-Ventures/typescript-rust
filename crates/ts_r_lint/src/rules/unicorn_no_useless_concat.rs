@@ -13,8 +13,9 @@
 //! from a glued keyword and gets a `;` when it would continue the previous line.
 
 use super::prelude::*;
+use super::unicorn_text::paren_span;
 use super::unicorn_text::{is_parenthesized, needs_semicolon, would_remove_comments};
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
+use super::unicorn_util::{space_around_keyword, with_edits};
 use ts_r_ast::Ast;
 use ts_r_span::Span;
 
@@ -243,7 +244,7 @@ impl Rule for NoUselessConcat {
         };
 
         // The `+`: the last token before the right operand and its parentheses.
-        let mut at = parenthesized_span(cx, right).start as usize;
+        let mut at = paren_span(cx, right).start as usize;
         loop {
             at = skip_trivia_backward(ast, src, at);
             if at > 0 && src.as_bytes()[at - 1] == b'(' {
@@ -257,10 +258,7 @@ impl Rule for NoUselessConcat {
         }
         let operator = Span::new(at as u32 - 1, at as u32);
 
-        let range = Span::new(
-            parenthesized_span(cx, left).start,
-            parenthesized_span(cx, right).end,
-        );
+        let range = Span::new(paren_span(cx, left).start, paren_span(cx, right).end);
         let fix = (|| {
             if would_remove_comments(cx, range, &[])
                 || (chain && is_parenthesized(cx, node_left))

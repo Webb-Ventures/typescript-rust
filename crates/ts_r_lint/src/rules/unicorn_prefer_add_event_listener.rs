@@ -19,11 +19,12 @@
 //! that ends after it.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, skip_wrappers, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    is_parenthesized, is_same_reference, is_value_not_function, member_object_text, static_string,
-    would_remove_comments,
-};
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::{is_same_reference, is_value_not_function, static_string};
+use super::unicorn_util::{skip_wrappers, space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -334,11 +335,7 @@ fn check(cx: &mut Ctx<'_, '_>, node: NodeId, assigns: &[NodeId]) {
         && parent_skip_parens(ast, cx.file.parents, node)
             .is_some_and(|p| matches!(cx.node(p), Node::ExprStmt { .. }))
         && !is_value_not_function(ast, value)
-        && !would_remove_comments(
-            cx,
-            cx.span(node),
-            &[parenthesized_span(cx, obj), cx.span(value)],
-        )
+        && !would_remove_comments(cx, cx.span(node), &[paren_span(cx, obj), cx.span(value)])
         && !assigns
             .iter()
             .any(|&other| other != node && assigned_same(cx, other, member))

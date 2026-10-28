@@ -10,7 +10,7 @@ use super::prelude::*;
 use super::unicorn_ast::linebreak;
 use super::unicorn_text::static_string_value;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h2::{indent_unit, line_indent, line_start};
+use super::unicorn_util::{indent_unit, line_indent, line_start};
 use ts_r_ast::{Ast, HeritageKind};
 
 pub static RULE: RuleDef = RuleDef {

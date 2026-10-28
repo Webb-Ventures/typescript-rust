@@ -15,8 +15,10 @@
 //! otherwise a suggestion.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, skip_wrappers};
-use super::unicorn_util_h5::{is_same_reference, static_string, would_remove_comments};
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::skip_wrappers;
+use super::unicorn_util::{is_same_reference, static_string};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -255,7 +257,7 @@ fn removal_fix(cx: &Ctx<'_, '_>, counted: &[(NodeId, NodeId)]) -> Option<Fix> {
         });
     };
     for &(_, len) in counted {
-        let range = parenthesized_span(cx, len);
+        let range = paren_span(cx, len);
         if would_remove_comments(cx, range, &[]) {
             return None;
         }

@@ -14,7 +14,7 @@
 //! used, the fix becomes a suggestion.
 
 use super::prelude::*;
-use super::unicorn_util_h4::linebreak;
+use super::unicorn_ast::linebreak;
 use ts_r_ast::{Ast, Modifiers};
 
 pub static RULE: RuleDef = RuleDef {
@@ -440,7 +440,7 @@ impl PreferExportFrom {
             Self::remove_import_or_export(cx, imported.specifier, &mut edits);
         }
         Self::remove_import_or_export(cx, exported.node, &mut edits);
-        super::unicorn_util_h4::fix_of(edits)
+        super::unicorn_util::fix_of(edits)
     }
 }
 

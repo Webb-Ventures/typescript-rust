@@ -19,9 +19,10 @@
 
 use super::prelude::*;
 use super::unicorn_ast::remove_argument;
-use super::unicorn_text::{is_same_reference, needs_semicolon};
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::{fix_of, has_side_effect_with, is_typescript_path};
 use super::unicorn_util::{skip_wrappers, space_around_keyword};
-use super::unicorn_util_h4::{fix_of, has_side_effect, is_typescript_path};
 use ts_r_ast::{Ast, BinaryOp, FnFlags, KeywordTypeKind, UnaryOp, VarKind};
 
 pub static RULE: RuleDef = RuleDef {
@@ -299,8 +300,8 @@ fn indexed_access(ast: &Ast, branch: NodeId) -> Option<Access> {
         return None;
     };
     if contains_optional_chain(ast, skip_wrappers(ast, branch))
-        || has_side_effect(ast, obj, true, false)
-        || has_side_effect(ast, index, true, false)
+        || has_side_effect_with(ast, obj, true, false)
+        || has_side_effect_with(ast, index, true, false)
     {
         return None;
     }
@@ -482,7 +483,7 @@ impl NoUselessUndefined {
                     return;
                 }
                 let start = cx.span(type_ann.unwrap_or(name)).end;
-                let end = super::unicorn_util::parenthesized_span(cx, node).end;
+                let end = super::unicorn_text::paren_span(cx, node).end;
                 let range = Span::new(start, end);
                 let fix = (!has_comment(cx, range)).then(|| Fix::replace(range, ""));
                 cx.report(span, MESSAGE).id(ID).fix_opt(fix);
@@ -507,7 +508,7 @@ impl NoUselessUndefined {
                     }
                     None => cx.span(pattern).end,
                 };
-                let end = super::unicorn_util::parenthesized_span(cx, node).end;
+                let end = super::unicorn_text::paren_span(cx, node).end;
                 let range = Span::new(left_end, end);
                 if has_comment(cx, range) {
                     cx.report(span, MESSAGE).id(ID);
@@ -549,7 +550,7 @@ impl NoUselessUndefined {
     }
 
     fn drop_default(&self, cx: &mut Ctx<'_, '_>, node: NodeId, left_end: u32) {
-        let end = super::unicorn_util::parenthesized_span(cx, node).end;
+        let end = super::unicorn_text::paren_span(cx, node).end;
         let range = Span::new(left_end, end);
         let fix = (!has_comment(cx, range)).then(|| Fix::replace(range, ""));
         let span = cx.span(node);

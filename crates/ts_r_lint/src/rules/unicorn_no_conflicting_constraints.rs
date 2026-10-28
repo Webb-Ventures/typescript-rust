@@ -10,7 +10,7 @@
 
 use super::prelude::*;
 use super::unicorn_static::{Static, static_value_control_flow};
-use super::unicorn_util_h1::decode_jsx_numeric_entities;
+use super::unicorn_util::decode_jsx_entities;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -134,7 +134,7 @@ impl Rule for NoConflictingConstraints {
             let attr = match value.map(|v| (v, ast.node(v))) {
                 Some((v, Node::StringLit { value })) => Attr {
                     node: v,
-                    value: Some(Static::Str(decode_jsx_numeric_entities(ast.atom(*value)))),
+                    value: Some(Static::Str(decode_jsx_entities(ast.atom(*value)))),
                 },
                 Some((v, Node::JsxExprContainer { expr })) => match *expr {
                     Some(e) => Attr {

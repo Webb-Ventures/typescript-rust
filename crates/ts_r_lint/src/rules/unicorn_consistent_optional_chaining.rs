@@ -10,7 +10,8 @@
 
 use super::prelude::*;
 use super::unicorn_ast::would_remove_comments;
-use super::unicorn_util_h1::{is_same_reference, unwrap_ts};
+use super::unicorn_util::is_same_reference;
+use super::unicorn_util::skip_wrappers;
 use ts_r_ast::Ast;
 use ts_r_span::Span;
 
@@ -40,7 +41,7 @@ fn member(ast: &Ast, id: NodeId) -> Option<(NodeId, bool, bool)> {
 /// An identifier, `this` or `super`, or member accesses on one (at most 1000 deep).
 fn is_supported_base(ast: &Ast, mut id: NodeId) -> bool {
     for _ in 0..1000 {
-        id = unwrap_ts(ast, id);
+        id = skip_wrappers(ast, id);
         match *ast.node(id) {
             Node::Ident { .. } | Node::This {} | Node::Super {} => return true,
             Node::Member { obj, .. } | Node::Index { obj, .. } => id = obj,
@@ -62,7 +63,7 @@ impl Rule for ConsistentOptionalChaining {
         if !matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
             return;
         }
-        let (left, right) = (unwrap_ts(ast, left), unwrap_ts(ast, right));
+        let (left, right) = (skip_wrappers(ast, left), skip_wrappers(ast, right));
         let (Some((left_obj, left_optional, _)), Some((right_obj, right_optional, computed))) =
             (member(ast, left), member(ast, right))
         else {

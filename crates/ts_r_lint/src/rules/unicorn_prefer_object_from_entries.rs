@@ -16,11 +16,11 @@
 //!   name or path is replaced by `Object.fromEntries`.
 
 use super::prelude::*;
+use super::unicorn_ast::remove_statements;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::paren_text;
 use super::unicorn_types::is_known_non_array;
-use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
-    has_type_arguments, method_call_of, node_matches_path, parenthesized_text, remove_statement,
-};
+use super::unicorn_util::{has_type_arguments, method_call_of, node_matches_path};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -266,8 +266,8 @@ fn reduce_fix(
         return None;
     }
     // The initial value with its parentheses and the comma before it.
-    let init_span = parenthesized_span(cx, skip_parens(ast, init));
-    let callback_end = parenthesized_span(cx, callback).end;
+    let init_span = paren_span(cx, skip_parens(ast, init));
+    let callback_end = paren_span(cx, callback).end;
     let comma = src[callback_end as usize..init_span.start as usize]
         .find(',')
         .map(|i| callback_end + i as u32)?;
@@ -298,11 +298,11 @@ fn reduce_fix(
         add_parens = !src[..arrow].trim_end().ends_with(')');
     }
     fix = fix.and(first_span, if add_parens { "()" } else { "" });
-    let mut key_text = parenthesized_text(cx, key).to_owned();
+    let mut key_text = paren_text(cx, key).to_owned();
     if !computed && matches!(ast.node(key), Node::Ident { .. }) {
         key_text = format!("'{key_text}'");
     }
-    let value_text = parenthesized_text(cx, value);
+    let value_text = paren_text(cx, value);
     let body_inner = skip_parens(ast, body);
     fix = fix.and(cx.span(body_inner), format!("[{key_text}, {value_text}]"));
     let mut cur = body_inner;
@@ -463,10 +463,10 @@ fn check_loop(cx: &mut Ctx<'_, '_>, decl: NodeId) {
             cx.span(init_inner),
             format!(
                 "Object.fromEntries({})",
-                parenthesized_text(cx, skip_parens(ast, right))
+                paren_text(cx, skip_parens(ast, right))
             ),
         )
-        .and_fix(remove_statement(cx, lp))
+        .and_fix(remove_statements(cx, lp, lp, false))
     });
     cx.report_node(lp, "Prefer `Object.fromEntries()` over a `for-of` loop.")
         .id("loop")

@@ -8,7 +8,7 @@
 
 use super::prelude::*;
 use super::unicorn_types::should_skip_known_non_array_receiver;
-use super::unicorn_util_h5::method_call_of;
+use super::unicorn_util::method_call_of;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

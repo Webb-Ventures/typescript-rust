@@ -8,7 +8,8 @@
 use super::prelude::*;
 use super::unicorn_ast::method_call;
 use super::unicorn_static::skip_ts_only;
-use super::unicorn_util::{new_to_call, parenthesized_span};
+use super::unicorn_text::paren_span;
+use super::unicorn_util::new_to_call;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -67,7 +68,7 @@ impl Rule for PreferResponseStaticJson {
         let Node::Call { callee: member, .. } = *ast.node(stringify) else {
             return;
         };
-        let call_range = parenthesized_span(cx, stringify);
+        let call_range = paren_span(cx, stringify);
         let data_range = cx.span(data);
         let before = Span::new(call_range.start, data_range.start);
         let after = Span::new(data_range.end, call_range.end);

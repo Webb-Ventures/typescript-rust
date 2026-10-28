@@ -6,9 +6,7 @@
 //! where the binding and its references live.
 
 use super::prelude::*;
-use super::unicorn_util_h4::{
-    available_name, estree_ident_span, is_method_call, rename_symbol_fix,
-};
+use super::unicorn_util::{available_name, estree_ident_span, is_method_call, rename_symbol_fix};
 use crate::regex;
 
 pub static RULE: RuleDef = RuleDef {

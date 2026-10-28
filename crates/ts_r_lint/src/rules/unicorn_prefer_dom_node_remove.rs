@@ -11,12 +11,15 @@
 //! an optional link, else `.remove()`. A comment inside the call blocks both.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    has_possible_side_effect, is_parenthesized, is_same_reference, is_value_not_dom_node,
-    is_value_not_usable, member_object_text, method_call_of, needs_semicolon,
-    would_remove_comments,
-};
+use super::unicorn_ast::is_value_not_usable;
+use super::unicorn_text::has_possible_side_effect;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_text;
+use super::unicorn_text::needs_semicolon;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::{is_same_reference, is_value_not_dom_node, method_call_of};
+use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -89,7 +92,7 @@ impl Rule for PreferDomNodeRemove {
             if is_parenthesized(cx, member) || is_parenthesized(cx, parent_inner) {
                 return None;
             }
-            let start = parenthesized_span(cx, skip_parens(ast, obj)).end;
+            let start = paren_span(cx, skip_parens(ast, obj)).end;
             Some(Fix::replace(
                 Span::new(start, cx.span(node).end),
                 if optional { "?.remove()" } else { ".remove()" },

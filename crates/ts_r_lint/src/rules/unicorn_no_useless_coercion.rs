@@ -80,7 +80,11 @@ fn parent_np(cx: &Ctx<'_, '_>, id: NodeId) -> Option<(NodeId, NodeId)> {
 }
 
 /// `replaceNodeWithExpression`: `node` replaced by its inner `expression`.
-fn replace_with_expression(cx: &Ctx<'_, '_>, node: NodeId, expression: NodeId) -> Option<Fix> {
+pub(crate) fn replace_with_expression(
+    cx: &Ctx<'_, '_>,
+    node: NodeId,
+    expression: NodeId,
+) -> Option<Fix> {
     let ast = cx.ast();
     let mut outer = node;
     let parent = loop {

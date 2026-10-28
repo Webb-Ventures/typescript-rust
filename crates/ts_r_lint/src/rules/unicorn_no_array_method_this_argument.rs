@@ -14,11 +14,14 @@
 //! member object) are suggestions.
 
 use super::prelude::*;
+use super::unicorn_text::is_parenthesized;
+use super::unicorn_text::member_object_needs_parens;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::paren_text;
+use super::unicorn_text::would_remove_comments;
 use super::unicorn_types::should_skip_known_non_array_receiver;
-use super::unicorn_util::parenthesized_span;
-use super::unicorn_util_h5::{
-    is_parenthesized, is_value_not_function, member_object_needs_parens, method_call_of,
-    node_matches_path, parenthesized_text, static_string, would_remove_comments,
+use super::unicorn_util::{
+    is_value_not_function, method_call_of, node_matches_path, static_string,
 };
 
 pub static RULE: RuleDef = RuleDef {
@@ -146,8 +149,8 @@ impl Rule for NoArrayMethodThisArgument {
 /// `, thisArg` with its parentheses: from the comma before it.
 fn removal_span(cx: &Ctx<'_, '_>, callback: NodeId, this_arg: NodeId) -> Span {
     let ast = cx.ast();
-    let prev_end = parenthesized_span(cx, skip_parens(ast, callback)).end;
-    let arg = parenthesized_span(cx, skip_parens(ast, this_arg));
+    let prev_end = paren_span(cx, skip_parens(ast, callback)).end;
+    let arg = paren_span(cx, skip_parens(ast, this_arg));
     let comments = ast.comments_in(Span::new(prev_end, arg.start));
     let src = cx.src();
     let comma = (prev_end..arg.start)
@@ -200,9 +203,9 @@ fn report(
         return;
     }
     let bind = remove.as_ref().map(|remove| {
-        let callback_span = parenthesized_span(cx, inner_callback);
+        let callback_span = paren_span(cx, inner_callback);
         let mut fix = remove.clone();
-        let mut bound = format!(".bind({})", parenthesized_text(cx, inner_this));
+        let mut bound = format!(".bind({})", paren_text(cx, inner_this));
         if !is_parenthesized(cx, inner_callback)
             && member_object_needs_parens(cx, inner_callback, inner_callback)
         {

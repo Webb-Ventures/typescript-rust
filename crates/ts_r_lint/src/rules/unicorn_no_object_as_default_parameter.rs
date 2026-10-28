@@ -3,8 +3,8 @@
 //! name is reported with its name; a destructuring pattern on the object.
 
 use super::prelude::*;
+use super::unicorn_util::estree_ident_span;
 use super::unicorn_util::skip_wrappers;
-use super::unicorn_util_h4::estree_ident_span;
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(

@@ -11,11 +11,11 @@
 //! outside those three.
 
 use super::prelude::*;
-use super::unicorn_util::{parenthesized_span, space_around_keyword, with_edits};
-use super::unicorn_util_h5::{
-    has_unparenthesized_optional_chain, member_object, static_member_name, static_string,
-    would_remove_comments,
-};
+use super::unicorn_text::has_unparenthesized_optional_chain;
+use super::unicorn_text::paren_span;
+use super::unicorn_text::would_remove_comments;
+use super::unicorn_util::{member_object, static_member_name, static_string};
+use super::unicorn_util::{space_around_keyword, with_edits};
 
 pub static RULE: RuleDef = RuleDef {
     meta: meta(
@@ -81,7 +81,7 @@ impl Rule for PreferReflectApply {
             && let [recv, list] = args
             && !matches!(ast.node(inner), Node::Super {})
             && apply_signature(cx, *recv, *list)
-            && !has_unparenthesized_optional_chain(ast, obj)
+            && !has_unparenthesized_optional_chain(cx, obj)
         {
             inner
         } else if method == Some("call")
@@ -101,7 +101,7 @@ impl Rule for PreferReflectApply {
         let (recv, list) = (skip_parens(ast, recv), skip_parens(ast, list));
         let seq = matches!(ast.node(target), Node::Seq { .. });
         let target_span = if seq {
-            parenthesized_span(cx, target)
+            paren_span(cx, target)
         } else {
             cx.span(target)
         };

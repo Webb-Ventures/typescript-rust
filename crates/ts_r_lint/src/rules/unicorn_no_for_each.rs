@@ -14,13 +14,14 @@
 
 use super::prelude::*;
 use super::unicorn_ast::matches_path;
+use super::unicorn_text::paren_span;
 use super::unicorn_text::{
     is_parenthesized, member_object_needs_parens, needs_semicolon,
     starts_with_declaration_like_token,
 };
 use super::unicorn_types::{is_array, should_skip_known_non_array_receiver};
-use super::unicorn_util::{parenthesized_span, space_around_keyword};
-use super::unicorn_util_h4::{fix_of, has_side_effect};
+use super::unicorn_util::space_around_keyword;
+use super::unicorn_util::{fix_of, has_side_effect_with};
 use crate::semantic::{DeclKind, RefFlags, Resolution, ScopeId};
 use ts_r_ast::{Ast, FnFlags};
 
@@ -407,7 +408,7 @@ fn build_fix(cx: &Ctx<'_, '_>, c: &Candidate<'_>) -> Option<Fix> {
     let call_span = cx.span(c.call);
     let head_range = Span::new(
         call_span.start,
-        parenthesized_span(cx, skip_parens(ast, body)).start,
+        paren_span(cx, skip_parens(ast, body)).start,
     );
     if ast
         .comments_in(head_range)
@@ -555,7 +556,8 @@ impl Rule for NoForEach {
         }
         let fix = if is_array(cx, object) {
             fixable_candidate(cx, node).and_then(|c| {
-                let suggest = c.member_optional && has_side_effect(ast, c.callee, false, false);
+                let suggest =
+                    c.member_optional && has_side_effect_with(ast, c.callee, false, false);
                 build_fix(cx, &c).map(|f| (f, suggest))
             })
         } else {
