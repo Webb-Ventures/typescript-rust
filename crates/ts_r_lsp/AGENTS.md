@@ -382,15 +382,21 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   where it is the innermost node holding the position strictly (`f() {}|` is outside `f`);
   a body the parser closed at the end of the file holds the position after it.
 - Parameters: inside a parameter's type or default the parameter itself and the later ones
-  are not offered (`f(a, b = |, c)` offers `a`).
+  are not offered (`f(a, b = |, c)` offers `a`); `arguments` is offered in a default too.
+  A type parameter's default offers neither itself nor the later ones, and its own
+  constraint does not offer it, except inside a type argument (`C extends Array<|>`).
+- Labels: after `break`/`continue` on the same line, the labels of the enclosing labeled
+  statements (innermost first, up to the nearest function or class), or no list.
+- Literal text: inside a template's text (its ends included), at the end of a regular
+  expression and right after a bigint literal there is no list; a number is not text
+  (`10| + 1` gets one).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
   dot; after `?.` private names are not offered. A value whose type is a promise also
   lists the awaited type's members, each inserting `(await x).m` and replacing from the
   value's start (inside async functions and at the top of a module). `import("./m").|` in
   a type lists the module's exports (types, and namespaces holding them).
-- Template holes: a `${|}` of a template literal completes like any expression (only a
-  `TemplateElement`, the literal text, blocks completion); a word that starts with a digit
+- Template holes: a `${|}` of a template literal completes like any expression; a word that starts with a digit
   (`1.5|`) is a number, not a member access.
 - Generic calls (`generic_context.rs`): an object literal argument of a call to a generic
   signature (or one nested in such a literal through property values) also lists the
@@ -414,6 +420,12 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
 
 Rules from `tsc: tsc/internal/ls/hover.go` and `tsc: tsc/internal/checker/checker.go`
 (`instantiateSymbol`), v7.0.2, in our words; the fourslash tests are the oracle.
+
+- `this` (`hover.rs`, observed on `quickInfoOnThis*`): the `this` type in a member shows
+  `this`; a `this` parameter `(parameter) this: T`, with `T` its annotation or else the
+  `this` type of the contextual signature; the head of `typeof this` / `typeof this.x`
+  shows `this: T`, the type `this` has there (an explicit `this` parameter, the class's
+  `this` type or, in an object literal method, the literal's contextual or own type).
 
 - The location's meaning (value, type or namespace position; a declaration name is all
   three) picks which of a merged symbol's meanings get a line; when none match, all are
@@ -526,6 +538,30 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   definition of the declared name. A variable statement's modifier goes nowhere.
   Find-all-references on such a keyword (`keyword_name`) lists the declared name's
   references; document highlights on it do not move to the name (`const` alone has none).
+- **References from other keywords** (`reference_keyword`, from tsc 7's answers to
+  `referencesFor{Statement,Expression,Type,Declaration}Keywords`): a statement, expression or
+  type keyword stands for its operand's name: `import`/`type`/`export` of a declaration with
+  one specifier that specifier (`* as n`'s `n`), `from` and `require` the module specifier,
+  `as` the name it introduces, `export =`/`export default` the expression, `new`/`void`/
+  `typeof`/`delete`/`await`/`yield` the operand, `in`/`instanceof` the right side, `as`/
+  `satisfies` the type, `extends`/`implements` with one type that type, a type parameter's
+  `extends` its constraint, `infer` and a mapped `in` the type parameter, `keyof`/
+  `readonly`/`unique` the operand. Rename uses only the declaration keywords (`class C`,
+  `get x`), and `default` of `export { a as default }` / `import { default as b }` cannot be
+  renamed.
+- **Module references** (`module_refs.rs`): a module specifier, an ambient module's name, a
+  `/// <reference path>` or `module` of `module.exports` finds every specifier resolving to
+  the same module, the reference paths naming the file, the ambient declarations' names and
+  the file's own `module.exports` heads (an import type's specifier counts, qualified or
+  not, except a qualified one when searching from a `module.exports` head; directives are
+  read past block comments), not for a script (strings then); a keyword's word inside a
+  comment finds nothing. Names in an import type's qualifier
+  (`import("./a").N.T`) resolve through the module's exports.
+- **Rename through specifiers** (`rename_alias.rs`, tsc's prefix and suffix text): a
+  name-keeping specifier (`import { x }`, `export { x }`, `export { x } from`) is where a
+  rename stops: renaming at it (or at an import's use) gives `x as new` and follows only
+  that alias; renaming the symbol gives an export of it `new as x`, and renames an import of
+  it only when the symbol is exported by its own name.
 - **Property names in destructuring and literals** (`locate.rs`): a key of an object literal
   used as an assignment target (`({ a: x } = o)`, `for ({ a } of xs)`, `[{ a }] = xs`,
   nested) means the property of the type it takes apart, as does a binding key in
@@ -1063,7 +1099,7 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2085 of 2516 tests at 682d76b, lists the rest by cause:
+- Features (the fourslash oracle, 2131 of 2513 tests at 91f3b08, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
@@ -1071,7 +1107,7 @@ features stay on ts-r (hover p50 0.12 ms).
   (`a<string>` for `import a = require(..)`); references do not go back up from a
   re-export to the declaration the way tsc does from some imports (`import boom from
   "./d"` where `d` re-exports a renamed default), nor through JSDoc `@param`/`@import`,
-  `require` or import types.
+  `require` or import types of JavaScript exports.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no

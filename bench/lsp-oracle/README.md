@@ -33,7 +33,7 @@ node bench/lsp-oracle/fails.mjs [REGEX]   # list failures from target/lsp-oracle
 `--filter REGEX` and `--feature hover,completion` narrow the run, `--show N` prints the first
 N differences, `--keep` leaves the temporary projects, `--tsr PATH` runs another ts-r-lsp
 binary, and `--dump FILE` appends every compared query as a JSON line
-(`{test, feature, marker, file, at, tsc, tsr}`; `at` is the marker's line with `¦` at the marker) for grouping mismatches by cause. Tests are skipped when they verify no
+(`{test, feature, marker, file, at, agree, diff, tsc, tsr}`; `at` is the marker's line with `¦` at the marker, `diff` the difference reported) for grouping mismatches by cause. Tests are skipped when they verify no
 compared feature (code fixes, formatting, navigation bars, ...), when both servers answer
 nothing at every marker, or when they need a setup the harness can't give both servers the
 same way: non-TS extensions, `outFile`, symlinks, files outside the project, non-source files,
@@ -42,27 +42,30 @@ every skip reason.
 
 ## Results
 
-682d76b (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2085 of 2516 compared tests pass (82.9%)**; 8023 of 8967 queries agree.
-3803 of the 6319 test files are skipped (3698 verify no compared feature, 156 get no answer
-from either server). Up from 1967 of 2516 at 5628954: 118 tests fixed (JSDoc completions;
-completions in template holes, generic-call object literals, awaited members, import
-statement keywords and import types; references, rename, definition and hover on names in
-`{@link}`, `@see` and `@throws` paths; references and rename of string literal types; JSX
-intrinsic tags and attributes), none lost. The compared count is unchanged: two rename tests
-where tsc answers nothing (`renameImport`, `jsObjectDefinePropertyRenameLocations`) now get
-no answer from ts-r either and are skipped, and tsc's timeouts move a few others in and out
-run to run (rerun with `--filter` and counted).
+91f3b08 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2131 of 2513 compared tests pass (84.8%)**; 8247 of 8950 queries agree.
+3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
+from either server). Up from 2085 of 2516 at 682d76b: 46 tests fixed (references from
+statement, expression and type keywords; references to modules from specifiers, `declare
+module` names, `/// <reference path>` and `module.exports`; references through import-type
+qualifiers; rename through name-keeping import and export specifiers with `x as y` prefix
+and suffix text; completions after `break`/`continue` (labels), none in template text or
+after a regex or bigint, type parameters left out of their own constraints and defaults;
+hover on `this` parameters, the `this` type and `typeof this`), none lost. The compared
+count moves by three: completion tests where tsc answers nothing in template text, after
+a regex or after a bigint now get no answer from ts-r either and are skipped. tsc's
+timeouts move a few others in and out run to run (five were rerun with `--filter` and
+counted).
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 419 | 101 | 18 | 2338 / 2515 |
-| completion | 875 | 151 | 107 | 2553 / 2792 |
-| references | 254 | 91 | 12 | 1160 / 1443 |
-| rename | 144 | 32 | 13 | 414 / 549 |
-| definition | 139 | 27 | 26 | 482 / 526 |
+| hover | 423 | 97 | 18 | 2351 / 2515 |
+| completion | 879 | 144 | 110 | 2567 / 2781 |
+| references | 273 | 72 | 12 | 1259 / 1443 |
+| rename | 161 | 15 | 13 | 504 / 543 |
+| definition | 140 | 26 | 26 | 489 / 526 |
 | signatureHelp | 136 | 14 | 26 | 637 / 656 |
-| highlights | 105 | 12 | 20 | 387 / 431 |
+| highlights | 106 | 11 | 20 | 388 / 431 |
 | typeDefinition | 13 | 3 | 3 | 52 / 55 |
 
 Remaining failures by cause (example tests in parentheses):
@@ -88,10 +91,10 @@ Remaining failures by cause (example tests in parentheses):
   (`documentHighlightInExport1`), JSDoc `@typedef`
   (`jsdocTypedefTagServices`), a few keyword sets (`getOccurrencesConst04`,
   `getOccurrencesTryCatchFinallyBroken`), JSX tag names.
-- **References and rename (ts_r_lsp)**: keywords (`referencesForStatementKeywords`,
-  `referencesForExpressionKeywords`), JSDoc `@param`, `@template` and `@import`
-  (`findAllRefsJsDocImportTag*`), import types (`findAllRefs_importType_named`), module
-  specifiers, CommonJS `require` and `module.exports`, JSX runtime imports
+- **References and rename (ts_r_lsp)**: JSDoc `@param`, `@template` and `@import`
+  (`findAllRefsJsDocImportTag*`), import types of JavaScript exports and JSDoc typedefs
+  (`findAllRefs_importType_js*`, `findAllRefsTypedef_importType`), CommonJS `require` and
+  `exports.x =` (`findAllRefsCommonJsRequire*`, `renameJsExports0*`), JSX runtime imports
   (`jsxFindAllReferencesOnRuntimeImportWithPaths1`), quoted export names
   (`arbitraryModuleNamespaceIdentifiers_*`), going back up from a
   re-export of a renamed default (`import boom from "./d"`), constructors reached through
@@ -109,8 +112,8 @@ Remaining failures by cause (example tests in parentheses):
   (`completionListInObjectLiteral7`, `completionsWithOptionalPropertiesGenericPartial2`),
   protected and private members after `.`, `import("./x").` inside JSDoc braces
   (`javascriptModulesTypeImport`), exhaustive `case` snippets, shorthand properties in call arguments
-  (`completionPropertyShorthandForObjectLiteral*`), type parameters in their own defaults
-  and constraints, keyword sets by position, auto-import details.
+  (`completionPropertyShorthandForObjectLiteral*`), keyword sets by position, auto-import
+  details.
 - **Signature help (ts_r_lsp)**: JSX (`tsxSignatureHelp1`, `signatureHelpJSX`), `... N
   more ...` truncation (`quickInfoCanBeTruncated`), JSDoc `@overload`
   (`quickInfoJsDocTags13`), JavaScript fallbacks (`signatureHelpJSMissingPropertyAccess`),
@@ -133,3 +136,4 @@ Remaining failures by cause (example tests in parentheses):
 | aed0aea | 2026-10-27 | 1864 | 2517 | 74.1% | References, rename and highlights through inherited and overridden members, search meanings (value, type, namespace), renaming import and export aliases, default keywords, private names and computed keys; hover JSDoc parsed and rendered as tsc 7 does (tags, links, examples) from the declaration tsc documents, contextual object literal properties, module names, anonymous classes and functions, `prototype` owners |
 | 5628954 | 2026-10-27 | 1967 | 2516 | 78.2% | Go to definition at calls (the resolved signature), unnamed functions and classes by their assigned name, literal and binding keys through contextual and destructured types, ambient modules and import specifiers; completions read possible type arguments as types, offer namespaces in type positions only with a type below them, and list a module's exports in import and export clauses; type alias hovers print the aliased type (checker's InTypeAlias mode), JSDoc `@typedef`/`@callback` hovers and docs, setter write types, instantiated candidates at unresolved generic calls; names inside JSDoc tag types found for every feature; daemon test flakes fixed |
 | 682d76b | 2026-10-27 | 2085 | 2516 | 82.9% | JSDoc completions (tag names, `@param` names, types in tag braces, `@import` specifiers and attributes); completions in template holes, object literals of generic calls (the declared parameter type with undecided type parameters at their constraints), awaited promise members, `import` statement keywords and `import("x").` members; references, rename, definition and hover on names in `{@link}`, `@see` and `@throws` paths; references, rename and highlights of string literal types; JSX intrinsic tags and attributes in references, rename, definition and hover |
+| 91f3b08 | 2026-10-27 | 2131 | 2513 | 84.8% | References from keywords and to modules (specifiers, `declare module` names, `/// <reference path>`, `module.exports`), through import-type qualifiers; rename through name-keeping specifiers (`x as y`); completions for labels, none in template text or after a regex or bigint, type parameters out of their own constraints and defaults; hover on `this` parameters and `typeof this` |

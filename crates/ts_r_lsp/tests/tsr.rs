@@ -1168,8 +1168,12 @@ fn definition_type_definition_references_rename() {
         "textDocument/rename",
         json!({"textDocument": {"uri": ub}, "position": {"line": 1, "character": 11}, "newName": "size"}),
     );
-    assert_eq!(e["changes"][&ua].as_array().unwrap().len(), 1, "{e}");
-    assert_eq!(e["changes"][&ub].as_array().unwrap().len(), 2, "{e}");
+    // At a use of a name-keeping import only the alias is renamed (as tsc 7 does): the
+    // specifier becomes `len as size`, the declaration in `a.ts` stays.
+    assert!(e["changes"].get(&ua).is_none(), "{e}");
+    let edits = e["changes"][&ub].as_array().unwrap();
+    assert_eq!(edits.len(), 2, "{e}");
+    assert_eq!(edits[0]["newText"], "len as size", "{e}");
     // Lib symbols cannot be renamed (`length` of `s.length`).
     let r = c
         .call("textDocument/prepareRename", at(&ua, 2, 13), T)
@@ -3390,5 +3394,319 @@ fn references_of_intrinsic_tags_and_jsx_attributes() {
     assert_eq!(refs(&mut c, 4, 15), vec![(2, 41), (4, 15)]);
     // An attribute that sets no prop is found alone.
     assert_eq!(refs(&mut c, 4, 24), vec![(4, 24)]);
+    c.shutdown();
+}
+
+/// `(file, line, character)` of each location in a references answer, sorted.
+fn ref_names(r: &Value) -> Vec<(String, u64, u64)> {
+    let mut v: Vec<(String, u64, u64)> = r
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|l| {
+            let uri = l["uri"].as_str().unwrap_or("");
+            let file = uri.rsplit('/').next().unwrap_or("").to_string();
+            let s = &l["range"]["start"];
+            (
+                file,
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+fn refs_at(c: &mut ScriptedClient, uri: &str, line: u32, ch: u32) -> Vec<(String, u64, u64)> {
+    let r = result(
+        c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch},
+               "context": {"includeDeclaration": true}}),
+    );
+    ref_names(&r)
+}
+
+/// `(file, line, character, newText)` of each edit in a rename answer, sorted.
+fn rename_edits(
+    c: &mut ScriptedClient,
+    uri: &str,
+    line: u32,
+    ch: u32,
+) -> Vec<(String, u64, u64, String)> {
+    let e = result(
+        c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": uri}, "position": {"line": line, "character": ch}, "newName": "z"}),
+    );
+    let mut v = Vec::new();
+    if let Some(m) = e["changes"].as_object() {
+        for (u, edits) in m {
+            let file = u.rsplit('/').next().unwrap_or("").to_string();
+            for t in edits.as_array().unwrap() {
+                let s = &t["range"]["start"];
+                v.push((
+                    file.clone(),
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                    t["newText"].as_str().unwrap().to_string(),
+                ));
+            }
+        }
+    }
+    v.sort();
+    v
+}
+
+fn s(f: &str, l: u64, c: u64) -> (String, u64, u64) {
+    (f.to_string(), l, c)
+}
+
+const KW_A: &str = "export class C { static x = 1; }\nexport const a = 1;\n";
+const KW_B: &str = "import { C } from \"./a\";\nimport * as ns from \"./a\";\nnew C();\ndelete C.x;\nlet v: typeof C | undefined;\nfunction f<T extends C>(t: T) { return t instanceof C; }\ntype K = keyof C;\nexport { f };\n";
+
+#[test]
+fn references_from_keywords_and_module_specifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navkw",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", KW_A),
+            ("src/b.ts", KW_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let class_c = refs_at(&mut c, &ub, 0, 9);
+    assert!(class_c.len() >= 7, "{class_c:?}");
+    // `new`, `typeof`, `instanceof`, `extends` and `keyof` read their operand `C`.
+    for (line, ch) in [(2, 0), (4, 7), (5, 46), (5, 13), (6, 9)] {
+        assert_eq!(refs_at(&mut c, &ub, line, ch), class_c, "at {line}:{ch}");
+    }
+    // `delete C.x` reads the property.
+    assert_eq!(
+        refs_at(&mut c, &ub, 3, 0),
+        vec![s("a.ts", 0, 24), s("b.ts", 3, 9)]
+    );
+    // `import` with one specifier reads it; `from` and a specifier read the module.
+    assert_eq!(refs_at(&mut c, &ub, 0, 0), class_c);
+    let module = vec![s("b.ts", 0, 19), s("b.ts", 1, 21)];
+    assert_eq!(refs_at(&mut c, &ub, 0, 13), module);
+    assert_eq!(refs_at(&mut c, &ub, 1, 23), module);
+    // `as` of `* as ns` reads `ns`; `export` of `export { f }` reads `f`.
+    assert_eq!(refs_at(&mut c, &ub, 1, 9), vec![s("b.ts", 1, 12)]);
+    assert_eq!(
+        refs_at(&mut c, &ub, 7, 0),
+        vec![s("b.ts", 5, 9), s("b.ts", 7, 9)]
+    );
+    // Rename on a declaration keyword renames the declared name.
+    let e = rename_edits(&mut c, &ub, 5, 0);
+    assert_eq!(e.len(), 2, "{e:?}");
+    c.shutdown();
+}
+
+const IT_A: &str = "export type T = number;\nexport namespace N { export type U = string; }\n";
+const IT_B: &str =
+    "const x: import(\"./a\").T = 0;\nconst y: import(\"./a\").N.U = \"\";\nexport { x, y };\n";
+
+#[test]
+fn references_through_import_type_qualifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navit",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", IT_A),
+            ("src/b.ts", IT_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let ua = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let t = vec![s("a.ts", 0, 12), s("b.ts", 0, 23)];
+    assert_eq!(refs_at(&mut c, &ua, 0, 12), t);
+    assert_eq!(refs_at(&mut c, &ub, 0, 23), t);
+    let n = vec![s("a.ts", 1, 17), s("b.ts", 1, 23)];
+    assert_eq!(refs_at(&mut c, &ub, 1, 23), n);
+    let u = vec![s("a.ts", 1, 33), s("b.ts", 1, 25)];
+    assert_eq!(refs_at(&mut c, &ub, 1, 25), u);
+    // The specifier of a qualified import type is a module reference too (as in tsc 7).
+    assert_eq!(
+        refs_at(&mut c, &ub, 0, 18),
+        vec![s("b.ts", 0, 17), s("b.ts", 1, 17)]
+    );
+    c.shutdown();
+}
+
+const RN_A: &str = "var x = 1;\nexport { x };\nexport { x as y };\nexport const w = 2;\n";
+const RN_B: &str = "import { x, w } from \"./a\";\nx; w;\nexport { w };\n";
+
+#[test]
+fn rename_stops_at_name_keeping_specifiers() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navrn",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", RN_A),
+            ("src/b.ts", RN_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    env.open(&mut c, "src/b.ts");
+    let ua = env.uri("src/a.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    let e = |f: &str, l, c: u64, t: &str| (f.to_string(), l, c, t.to_string());
+    // The declaration keeps the name it is exported under.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 0, 4),
+        vec![
+            e("a.ts", 0, 4, "z"),
+            e("a.ts", 1, 9, "z as x"),
+            e("a.ts", 2, 9, "z")
+        ]
+    );
+    // The export specifier renames the export and its importers.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 1, 9),
+        vec![
+            e("a.ts", 1, 9, "x as z"),
+            e("b.ts", 0, 9, "z"),
+            e("b.ts", 1, 0, "z")
+        ]
+    );
+    // An import renames only the local name.
+    assert_eq!(
+        rename_edits(&mut c, &ub, 1, 0),
+        vec![e("b.ts", 0, 9, "x as z"), e("b.ts", 1, 0, "z")]
+    );
+    // A declaration exported by its own name renames the imports; a re-export keeps it.
+    assert_eq!(
+        rename_edits(&mut c, &ua, 3, 13),
+        vec![
+            e("a.ts", 3, 13, "z"),
+            e("b.ts", 0, 12, "z"),
+            e("b.ts", 1, 3, "z"),
+            e("b.ts", 2, 9, "z as w")
+        ]
+    );
+    c.shutdown();
+}
+
+/// The labels of a completion answer (`None` when there is no list or it is empty).
+fn completion_at(c: &mut ScriptedClient, uri: &str, line: u32, ch: u32) -> Option<Vec<String>> {
+    let r = result(c, "textDocument/completion", at(uri, line, ch));
+    let items = r["items"].as_array().filter(|a| !a.is_empty())?;
+    Some(
+        items
+            .iter()
+            .map(|i| i["label"].as_str().unwrap().to_string())
+            .collect(),
+    )
+}
+
+const CP: &str = "outer: while (true) {\n  inner: for (;;) {\n    break ;\n  }\n}\nconst t = `a ${1} b`;\nconst r = /x/g;\nfunction f(a = 1) {}\ntype A<K = number, L = string> = K;\nfunction g<C extends Array<number>>() {}\n";
+
+#[test]
+fn completions_for_labels_literals_and_type_parameters() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new("cmpl8", &[("tsconfig.json", TSCONFIG), ("src/a.ts", CP)]);
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // After `break`: the labels around, innermost first.
+    assert_eq!(
+        completion_at(&mut c, &u, 2, 10),
+        Some(vec!["inner".to_string(), "outer".to_string()])
+    );
+    // In a template's text (also at its ends) and at the end of a regular expression:
+    // no list. Inside the hole: a list.
+    for ch in [11, 12, 13, 18, 19] {
+        assert_eq!(completion_at(&mut c, &u, 5, ch), None, "at 5:{ch}");
+    }
+    assert!(completion_at(&mut c, &u, 5, 15).is_some());
+    assert_eq!(completion_at(&mut c, &u, 6, 14), None);
+    // `arguments` in a parameter's default.
+    let l = completion_at(&mut c, &u, 7, 15).unwrap_or_default();
+    assert!(l.iter().any(|x| x == "arguments"), "{l:?}");
+    // A type parameter's default names neither it nor later ones; a constraint's type
+    // argument may name the parameter itself.
+    let l = completion_at(&mut c, &u, 8, 11).unwrap_or_default();
+    assert!(!l.iter().any(|x| x == "K" || x == "L"), "{l:?}");
+    let l = completion_at(&mut c, &u, 9, 27).unwrap_or_default();
+    assert!(l.iter().any(|x| x == "C"), "{l:?}");
+    c.shutdown();
+}
+
+const THIS_SRC: &str = "interface R { n: number }\ninterface F { (this: void, n: number): void }\nclass Foo {\n  p: this;\n  m(this: R) {}\n  f() { type Y = typeof this.p; }\n}\nlet g: F = function (this, n) {};\n";
+
+#[test]
+fn hover_on_this_parameters_types_and_type_queries() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "hover8",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", THIS_SRC)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/a.ts");
+    let u = env.uri("src/a.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    // The `this` type, a `this` parameter (declared and contextual), and `typeof this`.
+    assert!(hover_text(&mut c, &u, 3, 6).contains("\nthis\n"));
+    assert!(hover_text(&mut c, &u, 4, 5).contains("(parameter) this: R"));
+    assert!(hover_text(&mut c, &u, 5, 25).contains("this: this"));
+    assert!(hover_text(&mut c, &u, 7, 22).contains("(parameter) this: void"));
+    c.shutdown();
+}
+
+const MC_A: &str = "export class C {}\n";
+const MC_B: &str = "/* copyright */\n/// <reference path=\"./a.ts\" />\nimport { C } /* from */ from \"./a\";\nconst t: import(\"./a\").C = new C();\n";
+
+#[test]
+fn module_references_past_comments() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navmc",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/a.ts", MC_A),
+            ("src/b.ts", MC_B),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/b.ts");
+    let ub = env.uri("src/b.ts");
+    let _ = diags_for(&mut c, &ub, |_| true);
+    // A directive after a block comment, the `from` keyword and a qualified import type's
+    // specifier all refer to the module; a `from` inside a comment is no keyword.
+    let module = vec![s("b.ts", 1, 21), s("b.ts", 2, 30), s("b.ts", 3, 17)];
+    for (line, ch) in [(1, 23), (2, 25), (3, 18)] {
+        assert_eq!(refs_at(&mut c, &ub, line, ch), module, "at {line}:{ch}");
+    }
+    assert_eq!(refs_at(&mut c, &ub, 2, 17), Vec::new());
     c.shutdown();
 }

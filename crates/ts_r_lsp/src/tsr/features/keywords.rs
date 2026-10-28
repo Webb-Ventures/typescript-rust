@@ -1035,6 +1035,191 @@ pub fn keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
     }
 }
 
+/// The node find-all-references reads for the keyword at `offset`: the declared name of a
+/// declaration keyword or modifier ([`keyword_name`], not `default`), else the operand a
+/// statement, expression or type keyword introduces (observed on tsc 7.0.2's answers to
+/// `referencesFor{Statement,Expression,Type,Declaration}Keywords`):
+///
+/// - `import`/`type` of `import x = ...` the name, `require` its module specifier;
+///   `import`/`type`/`export` of an import or export declaration its only specifier's name
+///   (`* as n`'s `n`), else the module specifier when there is no clause; `from` the module
+///   specifier; `as` the name it introduces; `export` of `export =` / `export default` the
+///   expression;
+/// - `new`, `void`, `typeof`, `delete`, `await`, `yield` their operand, `in` / `instanceof`
+///   the right operand, `as` / `satisfies` the type;
+/// - `extends` / `implements` with one type that type; `extends` of a type parameter its
+///   constraint, of a conditional type the type after it; `infer` and a mapped type's `in`
+///   the type parameter; `keyof` / `readonly` / `unique` their operand.
+///
+/// An operand is read as its name: an identifier, a member access's property, a type
+/// reference's (last) name, an array type's element.
+pub fn reference_keyword(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
+    let w = d.word_at(offset)?;
+    // A word inside a comment is not a keyword.
+    let i = d.ast.comments.partition_point(|c| c.span.end < w.1);
+    if d.ast.comments.get(i).is_some_and(|c| c.span.start <= w.0) {
+        return None;
+    }
+    let word = d.word(w);
+    if word != "default"
+        && let Some(n) = keyword_name(d, offset)
+    {
+        return Some(n);
+    }
+    let n = node_around(d, w)?;
+    if matches!(d.node(n), Node::Ident { .. } | Node::PrivateName { .. }) {
+        return None;
+    }
+    let at_start = d.span(n).start == w.0;
+    let only = |list: ts_r_ast::NodeList| match d.ast.list(list) {
+        [one] => Some(*one),
+        _ => None,
+    };
+    let spec_name = |s: NodeId| match d.node(s) {
+        Node::ImportDefaultSpecifier { local } | Node::ImportNamespaceSpecifier { local } => {
+            Some(local)
+        }
+        Node::ImportSpecifier { local, .. } => Some(local),
+        Node::ExportSpecifier {
+            local, exported, ..
+        } => Some(exported.unwrap_or(local)),
+        _ => None,
+    };
+    let target = match d.node(n) {
+        Node::ImportEquals {
+            name, module_ref, ..
+        } => match word {
+            "import" | "type" if d.span(name).start >= w.1 => Some(name),
+            "require" => match d.node(module_ref) {
+                Node::ExternalModuleRef { expr } => Some(expr),
+                _ => None,
+            },
+            _ => None,
+        },
+        Node::ExternalModuleRef { expr } if word == "require" => Some(expr),
+        Node::ImportDecl {
+            has_clause,
+            specifiers,
+            source,
+            ..
+        } => match word {
+            "from" => Some(source),
+            "import" if at_start && !has_clause => Some(source),
+            "import" | "type" => only(specifiers).and_then(spec_name),
+            _ => None,
+        },
+        Node::ImportNamespaceSpecifier { local } if word == "as" => Some(local),
+        Node::ImportSpecifier { local, .. } if word == "as" => Some(local),
+        Node::ExportSpecifier {
+            exported: Some(e), ..
+        } if word == "as" => Some(e),
+        Node::ExportAll {
+            exported, source, ..
+        } => match word {
+            "from" => Some(source),
+            "as" => exported,
+            "export" | "type" => Some(exported.unwrap_or(source)),
+            _ => None,
+        },
+        Node::ExportNamed {
+            specifiers, source, ..
+        } => match word {
+            "from" => source,
+            "export" | "type" => match d.ast.list(specifiers) {
+                [] => source,
+                [one] => spec_name(*one),
+                _ => None,
+            },
+            _ => None,
+        },
+        Node::ExportAssignment { expr } | Node::ExportDefaultExpr { expr }
+            if word == "export" && at_start =>
+        {
+            operand_name(d, expr)
+        }
+        Node::New { callee, .. } if word == "new" && at_start => operand_name(d, callee),
+        Node::Unary { op, arg }
+            if at_start
+                && matches!(
+                    (op, word),
+                    (ts_r_ast::UnaryOp::Void, "void")
+                        | (ts_r_ast::UnaryOp::TypeOf, "typeof")
+                        | (ts_r_ast::UnaryOp::Delete, "delete")
+                ) =>
+        {
+            operand_name(d, arg)
+        }
+        Node::Await { arg } if word == "await" && at_start => operand_name(d, arg),
+        Node::Yield { arg: Some(a), .. } if word == "yield" && at_start => operand_name(d, a),
+        Node::Binary { right, op, .. }
+            if matches!(
+                (op, word),
+                (ts_r_ast::BinaryOp::In, "in") | (ts_r_ast::BinaryOp::InstanceOf, "instanceof")
+            ) =>
+        {
+            operand_name(d, right)
+        }
+        Node::As { ty, .. } if word == "as" => operand_name(d, ty),
+        Node::Satisfies { ty, .. } if word == "satisfies" => operand_name(d, ty),
+        Node::HeritageClause { types, .. } if matches!(word, "extends" | "implements") => {
+            only(types).and_then(|t| operand_name(d, t))
+        }
+        Node::Interface { extends, name, .. } if word == "extends" && d.span(name).end <= w.0 => {
+            only(extends).and_then(|t| operand_name(d, t))
+        }
+        Node::TypeParam {
+            name, constraint, ..
+        } => match word {
+            "extends" => constraint.and_then(|t| operand_name(d, t)),
+            "in" if d
+                .parent(n)
+                .is_some_and(|p| matches!(d.node(p), Node::MappedType { .. })) =>
+            {
+                Some(name)
+            }
+            _ => None,
+        },
+        Node::MappedType { type_param, .. } if word == "in" => match d.node(type_param) {
+            Node::TypeParam { name, .. } => Some(name),
+            _ => None,
+        },
+        Node::ConditionalType { extends, .. } if word == "extends" => operand_name(d, extends),
+        Node::InferType { type_param } if word == "infer" => match d.node(type_param) {
+            Node::TypeParam { name, .. } => Some(name),
+            _ => None,
+        },
+        Node::TypeOperator { ty, .. }
+            if at_start && matches!(word, "keyof" | "readonly" | "unique") =>
+        {
+            operand_name(d, ty)
+        }
+        Node::TypeQuery { expr_name, .. } if word == "typeof" && at_start => {
+            operand_name(d, expr_name)
+        }
+        _ => None,
+    };
+    target.filter(|&t| d.span(t).start != w.0 || d.span(t).end != w.1)
+}
+
+/// The name an operand stands for in [`reference_keyword`].
+fn operand_name(d: &Doc<'_>, n: NodeId) -> Option<NodeId> {
+    let mut n = n;
+    for _ in 0..16 {
+        n = match d.node(n) {
+            Node::Ident { .. } | Node::StringLit { .. } => return Some(n),
+            Node::Member { prop, .. } => return Some(prop),
+            Node::QualifiedName { right, .. } => return Some(right),
+            Node::Paren { expr } => expr,
+            Node::ParenType { ty } => ty,
+            Node::TypeRef { name, .. } => name,
+            Node::ArrayType { elem } => elem,
+            Node::ExprWithTypeArgs { expr, .. } => expr,
+            _ => return None,
+        };
+    }
+    None
+}
+
 /// The key of the accessor whose `get` or `set` keyword is at `offset`.
 fn accessor_keyword_name(d: &Doc<'_>, offset: u32) -> Option<NodeId> {
     let w = d.word_at(offset)?;

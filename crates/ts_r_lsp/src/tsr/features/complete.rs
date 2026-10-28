@@ -132,6 +132,8 @@ enum Context {
     /// A name in `import { | } from "m"` / `export { | } from "m"`: the module's exports
     /// not named yet (and `type` unless it was just written).
     ImportClause { decl: NodeId, after_type: bool },
+    /// After `break` or `continue` on its line: the labels of the statements around.
+    Labels(Vec<String>),
     /// Nothing.
     None,
 }
@@ -186,6 +188,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     {
         return (Context::None, prefix);
     }
+    if in_literal_text(ast, c.file(file).parents(), text, offset) {
+        return (Context::None, prefix);
+    }
     // JSX: attribute names, the closing tag, nothing in text.
     let anchor0 = node.unwrap_or(ast.root);
     let word_node0 = if ws < offset {
@@ -209,6 +214,9 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     }
     if let Some((decl, after_type)) = import_clause_at(c, file, ws) {
         return (Context::ImportClause { decl, after_type }, prefix);
+    }
+    if let Some(labels) = jump_labels(c, file, ws) {
+        return (Context::Labels(labels), prefix);
     }
     // `obj.|` / `obj.pre|`
     let b = text.as_bytes();
@@ -317,6 +325,93 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     )
 }
 
+/// Whether `offset` is in a literal's text where tsc offers nothing: anywhere in a
+/// template's text part (its ends included, and inside the `${` that ends it), at the end of
+/// a regular expression (flags may follow), or right after a bigint (`0n|`; a number
+/// still gets the list: `10| + 1`).
+fn in_literal_text(
+    ast: &ts_r_ast::Ast,
+    parents: &ts_r_ast::ParentMap,
+    text: &str,
+    offset: u32,
+) -> bool {
+    let b = text.as_bytes();
+    for at in [Some(offset), offset.checked_sub(1)].into_iter().flatten() {
+        let Some(n) = node_at(ast, at) else { continue };
+        let sp = ast.span(n);
+        match ast.node(n) {
+            Node::RegexLit { .. } | Node::BigIntLit { .. }
+                if sp.start < offset && offset == sp.end =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        // The template around: its own node, or the template of a text part.
+        let mut t = Some(n);
+        for _ in 0..2 {
+            let Some(x) = t else { break };
+            if let Node::TemplateLit { parts } | Node::TemplateLitType { parts } = *ast.node(x) {
+                for &p in ast.list(parts) {
+                    if !matches!(ast.node(p), Node::TemplateElement { .. }) {
+                        continue;
+                    }
+                    let ps = ast.span(p);
+                    if (ps.start <= offset && offset <= ps.end)
+                        || (offset == ps.end + 1 && b.get(ps.end as usize) == Some(&b'$'))
+                    {
+                        return true;
+                    }
+                }
+                break;
+            }
+            t = parents.parent(x);
+        }
+    }
+    false
+}
+
+/// The labels a `break` or `continue` right before the word at `ws` (on the same line) may
+/// name: those of the labelled statements around it, innermost first, up to the enclosing
+/// function (`tsc: tsc/internal/ls/completions.go`, label completions). `None` when the
+/// word does not follow such a keyword.
+fn jump_labels(c: &Checker<'_>, file: FileId, ws: u32) -> Option<Vec<String>> {
+    let ast = c.ast(file);
+    let text = c.file(file).text.as_str();
+    let (at, tok) = super::position::token_before(ast, text, ws)?;
+    if !matches!(tok, "break" | "continue")
+        || text
+            .get(at as usize..ws as usize)
+            .is_none_or(|between| between.contains('\n'))
+    {
+        return None;
+    }
+    let parents = c.file(file).parents();
+    let mut n = super::position::node_covering(ast, at)?;
+    if !matches!(ast.node(n), Node::Break { .. } | Node::Continue { .. }) {
+        return None;
+    }
+    let mut out = Vec::new();
+    for _ in 0..4096 {
+        let Some(p) = parents.parent(n) else { break };
+        match *ast.node(p) {
+            Node::Labeled { label, .. } => {
+                if let Some(t) = super::locate::name_text(ast, label) {
+                    out.push(t.to_string());
+                }
+            }
+            Node::FunctionDecl { .. }
+            | Node::FunctionExpr { .. }
+            | Node::Arrow { .. }
+            | Node::ClassDecl { .. }
+            | Node::ClassExpr { .. } => break,
+            _ => {}
+        }
+        n = p;
+    }
+    Some(out)
+}
+
 /// The node whose scope an empty word at `offset` completes from. After a closing `}`, `)`,
 /// `;` or `]` it is the innermost node that holds the position strictly (`f() {}|` is outside
 /// `f`); after anything else, the node the token before ends (`(p) => |` at the end of the
@@ -377,15 +472,58 @@ fn token_node(c: &Checker<'_>, file: FileId, offset: u32, anchor: NodeId) -> Nod
 }
 
 /// Names of the parameters not yet declared at `l`: inside a parameter's type or default,
-/// that parameter's and the later ones' (`f(a, b = |, c)` offers `a` only).
-fn later_params(c: &Checker<'_>, l: Loc) -> HashSet<String> {
+/// that parameter's and the later ones' (`f(a, b = |, c)` offers `a` only); inside a type
+/// parameter's constraint (not in its type arguments) that type parameter's, inside its
+/// default also the later ones'.
+fn later_params(c: &Checker<'_>, l: Loc, offset: u32) -> HashSet<String> {
     let ast = c.ast(l.file);
     let parents = c.file(l.file).parents();
     let mut out = HashSet::new();
+    // A constraint or default not written yet (`<K extends |, L>`, `<K = |>`): the type
+    // parameter whose `extends` or `=` comes before the offset.
+    let slot = match *ast.node(l.node) {
+        Node::TypeParam { .. } => Some(l.node),
+        Node::TypeParams { params } => ast
+            .list(params)
+            .iter()
+            .copied()
+            .rfind(|&p| ast.span(p).start < offset),
+        _ => None,
+    };
+    if let Some(tp) = slot
+        && let Node::TypeParam { name, .. } = *ast.node(tp)
+        && let Some(between) = c
+            .file(l.file)
+            .text
+            .get(ast.span(name).end as usize..offset as usize)
+    {
+        let between = between.trim_start();
+        let in_default = between.starts_with('=');
+        // Inside a type argument of the constraint (`<C extends M<|>>`) the parameter may
+        // name itself.
+        if in_default || (between.starts_with("extends") && !between.contains('<')) {
+            let list = match parents.parent(tp).map(|p| *ast.node(p)) {
+                Some(Node::TypeParams { params }) => ast.list(params),
+                _ => &[],
+            };
+            let from = list.iter().position(|&p| p == tp).unwrap_or(0);
+            let to = if in_default { list.len() } else { from + 1 };
+            for &p in list.get(from..to).unwrap_or(&[]) {
+                if let Node::TypeParam { name, .. } = *ast.node(p)
+                    && let Some(t) = super::locate::name_text(ast, name)
+                {
+                    out.insert(t.to_string());
+                }
+            }
+            return out;
+        }
+    }
     let mut child = None;
     let mut cur = Some(l.node);
+    let mut in_type_args = false;
     for _ in 0..10_000 {
         let Some(n) = cur else { break };
+        in_type_args |= matches!(ast.node(n), Node::TypeArgs { .. });
         match *ast.node(n) {
             Node::Param { pattern, .. } if Some(pattern) != child => {
                 let Some(func) = parents.parent(n) else { break };
@@ -402,6 +540,42 @@ fn later_params(c: &Checker<'_>, l: Loc) -> HashSet<String> {
                             binding_names(ast, pattern, &mut out, 0);
                         }
                     }
+                }
+                break;
+            }
+            // A type parameter's constraint cannot name the parameter itself; its default
+            // cannot name it or a later one (`<K = |, L>`).
+            Node::TypeParam {
+                name,
+                constraint,
+                default,
+                ..
+            } if child.is_some() && Some(name) != child => {
+                let in_default = default.is_some() && default == child;
+                if (constraint != child || in_type_args) && !in_default {
+                    break;
+                }
+                let list = match parents.parent(n).map(|p| *ast.node(p)) {
+                    Some(Node::TypeParams { params }) => ast.list(params),
+                    _ => &[],
+                };
+                let from = list.iter().position(|&p| p == n);
+                let to = if in_default {
+                    list.len()
+                } else {
+                    from.map_or(0, |i| i + 1)
+                };
+                for &p in from.map_or(&[][..], |i| &list[i..to]) {
+                    if let Node::TypeParam { name, .. } = *ast.node(p)
+                        && let Some(t) = super::locate::name_text(ast, name)
+                    {
+                        out.insert(t.to_string());
+                    }
+                }
+                if from.is_none()
+                    && let Some(t) = super::locate::name_text(ast, name)
+                {
+                    out.insert(t.to_string());
                 }
                 break;
             }
@@ -531,6 +705,14 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let mut incomplete = false;
     match ctx {
         Context::None => {}
+        Context::Labels(labels) => {
+            if labels.is_empty() {
+                return Value::Null;
+            }
+            for l in labels {
+                items.push(json!({"label": l, "kind": 10, "sortText": SORT_LOCAL}));
+            }
+        }
         Context::Keywords(words) => {
             for k in words {
                 items.push(json!({"label": k, "kind": 14, "sortText": SORT_KEYWORD}));
@@ -869,7 +1051,11 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 }
             }
             let own = own_initializer(c, Loc::new(cx.file, anchor), offset, !prefix.is_empty());
-            let later = later_params(c, Loc::new(cx.file, token_node(c, cx.file, offset, anchor)));
+            let later = later_params(
+                c,
+                Loc::new(cx.file, token_node(c, cx.file, offset, anchor)),
+                offset,
+            );
             for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
                 if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
                     continue;
@@ -1980,7 +2166,9 @@ fn accessible_at(c: &Checker<'_>, s: SymId, at: Loc) -> bool {
 fn has_arguments(c: &Checker<'_>, l: Loc) -> bool {
     let ast = c.ast(l.file);
     let parents = c.file(l.file).parents();
-    let mut cur = parents.parent(l.node);
+    // The anchor itself counts: a position in a function's parameter list (`f(a = |)`) or
+    // type parameters is anchored at the function.
+    let mut cur = Some(l.node);
     for _ in 0..100_000 {
         let Some(n) = cur else { return false };
         match ast.node(n) {

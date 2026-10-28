@@ -548,7 +548,7 @@ async function runCase(pair, c, test) {
       if (a == null && b == null) continue;
       compared++;
       const d = compare(feature, a, b);
-      if (dump) fs.appendFileSync(dump, `${JSON.stringify({ test: c.name, feature, marker: p.name, file: p.file.name, at: markerLine(p.file.text, p.offset), tsc: ra.result ?? null, tsr: rb.result ?? null })}\n`);
+      if (dump) fs.appendFileSync(dump, `${JSON.stringify({ test: c.name, feature, marker: p.name, file: p.file.name, at: markerLine(p.file.text, p.offset), agree: d === null, diff: d, tsc: ra.result ?? null, tsr: rb.result ?? null })}\n`);
       if (d === null) agree++;
       else diffs.push(`${p.file.name} /*${p.name}*/: ${d.length > 600 ? `${d.slice(0, 600)}...` : d}`);
       if (broken) break;
