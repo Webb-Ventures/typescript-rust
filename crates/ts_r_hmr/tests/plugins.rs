@@ -424,6 +424,8 @@ fn plugin_loads_are_kept_until_the_module_is_invalidated() {
 struct WatchFileHost {
     root: String,
     runs: Mutex<u32>,
+    /// How long each `transform` call takes.
+    delay: Duration,
 }
 
 impl PluginHost for WatchFileHost {
@@ -469,6 +471,7 @@ impl PluginHost for WatchFileHost {
         if !id.ends_with("/src/main.js") {
             return Ok(None);
         }
+        std::thread::sleep(self.delay);
         let mut n = self.runs.lock().unwrap();
         *n += 1;
         Ok(Some(Transformed {
@@ -493,6 +496,7 @@ fn files_plugins_watch_rerun_the_module_hooks() {
     let host = Arc::new(WatchFileHost {
         root,
         runs: Mutex::new(0),
+        delay: Duration::ZERO,
     });
     let mut config = DevConfig::new(app.path());
     config.port = 0;
@@ -515,6 +519,49 @@ fn files_plugins_watch_rerun_the_module_hooks() {
     next_of(&mut ws, "full-reload");
     assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 3;"));
     assert_eq!(*host.runs.lock().unwrap(), 3);
+    server.shutdown();
+}
+
+/// Windows CI flake: the deps scan and the browser's request transform `main.js` at once and
+/// share one run. The caller that waited for the other's run must still learn the files the
+/// hooks watched (they were recorded only after the waiter had woken and read them), or
+/// editing `dep.txt` never runs the hooks again.
+#[test]
+fn a_request_sharing_the_scans_transform_learns_its_watch_files() {
+    let app = TempDir::new("plug-watch-shared");
+    let cache = TempDir::new("plug-watch-shared-cache");
+    app.write(
+        "index.html",
+        "<!doctype html><script type=\"module\" src=\"/src/main.js\"></script>\n",
+    );
+    app.write("src/main.js", "console.log(RUNS);\n");
+    app.write("dep.txt", "a");
+    app.write("load-dep.txt", "a");
+    let root = paths::id(&paths::canonicalize(app.path()).unwrap()).into_owned();
+    let host = Arc::new(WatchFileHost {
+        root,
+        runs: Mutex::new(0),
+        // Long enough for the request to join the scan's run (or the other way round).
+        delay: Duration::from_millis(300),
+    });
+    let mut config = DevConfig::new(app.path());
+    config.port = 0;
+    config.cache = CacheMode::Dir(cache.path().to_path_buf());
+    config.plugins = Some(Arc::clone(&host) as Arc<dyn PluginHost>);
+    let server = DevServer::start(config).unwrap();
+    let addr = server.addr();
+    let body = http_get(addr, "/src/main.js", &[]).2;
+    assert!(body.contains("RUNS = 1;"), "{body}");
+    assert_eq!(*host.runs.lock().unwrap(), 1, "one shared run");
+    let mut ws = WsClient::connect(&addr.to_string(), "/@ts-r/ws").unwrap();
+    ws.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.client_count() == 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.write("dep.txt", "b");
+    next_of(&mut ws, "full-reload");
+    assert!(http_get(addr, "/src/main.js", &[]).2.contains("RUNS = 2;"));
     server.shutdown();
 }
 

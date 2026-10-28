@@ -18,6 +18,7 @@ pub fn loader(url: &str) -> Option<Loader> {
     match mime.to_ascii_lowercase().as_str() {
         "text/javascript" => Some(Loader::Js),
         "application/json" => Some(Loader::Json),
+        "text/css" => Some(Loader::Css),
         _ => None,
     }
 }

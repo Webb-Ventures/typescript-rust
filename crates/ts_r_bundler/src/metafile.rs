@@ -48,7 +48,11 @@ pub fn render(
             s.push(',');
         }
         first = false;
-        let bytes = m.source.css.as_ref().map_or(m.source.js.len(), |c| c.len());
+        let bytes = m
+            .source
+            .css
+            .as_ref()
+            .map_or(m.source.js.len(), |c| c.src.len());
         let _ = write!(
             s,
             "\n    {}: {{\n      \"bytes\": {bytes},\n      \"imports\": [",
@@ -65,6 +69,9 @@ pub fn render(
                 RecordKind::Import | RecordKind::ReExport => "import-statement",
                 RecordKind::Require => "require-call",
                 RecordKind::Dynamic => "dynamic-import",
+                RecordKind::CssImport => "import-rule",
+                RecordKind::CssUrl => "url-token",
+                RecordKind::CssComposes => "composes-from",
             };
             if !fi {
                 s.push(',');

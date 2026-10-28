@@ -151,7 +151,8 @@ pub fn parse(argv: &[String]) -> Result<Parsed, String> {
                 "loader" => {
                     let v = value.ok_or_else(|| format!("missing \"=\" in {arg:?}"))?;
                     let l = Loader::parse(v).ok_or_else(|| format!("invalid loader {v:?}"))?;
-                    let ext = if key.starts_with('.') {
+                    // `--loader:=css` is the loader of extensionless files.
+                    let ext = if key.is_empty() || key.starts_with('.') {
                         key.to_owned()
                     } else {
                         format!(".{key}")

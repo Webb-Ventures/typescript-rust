@@ -420,7 +420,7 @@ fn esm_package_with_only_a_dynamic_css_import() {
         "node_modules/@vitejs/test-pkg/pkg.css",
         ".pkg { color: red }\n",
     );
-    let project = std::fs::canonicalize(&project).expect("canonical project");
+    let project = ts_r_hmr::paths::canonicalize(&project).expect("canonical project");
     let entry = project.join("node_modules/@vitejs/test-pkg/index.js");
     let request = DepRequest {
         specifier: "@vitejs/test-pkg",
@@ -443,5 +443,59 @@ fn esm_package_with_only_a_dynamic_css_import() {
     let one = bundler.bundle(&request, &source).expect("bundle");
     assert!(!one.code.contains("__tsrCjs"), "{}", one.code);
     assert!(one.code.contains(want), "{}", one.code);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A dependency importing CSS whose `url()` names an asset outside the served root: the
+/// adapter reads the CSS already bundled by the dev server (`url()`s rewritten to served
+/// URLs such as `/@ts-r/up/1/...`), and the batch keeps those URLs instead of resolving them
+/// as files (which failed the whole batch).
+#[test]
+fn dependency_css_urls_stay_the_served_urls() {
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dep-css-urls");
+    let _ = std::fs::remove_dir_all(&tmp);
+    write(
+        &tmp,
+        "node_modules/fancy-ui/package.json",
+        r#"{ "name": "fancy-ui", "type": "module", "main": "index.js" }"#,
+    );
+    write(
+        &tmp,
+        "node_modules/fancy-ui/index.js",
+        "import './fancy.css';\nexport const x = 1;\n",
+    );
+    write(
+        &tmp,
+        "node_modules/fancy-ui/fancy.css",
+        "@import './base.css';\n.fancy { background-image: url(./img/dot.svg); }\n",
+    );
+    write(
+        &tmp,
+        "node_modules/fancy-ui/base.css",
+        ".fancy { color: red }\n",
+    );
+    write(&tmp, "node_modules/fancy-ui/img/dot.svg", "<svg/>\n");
+    write(&tmp, "app/index.html", "<!doctype html>\n");
+    let base = ts_r_hmr::paths::canonicalize(&tmp).expect("canonical tmp");
+    let entry = base.join("node_modules/fancy-ui/index.js");
+    let request = DepRequest {
+        specifier: "fancy-ui",
+        package: "fancy-ui",
+        file: &entry,
+    };
+    // The app is a sibling of the hoisted node_modules, as in a workspace.
+    let bundler = DepBundle::new().serve_root(&base.join("app"));
+    let batch = bundler.batch(&[request]).expect("batch");
+    let css = batch
+        .files
+        .iter()
+        .find(|(n, _)| n.ends_with(".css"))
+        .map(|(_, f)| f.code.clone())
+        .expect("a stylesheet for the entry");
+    assert!(css.contains("color: red"), "{css}");
+    assert!(
+        css.contains("/@ts-r/up/1/node_modules/fancy-ui/img/dot.svg"),
+        "{css}"
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }

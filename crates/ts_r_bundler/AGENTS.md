@@ -34,7 +34,14 @@ code-split `batch` that `ts-r-dev` uses, with source maps whose `sources` are re
 the served URL when `DepBundle::serve_root` is set, and CSS outputs passed through; an entry
 is ESM when it has module syntax or Node would load it as a module (`.mjs`, `"type": "module"`),
 and a dependency's dynamic `import()` of a stylesheet stays external as the served URL of the
-original file, through `BuildOptions::dynamic_import_url`, as Vite does);
+original file, through `BuildOptions::dynamic_import_url`, as Vite does; dependency CSS is
+read already bundled by `ts_r_hmr::css`, so `BuildOptions::css_prebundled` keeps its
+`url()`s, served URLs like `/@ts-r/up/1/...`, as written instead of resolving them);
+`css/` is the stylesheet side: `lexer.rs` (CSS Syntax tokens, escapes, quoting), `mod.rs`
+(rules, `@import`/`url()`/`composes` records, local names for `local-css`), `print.rs`,
+`color.rs` (shortest colors for `--minify-syntax`; the CSS named-color table),
+`order.rs` (`@import` expansion, duplicates, layers, one stylesheet per chunk) and
+`link.rs` (final local names, `composes` class lists, reference errors);
 `data_url.rs` decodes `data:` URL modules; `fscache.rs` caches directory listings and real paths for a build; `expr.rs` is a tiny
 expression builder for generated code; `pool.rs` is the std-thread pool.
 
@@ -163,13 +170,34 @@ expression builder for generated code; `pool.rs` is the std-thread pool.
   entries' common directory, `..` written `_.._`. The replacement can shift source map
   columns after it on the same line. `--public-path` also prefixes cross-chunk imports
   (`plan::chunk_import`).
+- **`copy` files** (`graph::copy_imports_external`): an `import`, `require()` or
+  `import()` of one is an external import of a placeholder path (`copy_path`), replaced in
+  each chunk by the copy's URL from that chunk (`chunk::copy_url`); the copy is named with
+  `--asset-names`, or is the entry's own output when the file is also an entry point.
+  Import attributes on such an import are kept, never checked.
 - **A module only `import()` reaches is named like a chunk** (`bundle::dynamic_file_name`):
   `--chunk-names` (default `[name]-[hash]`, `[name]` the file's stem, `[dir]` dropped), not
   `--entry-names`, as esbuild 0.28.2 does (`import('./sub/c')` gives `out/c-HASH.js`).
+- **CSS is bundled like esbuild 0.28.2 does it** (`css/`): a stylesheet is a module whose
+  records follow its JavaScript ones (record `i` of `Sheet` is record `i` of the module's
+  `meta`); JavaScript sees an ES module stub (`export default` the local names, named
+  exports for identifier names) whose strings are placeholders `css::link` fills in. Each
+  chunk's stylesheet is its entry's CSS in first-import order, every `@import` expanded in
+  place; an earlier copy of a file is dropped when a later one applies under the same or
+  fewer conditions, leaving an `@layer` statement only where layer order needs it (the
+  rules are in `css/order.rs`). External `@import`s go first; only the first file's leading
+  `@layer` statements go above them. A leading `@charset` becomes `@charset "UTF-8";` at
+  the top, a later one stays. `composes ... from "file"` orders that file like an
+  `@import`. The `:global` / `:local` mode a selector ends in holds for its body, and a
+  nested rule left with no selector (`:global { ... }`) is its parent's body.
+  `--minify-syntax` shortens colors in color properties and drops a rule or declaration an
+  identical later one repeats. Parsing never fails: malformed CSS gives warnings, nesting deeper than
+  128 levels an error. Minified identifiers use our own name sequence, not esbuild's
+  frequency order.
 - **Entries**: an entry given twice with the same name is built once; an entry with `*` that
   isn't a file is a glob (sorted, bounded, skipping directories the pattern cannot match).
   Reaching a traversal size or depth limit is an error, never a partial expansion. CSS
-  entries pass through without `--bundle`; a missing `--tsconfig` is an error.
+  entries are printed without `--bundle`; a missing `--tsconfig` is an error.
 - **Resolution**: a `package.json` `exports` target or import of `./x.js` that is missing
   falls back to `./x.ts`/`./x.tsx` (`.jsx` tries `.ts` first); esbuild's dual-package rule
   (require picks `main`) applies only with the default main fields.

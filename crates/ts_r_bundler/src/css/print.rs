@@ -1,0 +1,373 @@
+//! Prints a [`Sheet`]'s rules: two-space indentation and one declaration per line, or
+//! everything on one line with `minify`. Token text is copied as written except whitespace,
+//! which collapses to one space; references and local names come from the caller.
+//!
+//! With `syntax` (`--minify-syntax`), observed in esbuild 0.28.2: a declaration or rule that
+//! is printed exactly like a later one in the same list is dropped (the later one wins
+//! anyway; `@layer`, `@import` and `@charset` rules stay), and a `& ` that starts a selector
+//! outside any style rule is dropped (`@media x { & a {} }` is `@media x { a {} }`).
+
+use super::lexer::{self, T, Token};
+use super::{Cv, Node, Sheet};
+
+/// What the printer asks the bundler.
+pub struct Printer<'a> {
+    pub sheet: &'a Sheet,
+    pub minify: bool,
+    pub syntax: bool,
+    /// The text of a `url()` (unquoted) for record `r`.
+    pub url: &'a dyn Fn(u32) -> String,
+    /// The final name of local name `n`.
+    pub local: &'a dyn Fn(u32) -> String,
+}
+
+impl std::fmt::Debug for Printer<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Printer")
+            .field("minify", &self.minify)
+            .finish()
+    }
+}
+
+impl Printer<'_> {
+    pub fn nodes(&self, nodes: &[Node], indent: usize, out: &mut String) {
+        self.list(nodes, indent, false, out);
+    }
+
+    fn list(&self, nodes: &[Node], indent: usize, in_style: bool, out: &mut String) {
+        if !self.syntax {
+            for n in nodes {
+                self.node_in(n, indent, in_style, out);
+            }
+            return;
+        }
+        let printed = self.each(nodes, indent, in_style);
+        for text in dedupe(nodes, printed) {
+            out.push_str(&text);
+        }
+    }
+
+    /// Each node printed on its own.
+    pub fn each(&self, nodes: &[Node], indent: usize, in_style: bool) -> Vec<String> {
+        nodes
+            .iter()
+            .map(|n| {
+                let mut s = String::new();
+                self.node_in(n, indent, in_style, &mut s);
+                s
+            })
+            .collect()
+    }
+
+    fn pad(&self, indent: usize, out: &mut String) {
+        if !self.minify {
+            for _ in 0..indent {
+                out.push_str("  ");
+            }
+        }
+    }
+
+    fn nl(&self, out: &mut String) {
+        if !self.minify {
+            out.push('\n');
+        }
+    }
+
+    pub fn node(&self, n: &Node, indent: usize, out: &mut String) {
+        self.node_in(n, indent, false, out);
+    }
+
+    fn node_in(&self, n: &Node, indent: usize, in_style: bool, out: &mut String) {
+        match n {
+            Node::Decl {
+                name,
+                value,
+                important,
+            } => {
+                self.pad(indent, out);
+                out.push_str(self.sheet.text(name));
+                out.push(':');
+                if !self.minify && !value.is_empty() {
+                    out.push(' ');
+                }
+                if self.syntax && super::color::takes_color(self.sheet.text(name)) {
+                    self.values_in(value, true, out);
+                } else {
+                    self.values(value, out);
+                }
+                if *important {
+                    out.push_str(if self.minify {
+                        "!important"
+                    } else {
+                        " !important"
+                    });
+                }
+                out.push(';');
+                self.nl(out);
+            }
+            Node::Rule { prelude, body } => {
+                self.pad(indent, out);
+                let prelude = match prelude.as_slice() {
+                    [Cv::Tok(amp), Cv::Tok(ws), rest @ ..]
+                        if self.syntax
+                            && !in_style
+                            && amp.t == T::Delim
+                            && self.sheet.text(amp) == "&"
+                            && ws.t == T::Ws
+                            && !rest.is_empty()
+                            && !rest.iter().any(|cv| {
+                                matches!(cv, Cv::Tok(t) if t.t == T::Comma
+                                    || t.t == T::Delim && matches!(self.sheet.text(t), "&" | ">" | "+" | "~"))
+                            }) =>
+                    {
+                        rest
+                    }
+                    p => p,
+                };
+                self.values(prelude, out);
+                self.block(body, indent, true, out);
+            }
+            Node::At {
+                name,
+                prelude,
+                body,
+            } => {
+                self.pad(indent, out);
+                out.push('@');
+                out.push_str(name);
+                if !prelude.is_empty() {
+                    out.push(' ');
+                    self.values(prelude, out);
+                }
+                match body {
+                    Some(b) => self.block(b, indent, in_style, out),
+                    None => {
+                        out.push(';');
+                        self.nl(out);
+                    }
+                }
+            }
+            // Bundling removes imports; the printer only sees them without `--bundle`.
+            Node::Import(i) => {
+                let Some(imp) = self.sheet.imports.get(*i as usize) else {
+                    return;
+                };
+                self.pad(indent, out);
+                let c = self.conditions_text(&imp.conditions);
+                out.push_str(&super::order::with_conditions(
+                    &lexer::quote(&(self.url)(imp.record)),
+                    &c,
+                    self.minify,
+                ));
+                self.nl(out);
+            }
+        }
+    }
+
+    /// `layer(x) supports(y) media` as written after an `@import`'s URL.
+    pub fn conditions_text(&self, c: &super::Conditions) -> String {
+        let mut parts = Vec::new();
+        if let Some(l) = &c.layer {
+            if l.is_empty() {
+                parts.push("layer".to_owned());
+            } else {
+                parts.push(format!("layer({})", self.values_text(l)));
+            }
+        }
+        if let Some(s) = &c.supports {
+            parts.push(format!("supports({})", self.values_text(s)));
+        }
+        if !c.media.is_empty() {
+            parts.push(self.values_text(&c.media));
+        }
+        parts.join(" ")
+    }
+
+    fn block(&self, body: &[Node], indent: usize, in_style: bool, out: &mut String) {
+        out.push_str(if self.minify { "{" } else { " {\n" });
+        self.list(body, indent + 1, in_style, out);
+        if self.minify && out.ends_with(';') {
+            out.pop();
+        }
+        self.pad(indent, out);
+        out.push('}');
+        self.nl(out);
+    }
+
+    pub fn values_text(&self, v: &[Cv]) -> String {
+        let mut s = String::new();
+        self.values(v, &mut s);
+        s
+    }
+
+    pub fn values(&self, v: &[Cv], out: &mut String) {
+        self.values_in(v, false, out);
+    }
+
+    /// `colors`: print colors in their shortest form (`--minify-syntax`, see `color`).
+    fn values_in(&self, v: &[Cv], colors: bool, out: &mut String) {
+        let n = v.len();
+        for (i, cv) in v.iter().enumerate() {
+            match cv {
+                Cv::Tok(t) if t.t == T::Ws => {
+                    if i == 0 || i + 1 == n {
+                        continue;
+                    }
+                    if self.minify
+                        && (is_tight(&v[i - 1], self.sheet) || is_tight(&v[i + 1], self.sheet))
+                    {
+                        continue;
+                    }
+                    out.push(' ');
+                }
+                Cv::Tok(t) => {
+                    let short = (colors && matches!(t.t, T::Ident | T::Hash | T::IdHash))
+                        .then(|| super::color::shorten_token(self.sheet.text(t)))
+                        .flatten();
+                    match short {
+                        Some(c) => out.push_str(&c),
+                        None => self.token(t, out),
+                    }
+                }
+                Cv::Func { name, items } => {
+                    if colors && let Some(c) = self.color_function(name, items) {
+                        out.push_str(&c);
+                        continue;
+                    }
+                    let fname = self.sheet.text(name);
+                    out.push_str(fname);
+                    self.values_in(items, colors && !fname.eq_ignore_ascii_case("var("), out);
+                    out.push(')');
+                }
+                Cv::Block { open, items } => {
+                    out.push(*open as char);
+                    self.values(items, out);
+                    out.push(match open {
+                        b'(' => ')',
+                        b'[' => ']',
+                        _ => '}',
+                    });
+                }
+                Cv::Url { record } => {
+                    let u = (self.url)(*record);
+                    out.push_str("url(");
+                    if !u.is_empty()
+                        && !u.contains(|c: char| {
+                            c.is_ascii_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '\\')
+                        })
+                        && self.minify
+                    {
+                        out.push_str(&u);
+                    } else {
+                        out.push_str(&lexer::quote(&u));
+                    }
+                    out.push(')');
+                }
+                Cv::Local { name, prefix } => {
+                    if *prefix != 0 {
+                        out.push(*prefix as char);
+                    }
+                    out.push_str(&lexer::escape_ident(&(self.local)(*name)));
+                }
+            }
+        }
+    }
+
+    /// `rgb(255, 0, 0)` and the like as their shortest color text.
+    fn color_function(&self, name: &Token, items: &[Cv]) -> Option<String> {
+        let mut args = Vec::new();
+        for cv in items {
+            match cv {
+                Cv::Tok(t) if matches!(t.t, T::Ws | T::Comma) => {}
+                Cv::Tok(t) if t.t == T::Delim && self.sheet.text(t) == "/" => {}
+                Cv::Tok(t) if matches!(t.t, T::Number | T::Percentage | T::Dimension) => {
+                    args.push(self.sheet.text(t));
+                }
+                _ => return None,
+            }
+        }
+        super::color::shorten_function(self.sheet.text(name), &args)
+    }
+
+    fn token(&self, t: &Token, out: &mut String) {
+        let text = self.sheet.text(t);
+        match t.t {
+            T::Str => out.push_str(&lexer::quote(&lexer::string_value(text))),
+            _ => out.push_str(text),
+        }
+    }
+}
+
+/// Whether a node may be dropped for an identical later one.
+pub fn droppable(n: &Node) -> bool {
+    match n {
+        Node::Import(_) => false,
+        Node::At { name, .. } => !matches!(name.as_str(), "layer" | "import" | "charset"),
+        _ => true,
+    }
+}
+
+/// `printed` without the texts an identical later droppable node repeats.
+fn dedupe(nodes: &[Node], printed: Vec<String>) -> Vec<String> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut keep = vec![true; printed.len()];
+    for i in (0..printed.len()).rev() {
+        let key = printed[i].trim();
+        if droppable(&nodes[i]) && !seen.insert(key.to_owned()) {
+            keep[i] = false;
+        }
+    }
+    printed
+        .into_iter()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(t, _)| t)
+        .collect()
+}
+
+/// Tokens that need no space around them in minified output.
+fn is_tight(cv: &Cv, sheet: &Sheet) -> bool {
+    match cv {
+        Cv::Tok(t) => match t.t {
+            T::Comma | T::Colon | T::Semicolon => true,
+            T::Delim => matches!(sheet.text(t), ">" | "~"),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{NameMode, parse};
+    use super::*;
+    use std::sync::Arc;
+
+    fn print(src: &str, minify: bool) -> String {
+        let s = parse(Arc::from(src), NameMode::Local);
+        let mut out = String::new();
+        let url = |r: u32| format!("u{r}");
+        let local = |n: u32| format!("f_{}", s.locals[n as usize]);
+        Printer {
+            sheet: &s,
+            minify,
+            syntax: false,
+            url: &url,
+            local: &local,
+        }
+        .nodes(&s.rules, 0, &mut out);
+        out
+    }
+
+    #[test]
+    fn pretty_and_minified() {
+        assert_eq!(
+            print(".a  >  b { color :  red ; background: url(x.png) }", false),
+            ".f_a > b {\n  color: red;\n  background: url(\"u0\");\n}\n"
+        );
+        assert_eq!(
+            print("@media screen { .a { x: y !important } }", true),
+            "@media screen{.f_a{x:y!important}}"
+        );
+    }
+}

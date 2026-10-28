@@ -30,30 +30,28 @@ the set equals a year target and to `--supported:<feature>=false` flags otherwis
 
 ## Results
 
-v1 build3 at 8a3356f (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
-**858 of 885 compared cases pass (96.9%)**; 185 of the 1070 cases are skipped. Of the 27 failures, 13 are
+v1 build4 at 955b2a9 (2026-10-26, macOS arm64, esbuild 0.28.2, `--jobs 4`):
+**931 of 957 compared cases pass (97.3%)**; 113 of the 1070 cases are skipped. Of the 26 failures, 13 are
 intended differences where ts-r-build follows tsc 7 (listed below) and 8 are oracle
-artifacts; the other 6 are gaps. The esbuild test files come from
+artifacts; the other 5 are gaps. The esbuild test files come from
 `raw.githubusercontent.com/evanw/esbuild/<commit>/internal/bundler_tests/` (data only).
-Since 07d2cdd (832 of 872): dead `switch` cases, `@__NO_SIDE_EFFECTS__` and pure calls with
-spread arguments in DCE; top-level await in lazily initialized modules; CommonJS imports run
-in order between inlined modules; top-level `this` is `exports` in a file without exports;
-top-level `let` / `const` / `class` become `var`; every CommonJS entry runs unwrapped; and
-`define` matches `import.meta`, optional chains and string keys. The runner now maps the
-tests' `Defines` lists to `--define`, so 9 more cases are compared (8 pass). At 8a3356f
-`--alias` and `--drop-labels` are implemented and the runner maps `PackageAliases` and
-`DropLabels`, so 4 more cases are compared (all pass).
+Since 8a3356f (858 of 885): ts-r-build bundles CSS (`@import` ordering with layers, media and
+supports conditions, `url()` assets, CSS modules with `composes` and `:local` / `:global`,
+`--minify-syntax` colors and duplicate rules, `@charset` hoisting), and has the `copy`,
+`local-css` and `global-css` loaders. The runner compares CSS outputs and maps
+`Loader=copy` / `localcss` / `globalcss`, so 72 more cases are compared (69 pass), and 4 of
+the 5 earlier CSS failures pass.
 
 | Test file | Pass | Fail | Skip |
 | --- | ---: | ---: | ---: |
-| bundler_css_test.go | 1 | 5 | 56 |
+| bundler_css_test.go | 48 | 4 | 10 |
 | bundler_dce_test.go | 115 | 0 | 6 |
-| bundler_default_test.go | 245 | 1 | 57 |
+| bundler_default_test.go | 250 | 1 | 52 |
 | bundler_glob_test.go | 1 | 0 | 9 |
 | bundler_importphase_test.go | 12 | 0 | 0 |
 | bundler_importstar_test.go | 80 | 0 | 0 |
 | bundler_importstar_ts_test.go | 23 | 0 | 0 |
-| bundler_loader_test.go | 57 | 0 | 28 |
+| bundler_loader_test.go | 78 | 0 | 7 |
 | bundler_lower_test.go | 73 | 11 | 0 |
 | bundler_packagejson_test.go | 93 | 2 | 1 |
 | bundler_splitting_test.go | 22 | 1 | 0 |
@@ -106,20 +104,22 @@ where tsc 7 and esbuild disagree it gives tsc's result. These cases are not chan
 - `SplittingMinifyIdentifiersCrashIssue437`: the output differs only in which short name the
   minifier picks (`o` vs `f`), which shows in a thrown error.
 
-### Gaps (6)
+### Gaps (5)
 
-- **CSS** (5): CSS modules imported from JS, CSS-from-JS missing-import errors, and the
-  `[ext]` placeholder in entry names with CSS bundles (`MetafileCSSBundleTwoToOne`).
+- **CSS** (4): with `--minify-identifiers`, esbuild names local CSS classes by how often
+  they are used, ts-r-build in source order (`ImportLocalCSSFromJSMinifyIdentifiers`,
+  `...AvoidGlobalNames`, `...MultipleEntryPoints`); `CSSCaseInsensitivity` needs at-rule
+  names kept in their written case, `from` printed as `0%` and `calc()` folding.
 - **`define` inside a TypeScript enum** (`TSEnumDefine`): esbuild substitutes before it lowers
   the enum, so `c = d` with `d=b` refers to the member `b`; ts-r substitutes after.
 
-### Skipped (185)
+### Skipped (113)
 
-CSS bundling entries (44), `MangleProps` / `MangleQuoted` / `ReserveProps` (35), `Loader=copy`
-(19), `Loader=localcss` / `globalcss` (19), `InjectPaths` (17), nondeterministic (11), Go-only
-TypeScript options (10), `External.PostResolve` (8), `KeepNames` (8), `UnsupportedCSSFeatures`
-(7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no output path (4), `Defines`
-with call flags (`--pure`, 2), and 1-2 each for Windows paths, stdout, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
+`MangleProps` / `MangleQuoted` / `ReserveProps` (35), `InjectPaths` (17), nondeterministic
+(11), Go-only TypeScript options (10), `External.PostResolve` (8), `KeepNames` (8),
+`UnsupportedCSSFeatures` (7), cases sharing a Go variable (6), `OriginalTargetEnv` (5), no
+output path (4), `Defines` with call flags (`--pure`, 2), and 1-2 each for Windows paths,
+stdout, a non-string file, JSX options and absolute node paths. `Plugins` (1) needs a Go plugin and stays skipped.
 
 | Run | Cases | Compared | Pass | Fail | Skip | Pass rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -137,3 +137,4 @@ with call flags (`--pure`, 2), and 1-2 each for Windows paths, stdout, JSX optio
 | v1 emit parity at 9293c3c: async `super` below ES2017 (optional `super` calls, `super` in nested class keys) | 1070 | 881 | 852 | 29 | 189 | 96.7% |
 | v1 resolve parity at 45ab2ad: tsconfig `extends` of a package through Yarn PnP's `.pnp.data.json` | 1070 | 881 | 854 | 27 | 189 | 96.9% |
 | v1 build3 at 8a3356f: `--alias`, `--drop-labels`; runner maps `PackageAliases` and `DropLabels` | 1070 | 885 | 858 | 27 | 185 | 96.9% |
+| v1 build4 at 955b2a9: CSS bundling and CSS modules, `copy` / `local-css` / `global-css` loaders; runner compares CSS and maps those loaders | 1070 | 957 | 931 | 26 | 113 | 97.3% |

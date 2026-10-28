@@ -28,8 +28,6 @@ use crate::{Message, Severity};
 pub enum Kind {
     Esm,
     Cjs,
-    /// CSS (no JavaScript).
-    Css,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -231,6 +229,32 @@ pub fn link(g: &Graph, entries: &[ModuleId], dynamic_entries: &[ModuleId], o: Li
         lk.work.push(Task::AllExports(e));
     }
     lk.run();
+    // Stylesheets that JavaScript imports are in the bundle even when tree shaking drops
+    // the JavaScript that imports them (esbuild:
+    // `TreeShakingJSWithAssociatedCSSUnusedNestedImportSideEffectsFalse`).
+    if g.modules.iter().any(|m| m.loader.is_css()) {
+        let mut seen = vec![false; n];
+        let mut stack: Vec<ModuleId> = entries.iter().chain(dynamic_entries).copied().collect();
+        while let Some(m) = stack.pop() {
+            if std::mem::replace(&mut seen[m as usize], true) {
+                continue;
+            }
+            let module = &g.modules[m as usize];
+            if module.loader.is_css() {
+                lk.work.push(Task::Include(m));
+                continue;
+            }
+            for (r, t) in module.meta.records.iter().zip(&module.targets) {
+                if let Target::Module(u) = t
+                    && !r.kind.is_css()
+                    && !seen[*u as usize]
+                {
+                    stack.push(*u);
+                }
+            }
+        }
+        lk.run();
+    }
     // Named imports must exist even when unused (esbuild reports those too).
     for m in 0..n {
         if !lk.l.included[m] {
@@ -290,9 +314,8 @@ impl Linker<'_> {
         }
         for (i, m) in g.modules.iter().enumerate() {
             let meta = &m.meta;
-            self.l.kinds[i] = if m.loader == Loader::Css {
-                Kind::Css
-            } else if meta.has_esm_exports {
+            // A stylesheet's JavaScript face is an ES module (`prepare::css_stub`).
+            self.l.kinds[i] = if meta.has_esm_exports {
                 Kind::Esm
             } else if meta.uses_cjs {
                 Kind::Cjs
@@ -506,7 +529,6 @@ impl Linker<'_> {
                     }
                     Imported::Name(n) => Binding::Cjs(t, Some(n.clone())),
                 },
-                Kind::Css => Binding::Undefined,
                 Kind::Esm => match name {
                     Imported::Namespace => Binding::Ns(t),
                     Imported::Name(n) => {
@@ -638,7 +660,6 @@ impl Linker<'_> {
         let g = self.g;
         let module = &g.modules[t as usize];
         match self.l.kinds[t as usize] {
-            Kind::Css => return true,
             Kind::Cjs => {
                 return name == "default"
                     || json_keys(module).is_none_or(|keys| keys.iter().any(|k| k == name));
@@ -674,7 +695,6 @@ impl Linker<'_> {
                 Some(Target::Module(u)) => match self.l.kinds[*u as usize] {
                     Kind::Esm => self.export_exists(*u, name, &mut seen.clone()),
                     Kind::Cjs => true,
-                    Kind::Css => false,
                 },
                 Some(Target::External(_)) => true,
                 _ => false,
@@ -788,7 +808,6 @@ impl Linker<'_> {
                         }
                     }
                     Kind::Cjs => dynamic = true,
-                    Kind::Css => {}
                 },
                 Target::External(_) => dynamic = true,
                 Target::Missing => {}
@@ -880,7 +899,6 @@ impl Linker<'_> {
                             dyn_stars.push(Target::Module(*u));
                         }
                     }
-                    Kind::Css => {}
                 },
                 Target::External(p) => {
                     let p = p.clone();
@@ -926,8 +944,15 @@ impl Linker<'_> {
                 self.work.push(Task::Part(m, i as u32));
             }
         }
-        // Static imports run their targets' side effects.
+        // Static imports run their targets' side effects. A stylesheet includes what it
+        // imports and the files its `url()`s name (their assets are written).
         for (i, r) in module.meta.records.iter().enumerate() {
+            if r.kind.is_css() {
+                if let Target::Module(t) = &module.targets[i] {
+                    self.work.push(Task::Include(*t));
+                }
+                continue;
+            }
             if !matches!(r.kind, RecordKind::Import | RecordKind::ReExport) {
                 continue;
             }

@@ -61,8 +61,14 @@ pub enum Loader {
     Text,
     /// Copied to the output directory; the module exports its URL.
     File,
-    /// CSS passed through into a `.css` output next to the JS.
+    /// Copied to the output directory; imports of it stay imports of the copy (`copy`).
+    Copy,
+    /// A stylesheet, bundled into a `.css` output next to the JS (`crate::css`).
     Css,
+    /// A CSS module: classes, IDs and keyframe names are local (`local-css`).
+    LocalCss,
+    /// A stylesheet whose names are global unless `:local` (`global-css`).
+    GlobalCss,
     /// The module is empty.
     Empty,
     Base64,
@@ -83,7 +89,10 @@ impl Loader {
             "json" => Loader::Json,
             "text" => Loader::Text,
             "file" => Loader::File,
+            "copy" => Loader::Copy,
             "css" => Loader::Css,
+            "local-css" => Loader::LocalCss,
+            "global-css" => Loader::GlobalCss,
             "empty" => Loader::Empty,
             "base64" => Loader::Base64,
             "dataurl" => Loader::DataUrl,
@@ -96,6 +105,10 @@ impl Loader {
         matches!(self, Loader::Js | Loader::Jsx | Loader::Ts | Loader::Tsx)
     }
 
+    pub fn is_css(self) -> bool {
+        matches!(self, Loader::Css | Loader::LocalCss | Loader::GlobalCss)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Loader::Js => "js",
@@ -105,7 +118,10 @@ impl Loader {
             Loader::Json => "json",
             Loader::Text => "text",
             Loader::File => "file",
+            Loader::Copy => "copy",
             Loader::Css => "css",
+            Loader::LocalCss => "local-css",
+            Loader::GlobalCss => "global-css",
             Loader::Empty => "empty",
             Loader::Base64 => "base64",
             Loader::DataUrl => "dataurl",
@@ -221,6 +237,10 @@ pub struct BuildOptions {
     /// stays external, importing `url`. The dev server's dependency adapter keeps
     /// `import("./x.css")` in a package as a request for the original file this way.
     pub dynamic_import_url: Option<DynamicImportUrl>,
+    /// Not an esbuild option: the CSS the file system returns is already bundled, its
+    /// `@import`s inlined and its `url()`s the URLs the files are served at, so they stay as
+    /// written. The dev server's dependency adapter reads dependency CSS this way.
+    pub css_prebundled: bool,
 }
 
 /// See [`BuildOptions::dynamic_import_url`]: resolved file path to URL, or `None` to bundle.
@@ -287,6 +307,7 @@ impl Default for BuildOptions {
             legal_comments_inline: true,
             require_to_import: false,
             dynamic_import_url: None,
+            css_prebundled: false,
         }
     }
 }
@@ -389,9 +410,12 @@ impl BuildOptions {
         }
         let lower = name.to_ascii_lowercase();
         let Some((_, e)) = lower.rsplit_once('.') else {
-            // Extensionless files are JavaScript.
-            return Some(Loader::Js);
+            // Extensionless files are JavaScript, unless `--loader:=x` says otherwise.
+            return Some(self.loaders.get("").copied().unwrap_or(Loader::Js));
         };
+        if lower.ends_with(".module.css") {
+            return Some(Loader::LocalCss);
+        }
         Some(match e {
             "js" | "mjs" | "cjs" => Loader::Js,
             "jsx" => Loader::Jsx,

@@ -302,7 +302,7 @@ function flagsFor(c) {
       case 'ExtensionToLoader':
         for (const it of v.items) {
           const l = it.value.ident?.replace('config.Loader', '').toLowerCase();
-          const map = { js: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', json: 'json', text: 'text', file: 'file', css: 'css', empty: 'empty', base64: 'base64', dataurl: 'dataurl', binary: 'binary', copy: null, default: null, localcss: null, globalcss: null, none: null };
+          const map = { js: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', json: 'json', text: 'text', file: 'file', css: 'css', empty: 'empty', base64: 'base64', dataurl: 'dataurl', binary: 'binary', copy: 'copy', default: null, localcss: 'local-css', globalcss: 'global-css', none: null };
           if (!map[l]) { why.push(`Loader=${l}`); continue; }
           flags.push(`--loader:${it.key}=${map[l]}`);
         }
@@ -411,7 +411,23 @@ function run(cmd, argv, cwd, timeoutMs) {
 }
 
 // Content hashes in file names are implementation-defined.
-const normalizeHashes = (s) => s.replace(/-[A-Z2-7]{8}\b/g, '-HASH');
+// A `[hash]` alone as a file name (`--entry-names=[ext]/[hash]`) too.
+const normalizeHashes = (s) => s.replace(/-[A-Z2-7]{8}\b/g, '-HASH').replace(/(^|\/)[A-Z2-7]{8}(?=\.\w+\b)/g, '$1HASH');
+
+// CSS has no run-time behaviour under Node, so CSS outputs are compared as text, normalized
+// so that only formatting differs: comments dropped, quotes unified, whitespace collapsed and
+// removed around punctuation, the last `;` of a block dropped.
+function normalizeCss(css) {
+  return normalizeHashes(css)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/'/g, '"')
+    .replace(/url\(\s*([^"\s)][^)\s]*)\s*\)/g, 'url("$1")')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([{};,>~+])\s*/g, '$1')
+    .replace(/:\s+/g, ':')
+    .replace(/;+}/g, '}')
+    .trim();
+}
 
 function errorLine(stderr, dirs) {
   let line = stderr.split('\n').find((l) => /^\w*(Error|Exception)\b|^Error \[/.test(l) || /^Uncaught/.test(l)) ?? '';
@@ -436,6 +452,7 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
   if (b.code !== 0) return { built: false, log: (b.stderr || '').slice(0, 2000), signal: b.signal };
   // Entry outputs, in entry order.
   let outputs = [];
+  let css = [];
   try {
     const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
     const byEntry = new Map();
@@ -443,6 +460,7 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
       if (info.entryPoint && /\.(c|m)?js$/.test(o)) byEntry.set(path.resolve(cwd, info.entryPoint), path.resolve(cwd, o));
     }
     outputs = entries.map((e) => byEntry.get(path.resolve(cwd, e))).filter(Boolean);
+    css = Object.keys(m.outputs).filter((o) => o.endsWith('.css')).map((o) => path.resolve(cwd, o)).sort();
   } catch {
     if (plan.out.file && fs.existsSync(path.join(outRoot, plan.out.file))) outputs = [path.join(outRoot, plan.out.file)];
   }
@@ -454,6 +472,11 @@ async function buildAndRun(tool, bin, c, plan, caseDir) {
       stdout: normalizeHashes(r.stdout.split(outRoot).join('<out>').split(inRoot).join('<in>')),
       error: r.code === 0 ? '' : errorLine(r.stderr, [outRoot, inRoot]) || `exit ${r.code}${r.signal ? ` ${r.signal}` : ''}`,
     });
+  }
+  for (const o of css) {
+    let text = '';
+    try { text = fs.readFileSync(o, 'utf8'); } catch { text = '<missing>'; }
+    runs.push({ file: path.relative(outRoot, o), stdout: normalizeCss(text), error: '' });
   }
   return { built: true, runs };
 }
@@ -467,7 +490,6 @@ async function runCase(c, tmp) {
   if (Object.values(files).some((v) => typeof v !== 'string')) return { status: 'skip', why: ['non-string file'] };
   if (Object.values(files).some((v) => v.includes('Math.random'))) return { status: 'skip', why: ['nondeterministic (Math.random)'] };
   const entries = asList(c.spec.entryPaths);
-  if (entries.every((e) => /\.css$/.test(e))) return { status: 'skip', why: ['css entry (CSS bundling)'] };
   const caseDir = path.join(tmp, c.name);
   fs.rmSync(caseDir, { recursive: true, force: true });
   for (const [p, content] of Object.entries(files)) {
@@ -488,8 +510,9 @@ async function runCase(c, tmp) {
     status = 'fail';
     detail = `ts-r-build failed:\n${ours.log}`;
   } else {
-    const a = JSON.stringify(ref.runs.map((r) => [r.stdout, r.error]));
-    const b = JSON.stringify(ours.runs.map((r) => [r.stdout, r.error]));
+    const key = (r) => (r.file.endsWith('.css') ? [normalizeHashes(r.file), r.stdout] : [r.stdout, r.error]);
+    const a = JSON.stringify(ref.runs.map(key));
+    const b = JSON.stringify(ours.runs.map(key));
     status = a === b ? 'pass' : 'fail';
     if (status === 'fail') detail = `esbuild: ${a}\nts-r:    ${b}`;
   }

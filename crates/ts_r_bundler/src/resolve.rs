@@ -28,6 +28,11 @@ use crate::options::{BuildOptions, Platform, wildcard_match};
 pub enum ResolveKind {
     Import,
     Require,
+    /// A stylesheet's `@import` or `composes ... from`: a bare path is tried relative to
+    /// the stylesheet first, and implicit extensions skip JavaScript ones.
+    CssImport,
+    /// A stylesheet's `url()`: a bare path is tried relative first; `#x` and `url()` stay.
+    CssUrl,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -411,6 +416,18 @@ impl std::fmt::Debug for Resolver {
 /// `extensions` with the TypeScript ones moved after the last JavaScript one, as esbuild
 /// orders implicit extensions inside `node_modules` (observed: `pkg/path` finds `path.js`
 /// before `path.ts`, and `path.ts` still before `path.css`).
+/// Implicit extensions a stylesheet's `@import` skips.
+fn is_js_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        ".js" | ".jsx" | ".ts" | ".tsx" | ".mjs" | ".cjs" | ".mts" | ".cts" | ".json"
+    )
+}
+
+fn is_js_file(file: &str) -> bool {
+    file.rfind('.').is_some_and(|i| is_js_extension(&file[i..]))
+}
+
 fn javascript_first(extensions: &[String]) -> Vec<String> {
     let is_ts = |e: &str| matches!(e, ".ts" | ".tsx" | ".mts" | ".cts");
     let is_js = |e: &str| matches!(e, ".js" | ".jsx" | ".mjs" | ".cjs");
@@ -551,6 +568,9 @@ impl Resolver {
     }
 
     fn resolve_spec(&self, spec: &str, dir: &str, kind: ResolveKind) -> Resolution {
+        if matches!(kind, ResolveKind::CssImport | ResolveKind::CssUrl) {
+            return self.resolve_css(spec, dir, kind);
+        }
         if self.is_external_spec(spec) {
             return Resolution::External(spec.to_owned());
         }
@@ -660,6 +680,80 @@ impl Resolver {
                     "Could not resolve {spec:?}: you can mark the path {spec:?} as external to exclude it from the bundle"
                 ))
             }
+        }
+    }
+
+    /// A stylesheet's reference (observed in esbuild: `url(a/1.png)` and `@import "a.css"`
+    /// name `./a/1.png` and `./a.css` when those exist, else the package path; an
+    /// `@import "./x"` never picks `x.js` over `x.css`).
+    fn resolve_css(&self, spec: &str, dir: &str, kind: ResolveKind) -> Resolution {
+        if spec.is_empty() || (kind == ResolveKind::CssUrl && spec.starts_with('#')) {
+            return Resolution::External(spec.to_owned());
+        }
+        if self.is_external_spec(spec) {
+            return Resolution::External(spec.to_owned());
+        }
+        if spec.starts_with(crate::data_url::PREFIX) && crate::data_url::loader(spec).is_some() {
+            return Resolution::File(spec.to_owned());
+        }
+        let lower = spec.to_ascii_lowercase();
+        if lower.starts_with("data:")
+            || lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || spec.starts_with("//")
+        {
+            return Resolution::External(spec.to_owned());
+        }
+        let is_relative = spec.starts_with("./") || spec.starts_with("../");
+        let candidates: Vec<String> = if spec.starts_with('/') {
+            vec![path::normalize(spec)]
+        } else {
+            vec![path::resolve(dir, spec)]
+        };
+        let css_import = kind == ResolveKind::CssImport;
+        for target in &candidates {
+            if self.fs.file_exists(target) {
+                return self.finish(target.clone());
+            }
+            if css_import {
+                for ext in self.extensions.iter().filter(|e| !is_js_extension(e)) {
+                    let cand = format!("{target}{ext}");
+                    if self.fs.file_exists(&cand) {
+                        return self.finish(cand);
+                    }
+                }
+            }
+        }
+        if is_relative || spec.starts_with('/') {
+            // `./x.png?query` and `./x.png#hash` name `./x.png`.
+            if let Some(i) = spec.find(['?', '#'])
+                && i > 0
+                && let Resolution::File(f) = self.resolve_css(&spec[..i], dir, kind)
+            {
+                return Resolution::File(format!("{f}{}{}", crate::graph::QUERY_SEP, &spec[i..]));
+            }
+            return match self.resolve_spec(spec, dir, ResolveKind::Import) {
+                Resolution::File(f) if !css_import || !is_js_file(&f) => Resolution::File(f),
+                _ => Resolution::NotFound(format!("Could not resolve {spec:?}")),
+            };
+        }
+        match self.resolve_spec(spec, dir, ResolveKind::Import) {
+            Resolution::NotFound(_) => {
+                if let Some(i) = spec.find(['?', '#'])
+                    && i > 0
+                    && let Resolution::File(f) = self.resolve_css(&spec[..i], dir, kind)
+                {
+                    return Resolution::File(format!(
+                        "{f}{}{}",
+                        crate::graph::QUERY_SEP,
+                        &spec[i..]
+                    ));
+                }
+                Resolution::NotFound(format!(
+                    "Could not resolve {spec:?}: you can mark the path {spec:?} as external to exclude it from the bundle"
+                ))
+            }
+            other => other,
         }
     }
 
@@ -864,7 +958,7 @@ impl Resolver {
     fn conditions_for(&self, kind: ResolveKind) -> Vec<&str> {
         let mut v: Vec<&str> = self.conditions.iter().map(String::as_str).collect();
         v.push(match kind {
-            ResolveKind::Import => "import",
+            ResolveKind::Import | ResolveKind::CssImport | ResolveKind::CssUrl => "import",
             ResolveKind::Require => "require",
         });
         v
