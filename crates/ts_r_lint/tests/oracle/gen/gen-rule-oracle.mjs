@@ -27,7 +27,10 @@
 // `unicorn/no-null` (eslint-plugin-unicorn 79.0.0, from the tools dir with `outdent`: its
 // `test/utils/test.js` tester is replaced by a recorder; cases run with its default
 // globals, builtin + node + browser, which are written once per file as `globals` and left
-// out of each case's own; Vue, HTML, Svelte and non-JavaScript language cases are skipped),
+// out of each case's own; Vue, HTML, Svelte and non-JavaScript language cases are skipped;
+// with `--fixtures`, its type-aware cases (`projectService`) run typed like typescript-eslint's,
+// as files of the fixtures project, so run the generator from a directory above the fixtures
+// copy: ESLint's cwd must contain the linted file),
 // or `import/no-amd` (eslint-plugin-import 2.32.0 from its source tarball, the plugin itself
 // in the tools dir: `tests/src/utils` and its RuleTester are replaced by a recorder, the
 // test files are loaded as ES modules with `require`/`__dirname` shims, the plugin's
@@ -435,7 +438,8 @@ function observe(ruleId, isTs, testerConfig, c) {
   if (!c.code.isWellFormed()) return { skipped: 'lone surrogate' };
   const lo = mergeLo(testerConfig.languageOptions, c.languageOptions);
   const po = lo.parserOptions;
-  const typed = requiresTypes(ruleId) && !!fixturesDir && !!(po.project || po.projectService);
+  // eslint-plugin-unicorn rules use types when the case gives a program (`projectService`).
+  const typed = (requiresTypes(ruleId) || ruleId.startsWith('unicorn/')) && !!fixturesDir && !!(po.project || po.projectService);
   if (!typed) {
     if (po.project) return { skipped: 'type-aware case' };
     // Typed testers for rules that need no types: run without a program.
@@ -463,6 +467,9 @@ function observe(ruleId, isTs, testerConfig, c) {
   let verifyName = importFile ? c.filename : filename;
   let typedInfo;
   if (typed) {
+    // The plugin's tester lets its default project cover `file.*`; the fixtures' tsconfig
+    // already includes `file.ts`, which the project service then finds by itself.
+    if (ruleId.startsWith('unicorn/') && po.projectService) po.projectService = true;
     const root = path.resolve(fixturesDir, po.tsconfigRootDir ?? fixturesDir);
     const abs = path.resolve(root, c.filename ?? (jsx ? 'react.tsx' : 'file.ts'));
     const rel = path.relative(fixturesDir, abs).split(path.sep).join('/');
@@ -605,6 +612,8 @@ for (const rule of rules) {
           const obs = observe(rule, isTs, rec.config, c);
           if (obs.skipped) {
             const k = obs.skipped.replace(/:.*/, '');
+            // GEN_DEBUG=1 prints each skip reason in full.
+            if (process.env.GEN_DEBUG) console.error(`${rule}: ${obs.skipped}`);
             skipped[k] = (skipped[k] || 0) + 1;
             continue;
           }

@@ -17,27 +17,42 @@ mod getter_return;
 mod grouped_accessor_pairs;
 mod guard_for_in;
 mod import_consistent_type_specifier_style;
+mod import_default;
 mod import_dynamic_import_chunkname;
+mod import_export;
 mod import_exports_last;
+mod import_extensions;
 mod import_first;
 mod import_max_dependencies;
+mod import_named;
+mod import_namespace;
 mod import_newline_after_import;
 mod import_no_absolute_path;
 mod import_no_amd;
 mod import_no_anonymous_default_export;
 mod import_no_commonjs;
+mod import_no_cycle;
+mod import_no_deprecated;
 mod import_no_duplicates;
 mod import_no_dynamic_require;
 mod import_no_empty_named_blocks;
 mod import_no_import_module_exports;
+mod import_no_internal_modules;
 mod import_no_mutable_exports;
+mod import_no_named_as_default;
+mod import_no_named_as_default_member;
 mod import_no_named_default;
 mod import_no_namespace;
 mod import_no_nodejs_modules;
+mod import_no_relative_packages;
+mod import_no_restricted_paths;
+mod import_no_self_import;
 mod import_no_unassigned_import;
+mod import_no_unresolved;
+mod import_no_useless_path_segments;
 mod import_no_webpack_loader_syntax;
 mod import_prefer_default_export;
-mod import_util;
+pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
 mod jsdoc_check_param_names;
@@ -344,6 +359,7 @@ mod unicorn_id_match;
 mod unicorn_import_style;
 mod unicorn_isolated_functions;
 mod unicorn_iter;
+mod unicorn_iteration_fallback_style;
 mod unicorn_length_or_infinity;
 mod unicorn_logical_assignment_operators;
 mod unicorn_max_nested_calls;
@@ -408,6 +424,7 @@ mod unicorn_no_invalid_boolean_attribute_value;
 mod unicorn_no_invalid_character_comparison;
 mod unicorn_no_invalid_dom_token;
 mod unicorn_no_invalid_fetch_options;
+mod unicorn_no_invalid_file_input_accept;
 mod unicorn_no_invalid_integrity;
 mod unicorn_no_invalid_intl_options;
 mod unicorn_no_invalid_property_descriptor;
@@ -424,8 +441,11 @@ mod unicorn_no_leading_empty_lines;
 mod unicorn_no_lonely_if;
 mod unicorn_no_loop_iterable_mutation;
 mod unicorn_no_magic_array_flat_depth;
+mod unicorn_no_manually_wrapped_comments;
 mod unicorn_no_mismatched_map_key;
 mod unicorn_no_misrefactored_assignment;
+mod unicorn_no_missing_local_resource;
+mod unicorn_no_multiple_promise_resolver_calls;
 mod unicorn_no_named_default;
 mod unicorn_no_negated_array_predicate;
 mod unicorn_no_negated_comparison;
@@ -443,6 +463,7 @@ mod unicorn_no_optional_chaining_on_undeclared_variable;
 mod unicorn_no_prevent_default_in_passive_listener;
 mod unicorn_no_process_exit;
 mod unicorn_no_redundant_comparison;
+mod unicorn_no_repeated_call_wrappers;
 mod unicorn_no_return_array_push;
 mod unicorn_no_selector_as_dom_name;
 mod unicorn_no_shorthand_property_overrides;
@@ -468,6 +489,7 @@ mod unicorn_no_unnecessary_fetch_options;
 mod unicorn_no_unnecessary_global_this;
 mod unicorn_no_unnecessary_nested_ternary;
 mod unicorn_no_unnecessary_parameters;
+mod unicorn_no_unnecessary_polyfills;
 mod unicorn_no_unnecessary_slice_end;
 mod unicorn_no_unnecessary_splice;
 mod unicorn_no_unnecessary_string_trim;
@@ -477,6 +499,7 @@ mod unicorn_no_unreadable_iife;
 mod unicorn_no_unreadable_new_expression;
 mod unicorn_no_unreadable_object_destructuring;
 mod unicorn_no_unsafe_buffer_conversion;
+mod unicorn_no_unsafe_dom_html;
 mod unicorn_no_unsafe_json_serialization;
 mod unicorn_no_unsafe_promise_all_settled_values;
 mod unicorn_no_unsafe_property_key;
@@ -544,6 +567,7 @@ mod unicorn_prefer_continue;
 mod unicorn_prefer_date_now;
 mod unicorn_prefer_default_parameters;
 mod unicorn_prefer_direct_iteration;
+mod unicorn_prefer_dispose;
 mod unicorn_prefer_dom_node_append;
 mod unicorn_prefer_dom_node_html_methods;
 mod unicorn_prefer_dom_node_remove;
@@ -564,12 +588,16 @@ mod unicorn_prefer_has_check;
 mod unicorn_prefer_hoisting_branch_code;
 mod unicorn_prefer_https;
 mod unicorn_prefer_identifier_import_export_specifiers;
+mod unicorn_prefer_import_meta_properties;
 mod unicorn_prefer_includes;
+mod unicorn_prefer_includes_over_repeated_comparisons;
 mod unicorn_prefer_iterable_in_constructor;
+mod unicorn_prefer_iterator_concat;
 mod unicorn_prefer_iterator_helpers;
 mod unicorn_prefer_iterator_to_array;
 mod unicorn_prefer_iterator_to_array_at_end;
 mod unicorn_prefer_iterator_zip;
+mod unicorn_prefer_json_import;
 mod unicorn_prefer_keyboard_event_key;
 mod unicorn_prefer_literal_ascii;
 mod unicorn_prefer_location_assign;
@@ -585,7 +613,7 @@ mod unicorn_prefer_modern_math_apis;
 mod unicorn_prefer_module;
 mod unicorn_prefer_native_coercion_functions;
 mod unicorn_prefer_negative_index;
-mod unicorn_prefer_node_protocol;
+pub(crate) mod unicorn_prefer_node_protocol;
 mod unicorn_prefer_number_coercion;
 mod unicorn_prefer_number_is_safe_integer;
 mod unicorn_prefer_number_properties;
@@ -633,6 +661,7 @@ mod unicorn_prefer_string_starts_ends_with;
 mod unicorn_prefer_string_trim_start_end;
 mod unicorn_prefer_structured_clone;
 mod unicorn_prefer_switch;
+mod unicorn_prefer_temporal;
 mod unicorn_prefer_temporal_conversion;
 mod unicorn_prefer_ternary;
 mod unicorn_prefer_then_catch;
@@ -656,6 +685,7 @@ mod unicorn_require_module_attributes;
 mod unicorn_require_module_specifiers;
 mod unicorn_require_number_to_fixed_digits_argument;
 mod unicorn_require_passive_events;
+mod unicorn_require_post_message_target_origin;
 mod unicorn_require_proxy_trap_boolean_return;
 mod unicorn_require_text_decoder_streaming;
 mod unicorn_single_line_block_comment_style;
@@ -711,7 +741,19 @@ pub static ALL: &[&RuleDef] = &[
     &getter_return::RULE,
     &grouped_accessor_pairs::RULE,
     &guard_for_in::RULE,
+    &unicorn_iteration_fallback_style::RULE,
+    &unicorn_no_invalid_file_input_accept::RULE,
+    &unicorn_no_manually_wrapped_comments::RULE,
+    &unicorn_no_missing_local_resource::RULE,
+    &unicorn_no_repeated_call_wrappers::RULE,
+    &unicorn_no_unsafe_dom_html::RULE,
+    &unicorn_prefer_dispose::RULE,
+    &unicorn_prefer_import_meta_properties::RULE,
+    &unicorn_prefer_iterator_concat::RULE,
+    &unicorn_prefer_json_import::RULE,
     &unicorn_prefer_short_arrow_method::RULE,
+    &unicorn_prefer_temporal::RULE,
+    &unicorn_require_post_message_target_origin::RULE,
     &unicorn_try_complexity::RULE,
     &unicorn_no_unreadable_new_expression::RULE,
     &unicorn_no_barrel_files::RULE,
@@ -756,6 +798,21 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_webpack_loader_syntax::RULE,
     &import_no_named_default::RULE,
     &import_no_amd::RULE,
+    &import_no_restricted_paths::RULE,
+    &import_no_internal_modules::RULE,
+    &import_extensions::RULE,
+    &import_no_cycle::RULE,
+    &import_no_useless_path_segments::RULE,
+    &import_no_relative_packages::RULE,
+    &import_no_self_import::RULE,
+    &import_export::RULE,
+    &import_no_deprecated::RULE,
+    &import_no_named_as_default_member::RULE,
+    &import_no_named_as_default::RULE,
+    &import_namespace::RULE,
+    &import_default::RULE,
+    &import_named::RULE,
+    &import_no_unresolved::RULE,
     &max_depth::RULE,
     &max_nested_callbacks::RULE,
     &max_params::RULE,
@@ -1115,6 +1172,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_no_named_default::RULE,
     &unicorn_no_negated_comparison::RULE,
     &unicorn_no_negated_array_predicate::RULE,
+    &unicorn_no_multiple_promise_resolver_calls::RULE,
     &unicorn_no_negated_condition::RULE,
     &unicorn_no_negation_in_equality_check::RULE,
     &unicorn_no_nested_ternary::RULE,
@@ -1228,6 +1286,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_https::RULE,
     &unicorn_prefer_identifier_import_export_specifiers::RULE,
     &unicorn_prefer_includes::RULE,
+    &unicorn_prefer_includes_over_repeated_comparisons::RULE,
     &unicorn_prefer_iterable_in_constructor::RULE,
     &unicorn_prefer_iterator_helpers::RULE,
     &unicorn_prefer_iterator_to_array::RULE,
@@ -1346,6 +1405,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_isolated_functions::RULE,
     &unicorn_no_unsafe_property_key::RULE,
     &unicorn_no_unnecessary_parameters::RULE,
+    &unicorn_no_unnecessary_polyfills::RULE,
     &unicorn_no_unused_builtin_method_return::RULE,
     &unicorn_no_nonstandard_builtin_properties::RULE,
     &unicorn_no_unsafe_json_serialization::RULE,

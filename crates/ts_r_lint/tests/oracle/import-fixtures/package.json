@@ -1,0 +1,5 @@
+{
+  "name": "eslint-plugin-import",
+  "version": "2.32.0",
+  "main": "lib/index.js"
+}

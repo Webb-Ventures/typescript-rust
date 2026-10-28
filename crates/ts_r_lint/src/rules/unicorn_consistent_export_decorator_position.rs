@@ -80,42 +80,6 @@ fn class_keyword(src: &str, mut pos: usize, end: usize) -> Option<usize> {
     None
 }
 
-/// Every decorator in the class head, in source order. The parser keeps only one group on
-/// the class when decorators sit both before and after `export` (`@a export @b class`), so
-/// they are read from the nodes allocated before `scan_from` (the class's first child other
-/// than a decorator, or the class): the head's nodes, which start at or after `stmt_start`
-/// and end by `head_end`. Outermost only.
-fn head_decorators(
-    ast: &ts_r_ast::Ast,
-    scan_from: NodeId,
-    stmt_start: u32,
-    head_end: u32,
-) -> Vec<Span> {
-    let mut found: Vec<Span> = Vec::new();
-    let mut raw = scan_from.index() as u32;
-    while raw > 1 {
-        raw -= 1;
-        let Some(id) = NodeId::from_raw(raw) else {
-            break;
-        };
-        let s = ast.span(id);
-        if s.start < stmt_start {
-            break;
-        }
-        if ast.kind(id) == NodeKind::Decorator && s.end <= head_end {
-            found.push(s);
-        }
-    }
-    found.sort_by_key(|s| (s.start, std::cmp::Reverse(s.end)));
-    let mut out: Vec<Span> = Vec::new();
-    for s in found {
-        if out.last().is_none_or(|p| s.start >= p.end) {
-            out.push(s);
-        }
-    }
-    out
-}
-
 impl Rule for ConsistentExportDecoratorPosition {
     fn kinds(&self) -> &'static [NodeKind] {
         &[NodeKind::ClassDecl]
@@ -139,16 +103,16 @@ impl Rule for ConsistentExportDecoratorPosition {
         let span = cx.span(node);
         // Modifier keywords before the class's first child other than a decorator.
         let mut head_end = span.end;
-        let mut scan_from = node;
         let mut found = false;
         ast.for_each_child(node, |c| {
             if !found && ast.kind(c) != NodeKind::Decorator {
                 head_end = cx.span(c).start;
-                scan_from = c;
                 found = true;
             }
         });
-        let decorator_spans = head_decorators(ast, scan_from, span.start, head_end);
+        // Both groups (`@a export @b class`) are in the list, in source order.
+        let mut decorator_spans: Vec<Span> = decorators.iter().map(|&d| ast.span(d)).collect();
+        decorator_spans.sort_by_key(|s| s.start);
         let Some(last_decorator_end) = decorator_spans.last().map(|s| s.end) else {
             return;
         };

@@ -151,6 +151,8 @@ pub struct FileCtx<'a> {
     /// The file's indentation unit (`unicorn_util::indent_unit`), worked out on first use:
     /// it scans the whole file, and fixes ask for it once per report.
     pub(crate) indent_unit: OnceCell<String>,
+    /// The module resolution view of this file (eslint-plugin-import rules), on first use.
+    modules: OnceCell<crate::modules::ModCtx>,
 }
 
 impl fmt::Debug for FileCtx<'_> {
@@ -186,7 +188,14 @@ impl<'a> FileCtx<'a> {
             exported,
             semantic: OnceCell::new(),
             indent_unit: OnceCell::new(),
+            modules: OnceCell::new(),
         }
+    }
+
+    /// Module resolution and export maps for this file, set up on first use.
+    pub(crate) fn modules(&self) -> &crate::modules::ModCtx {
+        self.modules
+            .get_or_init(|| crate::modules::ModCtx::new(self.path, self.env))
     }
 
     /// The scope model, built on first use.

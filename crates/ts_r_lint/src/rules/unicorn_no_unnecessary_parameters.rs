@@ -196,10 +196,12 @@ struct Outcome {
     args: Vec<Arg>,
 }
 
+/// A local function whose callers are all known (`local_call_targets`).
 #[derive(Debug)]
-struct Target {
-    func: NodeId,
-    calls: Vec<NodeId>,
+pub(super) struct Target {
+    pub(super) func: NodeId,
+    /// The calls (or `new`s) of the function, in source order.
+    pub(super) calls: Vec<NodeId>,
     excluded: bool,
 }
 
@@ -616,7 +618,7 @@ fn is_exported(cx: &Ctx<'_, '_>, d: Decl) -> bool {
 }
 
 impl NoUnnecessaryParameters {
-    fn file_is_dynamic(&self, cx: &Ctx<'_, '_>, an: &An<'_, '_, '_>) -> bool {
+    fn file_is_dynamic(cx: &Ctx<'_, '_>, an: &An<'_, '_, '_>) -> bool {
         let ast = cx.ast();
         for i in 1..=ast.node_count() as u32 {
             let Some(id) = NodeId::from_raw(i) else {
@@ -650,22 +652,24 @@ impl NoUnnecessaryParameters {
         false
     }
 
-    fn targets(&self, cx: &Ctx<'_, '_>) -> Vec<Target> {
+    fn targets(cx: &Ctx<'_, '_>) -> Vec<Target> {
         let ast = cx.ast();
         let sem = cx.semantic();
         let mut targets: Vec<Target> = Vec::new();
-        fn get(targets: &mut Vec<Target>, func: NodeId) -> &mut Target {
-            let i = match targets.iter().position(|t| t.func == func) {
-                Some(i) => i,
-                None => {
-                    targets.push(Target {
-                        func,
-                        calls: Vec::new(),
-                        excluded: false,
-                    });
-                    targets.len() - 1
-                }
-            };
+        let mut index: rustc_hash::FxHashMap<NodeId, usize> = Default::default();
+        fn get<'t>(
+            targets: &'t mut Vec<Target>,
+            index: &mut rustc_hash::FxHashMap<NodeId, usize>,
+            func: NodeId,
+        ) -> &'t mut Target {
+            let i = *index.entry(func).or_insert_with(|| {
+                targets.push(Target {
+                    func,
+                    calls: Vec::new(),
+                    excluded: false,
+                });
+                targets.len() - 1
+            });
             &mut targets[i]
         }
         for (i, sym) in sem.symbols().iter().enumerate() {
@@ -723,6 +727,7 @@ impl NoUnnecessaryParameters {
                 if r.flags.contains(RefFlags::INIT)
                     || r.is_type()
                     || r.flags.contains(RefFlags::TYPEOF_TYPE)
+                    || in_type_only_export(cx, r.node)
                 {
                     continue;
                 }
@@ -733,7 +738,7 @@ impl NoUnnecessaryParameters {
                     _ => bad = true,
                 }
             }
-            let t = get(&mut targets, func);
+            let t = get(&mut targets, &mut index, func);
             t.excluded |= bad;
             t.calls.extend(calls);
         }
@@ -752,7 +757,7 @@ impl NoUnnecessaryParameters {
                 continue;
             };
             let call = call_of(cx, id);
-            let t = get(&mut targets, func);
+            let t = get(&mut targets, &mut index, func);
             match call {
                 Some(c) if !has_decorators(ast, method) => t.calls.push(c),
                 _ => t.excluded = true,
@@ -765,6 +770,27 @@ impl NoUnnecessaryParameters {
         targets.retain(|t| !t.excluded);
         targets
     }
+}
+
+/// `x` in `export type { x }` or `export { type x }`: not a runtime reference.
+fn in_type_only_export(cx: &Ctx<'_, '_>, ident: NodeId) -> bool {
+    let ast = cx.ast();
+    let Some(spec) = cx.parent(ident) else {
+        return false;
+    };
+    let Node::ExportSpecifier { type_only, .. } = *ast.node(spec) else {
+        return false;
+    };
+    type_only
+        || cx.parent(spec).is_some_and(|e| {
+            matches!(
+                *ast.node(e),
+                Node::ExportNamed {
+                    type_only: true,
+                    ..
+                }
+            )
+        })
 }
 
 /// The method a `#name` member names: `(MethodDef, function)` of the nearest class defining
@@ -804,17 +830,26 @@ fn private_method(
     None
 }
 
+/// Local functions whose every runtime reference is a direct call (the plugin's
+/// `trackLocalFunctionCalls`): `None` when the file has dynamic scope (`with`, a direct
+/// `eval`, a non-strict block-level function declaration).
+pub(super) fn local_call_targets(cx: &Ctx<'_, '_>) -> Option<Vec<Target>> {
+    let an = An { cx };
+    if NoUnnecessaryParameters::file_is_dynamic(cx, &an) {
+        return None;
+    }
+    Some(NoUnnecessaryParameters::targets(cx))
+}
+
 impl Rule for NoUnnecessaryParameters {
     fn has_run_file(&self) -> bool {
         true
     }
 
     fn run_file(&self, cx: &mut Ctx<'_, '_>) {
-        let an = An { cx: &*cx };
-        if self.file_is_dynamic(cx, &an) {
+        let Some(targets) = local_call_targets(cx) else {
             return;
-        }
-        let targets = self.targets(cx);
+        };
         let needs_review =
             cx.env().typescript || is_typescript_path(cx.file.path) || has_js_type_annotations(cx);
         let mut reports: Vec<(Span, String, Option<Fix>, String)> = Vec::new();

@@ -32,7 +32,36 @@ pub struct Cfg {
     pub ret: BlockId,
     /// Switch cases with the block at the end of their statements (for fall-through).
     pub case_ends: Vec<(NodeId, BlockId)>,
+    /// `try` statements with the block at the end of their `try` block (normal completion).
+    pub try_ends: Vec<(NodeId, BlockId)>,
     reachable: Vec<bool>,
+}
+
+/// How [`Cfg::function_with`] and friends build the graph (the code-path rules use the
+/// defaults; the plugin rules that model `process.exit()` set the rest).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Options<'a> {
+    /// Calls that end the program (sorted), as in [`Cfg::function_with_exits`].
+    pub exits: &'a [NodeId],
+    /// Identifiers (sorted) whose read cannot throw.
+    pub safe_reads: &'a [NodeId],
+    /// When set, the implicit throws inside a `try` are exactly after these nodes (sorted),
+    /// instead of after every call, member access, identifier read, ...
+    pub throws: Option<&'a [NodeId]>,
+    /// ESLint's code-path model: the end of a `try` block also flows to its `catch`.
+    pub try_end_to_catch: bool,
+    /// Literal tests are folded even without exits, loops with a falsy literal test never
+    /// run their body or loop again, and literals include TypeScript-wrapped ones and
+    /// template literals without substitutions.
+    pub fold_literals: bool,
+    /// `continue` statements (sorted) that end their path instead of looping.
+    pub dead_continues: &'a [NodeId],
+    /// A `continue` in the copy of a `finally` built for abrupt completion ends its path
+    /// when it targets a loop outside the `finally`.
+    pub abrupt_finally_continue_dead: bool,
+    /// With exits, static field initializers run with the class definition too, in
+    /// member order with the static blocks.
+    pub static_fields: bool,
 }
 
 impl Cfg {
@@ -47,8 +76,20 @@ impl Cfg {
     /// to a `catch` or `finally`). With exits, the static blocks of classes defined in the
     /// function are part of its graph too.
     pub fn function_with_exits(ast: &Ast, f: NodeId, exits: &[NodeId]) -> Cfg {
+        Cfg::function_with(
+            ast,
+            f,
+            &Options {
+                exits,
+                ..Options::default()
+            },
+        )
+    }
+
+    /// The graph of a function, built with `opts`.
+    pub fn function_with(ast: &Ast, f: NodeId, opts: &Options<'_>) -> Cfg {
         let mut b = Builder::new(ast);
-        b.exits = exits;
+        b.opts(opts);
         match *ast.node(f) {
             Node::FunctionDecl { params, body, .. } | Node::FunctionExpr { params, body, .. } => {
                 for &p in ast.list(params) {
@@ -91,12 +132,33 @@ impl Cfg {
         exits: &[NodeId],
         safe_reads: &[NodeId],
     ) -> Cfg {
+        Cfg::statements_with(
+            ast,
+            stmts,
+            &Options {
+                exits,
+                safe_reads,
+                ..Options::default()
+            },
+        )
+    }
+
+    /// The graph of a statement list, built with `opts`.
+    pub fn statements_with(ast: &Ast, stmts: &[NodeId], opts: &Options<'_>) -> Cfg {
         let mut b = Builder::new(ast);
-        b.exits = exits;
-        b.safe_reads = safe_reads;
+        b.opts(opts);
         for &s in stmts {
             b.stmt(s);
         }
+        b.finish()
+    }
+
+    /// The graph of one expression evaluated on its own (a class field initializer), built
+    /// with `opts`.
+    pub fn expression_with(ast: &Ast, expr: NodeId, opts: &Options<'_>) -> Cfg {
+        let mut b = Builder::new(ast);
+        b.opts(opts);
+        b.expr(expr);
         b.finish()
     }
 
@@ -188,6 +250,15 @@ struct Builder<'a> {
     /// Calls that end the program (sorted).
     exits: &'a [NodeId],
     safe_reads: &'a [NodeId],
+    throws: Option<&'a [NodeId]>,
+    try_end_to_catch: bool,
+    fold_literals: bool,
+    dead_continues: &'a [NodeId],
+    abrupt_finally_continue_dead: bool,
+    static_fields: bool,
+    /// While building the abrupt copy of a `finally`: the jump-target depth at its start.
+    abrupt_floor: Option<usize>,
+    try_ends: Vec<(NodeId, BlockId)>,
 }
 
 /// A literal test that is always truthy (`while (true)`).
@@ -268,12 +339,38 @@ impl<'a> Builder<'a> {
             block_budget: 4 * ast.nodes.len() + 4096,
             exits: &[],
             safe_reads: &[],
+            throws: None,
+            try_end_to_catch: false,
+            fold_literals: false,
+            dead_continues: &[],
+            abrupt_finally_continue_dead: false,
+            static_fields: false,
+            abrupt_floor: None,
+            try_ends: Vec::new(),
         };
         b.cur = b.new_block();
         b.exit = b.new_block();
         b.ret = b.new_block();
         b.throw = b.new_block();
         b
+    }
+
+    fn opts(&mut self, o: &Options<'a>) {
+        self.exits = o.exits;
+        self.safe_reads = o.safe_reads;
+        self.throws = o.throws;
+        self.try_end_to_catch = o.try_end_to_catch;
+        self.fold_literals = o.fold_literals;
+        self.dead_continues = o.dead_continues;
+        self.abrupt_finally_continue_dead = o.abrupt_finally_continue_dead;
+        self.static_fields = o.static_fields;
+    }
+
+    /// With an explicit throw list, an implicit throw after `id` when it is listed.
+    fn listed_throw(&mut self, id: NodeId) {
+        if self.throws.is_some_and(|t| t.binary_search(&id).is_ok()) {
+            self.maybe_throw();
+        }
     }
 
     fn finish(mut self) -> Cfg {
@@ -296,6 +393,7 @@ impl<'a> Builder<'a> {
             exit: self.exit,
             ret: self.ret,
             case_ends: self.case_ends,
+            try_ends: self.try_ends,
             reachable,
         }
     }
@@ -375,20 +473,49 @@ impl<'a> Builder<'a> {
     /// With program-ending calls (the plugin's exit analysis), the truthiness of a literal
     /// test, which decides the branch. Plain code-path graphs never fold.
     fn literal_truth(&self, test: NodeId) -> Option<bool> {
-        if self.exits.is_empty() {
+        if self.exits.is_empty() && !self.fold_literals {
             return None;
         }
         let mut id = test;
-        while let Node::Paren { expr } = *self.ast.node(id) {
-            id = expr;
+        loop {
+            match *self.ast.node(id) {
+                Node::Paren { expr } => id = expr,
+                Node::As { expr, .. }
+                | Node::Satisfies { expr, .. }
+                | Node::NonNull { expr }
+                | Node::TypeAssertion { expr, .. }
+                    if self.fold_literals =>
+                {
+                    id = expr
+                }
+                _ => break,
+            }
         }
         match *self.ast.node(id) {
             Node::BoolLit { value } => Some(value),
             Node::NullLit {} => Some(false),
             Node::NumberLit { value } => Some(value.get() != 0.0 && !value.get().is_nan()),
             Node::StringLit { value } => Some(!self.ast.atom(value).is_empty()),
+            Node::TemplateLit { parts } if self.fold_literals => {
+                let parts = self.ast.list(parts);
+                match parts {
+                    [only] => match *self.ast.node(*only) {
+                        Node::TemplateElement { cooked, .. } => {
+                            Some(!self.ast.atom(cooked).is_empty())
+                        }
+                        _ => None,
+                    },
+                    [] => Some(false),
+                    _ => None,
+                }
+            }
             _ => None,
         }
+    }
+
+    /// A loop test known to be falsy (only with `fold_literals`).
+    fn loop_never_runs(&self, test: NodeId) -> bool {
+        self.fold_literals && self.literal_truth(test) == Some(false)
     }
 
     /// A default value, evaluated only on some paths.
@@ -456,6 +583,7 @@ impl<'a> Builder<'a> {
                 return;
             }
         }
+        self.listed_throw(id);
         self.event(id);
     }
 
@@ -496,10 +624,20 @@ impl<'a> Builder<'a> {
         // exit-aware graph needs to see a `process.exit()` there).
         if !self.exits.is_empty() {
             for &m in ast.list(members) {
-                if let Node::StaticBlock { body } = *ast.node(m) {
-                    for &s in ast.list(body) {
-                        self.stmt(s);
+                match *ast.node(m) {
+                    Node::StaticBlock { body } => {
+                        for &s in ast.list(body) {
+                            self.stmt(s);
+                        }
                     }
+                    Node::PropertyDef {
+                        modifiers,
+                        value: Some(v),
+                        ..
+                    } if self.static_fields && modifiers.contains(ts_r_ast::Modifiers::STATIC) => {
+                        self.expr(v)
+                    }
+                    _ => {}
                 }
             }
         }
@@ -631,14 +769,18 @@ impl<'a> Builder<'a> {
                 for &a in ast.list(args) {
                     self.expr(a);
                 }
-                self.maybe_throw();
+                if self.throws.is_none() {
+                    self.maybe_throw();
+                }
             }
             Node::New { callee, args, .. } => {
                 self.expr(callee);
                 for &a in ast.list(args) {
                     self.expr(a);
                 }
-                self.maybe_throw();
+                if self.throws.is_none() {
+                    self.maybe_throw();
+                }
             }
             Node::As { expr, .. }
             | Node::Satisfies { expr, .. }
@@ -661,7 +803,10 @@ impl<'a> Builder<'a> {
                         self.expr(c);
                     }
                 }
-                if may_throw(ast.kind(id)) && self.safe_reads.binary_search(&id).is_err() {
+                if self.throws.is_none()
+                    && may_throw(ast.kind(id))
+                    && self.safe_reads.binary_search(&id).is_err()
+                {
                     self.maybe_throw();
                 }
                 // `generator.return()` resumes a `yield` as a return through `finally`.
@@ -674,6 +819,7 @@ impl<'a> Builder<'a> {
                 }
             }
         }
+        self.listed_throw(id);
         self.event(id);
     }
 
@@ -799,7 +945,9 @@ impl<'a> Builder<'a> {
                 self.expr(test);
                 let test_end = self.cur;
                 let (body_b, after) = (self.new_block(), self.new_block());
-                self.edge(test_end, body_b);
+                if !self.loop_never_runs(test) {
+                    self.edge(test_end, body_b);
+                }
                 if !const_true(ast, test) {
                     self.edge(test_end, after);
                 }
@@ -821,7 +969,9 @@ impl<'a> Builder<'a> {
                 self.jumps.pop();
                 self.cur = test_b;
                 self.expr(test);
-                self.edge(self.cur, body_b);
+                if !self.loop_never_runs(test) {
+                    self.edge(self.cur, body_b);
+                }
                 if !const_true(ast, test) {
                     self.edge(self.cur, after);
                 }
@@ -846,7 +996,9 @@ impl<'a> Builder<'a> {
                 self.expr_opt(test);
                 let test_end = self.cur;
                 let (body_b, upd, after) = (self.new_block(), self.new_block(), self.new_block());
-                self.edge(test_end, body_b);
+                if !test.is_some_and(|t| self.loop_never_runs(t)) {
+                    self.edge(test_end, body_b);
+                }
                 if test.is_some_and(|t| !const_true(ast, t)) {
                     self.edge(test_end, after);
                 }
@@ -938,7 +1090,7 @@ impl<'a> Builder<'a> {
             Node::Break { label } | Node::Continue { label } => {
                 let is_break = matches!(ast.node(id), Node::Break { .. });
                 let name = self.label_name(label);
-                let target = self.jumps.iter().rev().find_map(|j| {
+                let target = self.jumps.iter().enumerate().rev().find_map(|(index, j)| {
                     let ok = match name {
                         Some(n) => j.labels.contains(&n),
                         None => {
@@ -953,9 +1105,18 @@ impl<'a> Builder<'a> {
                         return None;
                     }
                     let t = if is_break { Some(j.brk) } else { j.cont };
-                    t.map(|t| (t, j.depth))
+                    t.map(|t| (t, j.depth, index))
                 });
-                if let Some((t, d)) = target {
+                // A `continue` that does not loop again (plugin model) still runs the
+                // `finally` blocks on its way, then goes nowhere.
+                let no_loop = !is_break
+                    && (self.dead_continues.binary_search(&id).is_ok()
+                        || target.is_some_and(|(_, _, index)| {
+                            self.abrupt_finally_continue_dead
+                                && self.abrupt_floor.is_some_and(|floor| index < floor)
+                        }));
+                if let Some((t, d, _)) = target {
+                    let t = if no_loop { self.new_block() } else { t };
                     self.jump(t, d);
                 }
                 self.dead();
@@ -979,9 +1140,14 @@ impl<'a> Builder<'a> {
                     self.handlers.push((ce, depth));
                 }
                 self.stmt(block);
+                self.try_ends.push((id, self.cur));
                 let mut ends = vec![self.cur];
                 if let (Some(h), Some(ce)) = (handler, catch_entry) {
                     self.handlers.pop();
+                    if self.try_end_to_catch {
+                        let c = self.cur;
+                        self.edge(c, ce);
+                    }
                     self.cur = ce;
                     self.event(h);
                     if let Node::CatchClause { param, body, .. } = *ast.node(h) {
@@ -1008,7 +1174,9 @@ impl<'a> Builder<'a> {
                                 self.cur
                             } else {
                                 self.cur = frame.abrupt;
+                                let floor = self.abrupt_floor.replace(self.jumps.len());
                                 self.stmt(fin);
+                                self.abrupt_floor = floor;
                                 self.cur
                             };
                             for (t, d) in frame.routed {

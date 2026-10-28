@@ -140,27 +140,33 @@ Files:
   defined. Configured globals satisfy both. `builtinGlobals` counts every lib global
   variable (`LintEnv::is_builtin_global`). Core `no-undef` reports unresolved type
   references too.
+- **Rules read other files only through `LintEnv.modules`** (a `modules::ModuleHost`: a
+  `FileSystem` plus resolution, export-map and `package.json` caches shared by the files of
+  one run; `ResolveOptions.modules` sets it). The caches never invalidate, so a host must
+  not outlive a run: `lint_paths` makes one per call (`ResolveOptions::for_run`) unless the
+  caller passed one, and `LintOptions::new` leaves it `None`, so the editor's jobs (which
+  keep their `LintOptions` and configs for the session) get a fresh real-disk host per
+  file. Never `std::fs` in a rule. Cached data holds no timestamps; cache keys include a
+  hash of the file's `import/*` settings.
 
-## Status (v1 lint round 6, `wip/v1-lint6`)
+## Status (v1 lint round 7, `wip/v1-lint7`)
 
-- 650 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 352
-  eslint-plugin-unicorn, 21 eslint-plugin-import), 51 of them type-aware. Rule oracle:
-  73,072 / 73,093 cases. The non-type-aware cases are 66,170 / 66,173 and the type-aware
-  cases 6,902 / 6,920 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
-  in design record 0006. The 3 others are on rules added this round:
-  import/no-import-module-exports 13/14 (its entry-point exemption reads a `package.json`
-  the oracle doesn't mount), unicorn/prefer-await 109/110 (`promise.then(await => await)` in
-  a `.ts` file is a parser error in ts_r_parser) and unicorn/require-proxy-trap-boolean-return
-  166/167 (a `case process.exit(1):` test after `default`). unicorn/require-module-specifiers
-  is 68/68 since emit6's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
-  Every rule of ESLint's, typescript-eslint's and eslint-plugin-jsdoc's recommended presets
-  is implemented; unicorn's `recommended` has 335 of 338 (missing:
-  no-multiple-promise-resolver-calls, no-unnecessary-polyfills, which needs core-js-compat
-  and browserslist data, and prefer-includes-over-repeated-comparisons, whose `.ts` cases need
-  typed oracle data), plus 17 of its opt-in rules (352 of its 376 live rules).
-  eslint-plugin-import has 21 of 46: the ones that need no module resolution (the oracle has
-  no fixture file tree, so default, export, named, namespace, no-cycle, no-unresolved,
-  order, ... are not implemented).
+- 680 rules (134 core ESLint, 95 typescript-eslint, 48 eslint-plugin-jsdoc, 367
+  eslint-plugin-unicorn, 36 eslint-plugin-import), 51 of them type-aware. Rule oracle:
+  75,282 / 75,305 cases. The non-type-aware cases are 68,288 / 68,293 and the type-aware
+  cases 6,994 / 7,012 (2026-10-27); the 18 type-aware failures are a subset of the 46 listed
+  in design record 0006. The 5 others: import/no-unresolved 77/80 (3 cases need the
+  uppercase absolute path of the machine that recorded them), import/default 22/23 (its
+  `FooES7` case needs espree's ecmaVersion parse error) and unicorn/no-repeated-call-wrappers
+  107/108 (`this?.#x()` is a parse error in ts_r_parser). unicorn/prefer-await is 110/110
+  since emit7's parser fix. `tests/oracle/baseline.txt` has the per-rule counts.
+  Every rule of ESLint's, typescript-eslint's, eslint-plugin-jsdoc's and
+  eslint-plugin-unicorn's recommended presets is implemented (unicorn: 338 of 338, plus 29
+  of its opt-in rules: 367 of its 376 live rules). eslint-plugin-import has 36 of 46,
+  `import/recommended` included; import/order (82 oracle cases) is the one with oracle data
+  still missing, and no-extraneous-dependencies, no-unused-modules,
+  no-relative-parent-imports, enforce-node-protocol-usage, group-exports, no-default-export,
+  no-named-export, imports-first and unambiguous have none yet.
 - private-app against ESLint with every configured rule (round 3 run): all 23 projects
   pass the parity gate. The result is 26,578 match, 0 miss, 0 extra.
 - Speed at 4 threads: cold 4.4 s and 406 MB; warm 0.52 s and 170 MB. ESLint takes 19.6 s.
@@ -1783,8 +1789,8 @@ Control-flow, comparison and promise rules from unicorn 79.0.0's `recommended` s
   discarded with `void`; there is no type information, so no receiver is known not to be a
   promise. The async-IIFE suggestion follows the plugin's indentation rules (first body
   line, else one level deeper than the nearest line-starting ancestor, else the file's
-  indent unit). 109/110: `promise.then(await => await)` in a `.ts` file is a parse error in
-  ts_r_parser (`await` as an arrow parameter outside a module), not a rule gap.
+  indent unit). 110/110 since emit7's parser fix (`promise.then(await => await)` in a `.ts`
+  file parses).
 - **no-error-property-assignment**: assignments to `message`, `name`, `cause`, `stack` (and
   `Object.assign(err, {..})` with the global `Object`) on a `const`/`let` freshly bound to
   `new <builtin Error>(..)` in the same statement list, before anything else could have
@@ -2576,8 +2582,8 @@ Rules the track lead wrote this round, all `NO_PRESET` (unicorn presets are coun
 tagged), each at 100% of its oracle cases except require-proxy-trap-boolean-return.
 
 - `no-anonymous-default-export`, `default-export-style`, `consistent-export-decorator-position`
-  (the parser keeps only one decorator group when decorators sit on both sides of `export`,
-  `@a export @b class X {}`; the rule works from the source text there).
+  (it reads the class's decorator list; since emit7's parser fix that list holds both
+  groups when decorators sit on both sides of `export`, `@a export @b class X {}`).
 - `no-accessor-recursion`, `no-incomplete-accessor-override`, `no-uncalled-method`,
   `class-reference-in-static-methods`, `prefer-private-class-fields`.
 - `no-unreadable-object-destructuring`, `prefer-single-object-destructuring`,
@@ -2636,3 +2642,228 @@ prefer-short-arrow-method}.js`; `rules/shared/nullish-check.js`,
 `rules/ast/is-undefined.js`, `rules/utils/get-function-from-identifier.js`,
 `rules/utils/has-unsafe-arrow-conversion-reference.js`,
 `rules/utils/get-concise-arrow-body-text.js`, `rules/utils/comments.js`.
+
+## eslint-plugin-unicorn rules (round 7, h2)
+
+Twelve opt-in rules, each at its full oracle count except no-repeated-call-wrappers:
+require-post-message-target-origin (43/43), no-repeated-call-wrappers (107/108),
+prefer-iterator-concat (87/87), no-unsafe-dom-html (95/95), prefer-json-import (82/82),
+prefer-import-meta-properties (48/48), prefer-temporal (93/93), iteration-fallback-style
+(108/108), no-manually-wrapped-comments (107/107), prefer-dispose (56/56),
+no-invalid-file-input-accept (49/49), no-missing-local-resource (34/34).
+
+**Local call targets are shared.** `unicorn_no_unnecessary_parameters::local_call_targets`
+gives every local function with the calls that reach it (`None` when the file has dynamic
+scope, so no rule guesses); no-repeated-call-wrappers uses it too. The target lookup is an
+id-to-index map, not a linear search. A name used in `export type {x}` or `export {type x}`
+is not a runtime reference. The one no-repeated-call-wrappers miss is `this?.#getWords(x)`,
+which ts_r_parser rejects ("An optional chain cannot contain private identifiers") though
+ESTree parsers accept it; the fix belongs in the parser.
+
+**No type information in the oracle.** prefer-temporal's `checkMethods` and prefer-dispose's
+"is the resource disposable" check need types; the published outputs were made without
+them, so both do nothing more than the untyped path (prefer-dispose reports any matching
+`try`).
+
+**Comment prose.** no-manually-wrapped-comments works on the file's comment list in
+`run_file`. Lines are split the ESLint way (`\r\n`, `\r`, `\n`, U+2028, U+2029), columns
+compared in UTF-16 units. A sentence ends in `.`, `!`, `?`, `:` or an
+`Extended_Pictographic` character (optionally plus a variation selector), or in an emoji
+sequence ending in a skin tone, a regional-indicator pair, a keycap or a tag. The pictograph
+table is Unicode 17 (what Node 24 matches), generated with Node and pasted as ranges: our
+regex engine only approximates `\p{...}`, so the rule does not use it. Inside a block comment
+lines are split at `\n` only, as the plugin does, and a copyright, `SPDX-` or `@license`
+line exempts the whole comment.
+
+**prefer-dispose ordering.** `using` disposes in reverse declaration order, so the
+`finally` must already dispose the resources last-declared-first; the declarations must be
+the statements just before the `try`. The suggestion re-indents with
+`unicorn_iteration_fallback_style::reindent` (now `pub(super)`), unless a template literal in
+the `try` spans lines.
+
+**MIME types.** no-invalid-file-input-accept parses a MIME type like Node's `MIMEType`:
+type and subtype must be non-empty HTTP token characters, whitespace before `;` is dropped
+from the subtype, parameters never make it invalid; the essence is lowercased.
+
+**The file system.** no-missing-local-resource reads the disk through the run's
+`FileSystem` (`LintEnv.modules`, the same host the import rules use; never `std::fs`): it
+lists each directory on the way (cached for the one lookup) and compares entries exactly,
+then ignoring case (an ambiguous case-insensitive match counts as missing). When a directory
+can't be listed the whole path's existence decides. The oracle lints `/oracle/<file>`,
+which does not exist, so every published case is "missing"; a unit test with a temp
+directory covers the existing and wrongly cased paths. Percent-escapes decode as
+`decodeURIComponent`, falling back to each run of escapes alone; the casing fix keeps the
+escapes the author wrote where the decoded text lines up.
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
+`rules/{require-post-message-target-origin,no-repeated-call-wrappers,prefer-iterator-concat,
+no-unsafe-dom-html,prefer-json-import,prefer-import-meta-properties,prefer-temporal,
+iteration-fallback-style,no-manually-wrapped-comments,prefer-dispose,
+no-invalid-file-input-accept,no-missing-local-resource}.js`;
+`rules/utils/track-local-function-calls.js`, `rules/utils/global-reference-tracker.js`,
+`rules/utils/reindent-text.js`, `rules/utils/needs-semicolon.js`,
+`rules/utils/eslint-directive.js`, `rules/utils/get-comments.js`,
+`rules/utils/get-line-indent.js`, `rules/fix/replace-string-raw.js`,
+`rules/ast/call-or-new-expression.js`, `rules/ast/literal.js`, `rules/ast/is-method-call.js`,
+`rules/ast/is-member-expression.js`, `rules/utils/matches-name-constraint.js`.
+
+## eslint-plugin-import rules (round 7)
+
+15 more rules, the ones that resolve modules and read other files: no-unresolved, named,
+default, namespace, export, no-named-as-default, no-named-as-default-member (with
+no-duplicates, all of `import/recommended`), no-deprecated, no-self-import,
+no-relative-packages, no-useless-path-segments, no-cycle, extensions, no-internal-modules
+and no-restricted-paths; 36 of the 46 rules in all. Left: order (82 oracle cases),
+no-extraneous-dependencies, no-unused-modules, no-relative-parent-imports,
+enforce-node-protocol-usage, group-exports, no-default-export, no-named-export,
+imports-first and unambiguous (the last eight have no oracle data yet).
+
+**The module host** (`src/modules/`):
+
+- `mod.rs`: `ModuleHost`, `ModCtx` (the linted file's view: normalized path, cwd, parsed
+  `import/*` settings, a once-per-rule error set), `Resolved {Core, File, NotFound}`.
+  Resolvers come from `import/resolver` (`node`, the default, with `import/resolve` as its
+  options); any other resolver name fails to load, which the rules report once per rule
+  and file at 1:1 as `Resolve error: unable to load resolver "x".`. `import/ignore`
+  regexes and `import/extensions` (default `.js`, `.mjs`, `.cjs`, plus the
+  `import/parsers` extensions) decide which files get export maps.
+- `node_resolve.rs`: the default resolver's algorithm (see its header): extensions `.mjs`,
+  `.js`, `.json`, `.node`; a `main` that leads nowhere fails the whole lookup; `module` and
+  `jsnext:main` never apply; `package.json` is parsed without stripping a BOM (the
+  `package.json` the plugin itself reads, for `no-relative-packages` and entry points, is
+  stripped).
+- `export_map.rs`: a file's exports, re-exports, `export *` dependencies, imports (for
+  no-cycle), parse errors and doc comments. A file is only mapped when a quick scan says it
+  may be a module (`import`/`export` at a statement start, or `import(`) and it parses as
+  one; a file with `import()` but no module syntax gets an empty "ambiguous" map. JSDoc
+  (`/** */`, default) or TomDoc (`import/docstyle`) comments give `@deprecated`. Lookups
+  through `export *` chains stop at `MAX_DEPTH` (64) and on cycles.
+- `import_type.rs`: the kind of a specifier (`internal-regex`, absolute, builtin, parent,
+  index, sibling, external, internal, unknown; see its header).
+- `minimatch.rs`: minimatch 3's `makeRe` (no-internal-modules matches through the regex,
+  where `a/**/**` needs two slashes). Other globs use `config::glob`.
+
+**Rules, in our words** (each file's header has the details):
+
+- no-cycle: the linted file's strongly connected component of value imports on disk
+  (iterative Tarjan) gates both the import and the walk; the walk is breadth first and
+  shares one visited set across the file's imports, so a later import may miss a cycle the
+  plugin would also miss. Side-effect imports and type-only declarations are skipped.
+- no-useless-path-segments: posix-normalized specifiers that resolve to the same file,
+  `/index` under `noUselessIndex`, and extra `..` segments compared with the relative path
+  to the resolved file. no-relative-packages: the nearest `package.json` with a `name`
+  (unnamed ones pass the search upward).
+- extensions: the extension comes from the resolved file; `never` only reports when the
+  path without it resolves to the same file (two unresolved paths count as the same).
+- no-restricted-paths: `basePath` defaults to the cwd; glob vs plain is is-glob's strict
+  check.
+- Two deliberate departures from the plugin, which matches names by spelling: namespace
+  checks `<Ns.x/>` only when `Ns` is the module-level binding (not a shadowing parameter or
+  local), and no-deprecated reports only identifiers that are references to the imported
+  binding (not object keys or labels spelled the same). No oracle case depends on either.
+- Export-map walks (`has`, `has_deep`, `get`, `size`, `names`) keep a visited set, so
+  `export *` cycles and diamonds cost linear work (the plugin recurses unchecked);
+  `size` counts each map once, as the rules only ask whether it is zero.
+
+**Testing.** The plugin's `tests/files` (and `tests/index.js`) are vendored in
+`tests/oracle/import-fixtures/` (its `.gitignore` re-includes `node_modules`; the
+`eslint-import-resolver-foo` symlink is a copy). The rule oracle mounts them in a
+case-insensitive `MemoryFs` at `/import` (cwd `/import`) and lints import cases as
+`/import/tests/files/<filename>`. 3 no-unresolved cases need the uppercase absolute path of
+the machine that recorded them, and import/default's `FooES7` case needs espree's
+ecmaVersion parse error. `tests/import_modules.rs` covers long and cyclic graphs (3,000
+modules), self-referential packages and re-exports, malformed `package.json` and non-ASCII
+paths.
+
+Upstream files read (eslint-plugin-import 2.32.0 and its eslint-module-utils): utils
+`resolve.js`, `ignore.js`, `ModuleCache.js`, `moduleVisitor.js`, `unambiguous.js`,
+`parse.js`, `readPkgUp.js`, `pkgUp.js`; `resolvers/node/index.js`; resolve 2.0.0-next
+`lib/sync.js`, `lib/node-modules-paths.js`; `src/exportMap/*`, `src/core/importType.js`,
+`src/core/packagePath.js`, `src/scc.js`; `src/rules/{no-unresolved, named, default,
+namespace, export, no-named-as-default, no-named-as-default-member, no-deprecated,
+no-import-module-exports, no-unassigned-import, no-self-import, no-relative-packages,
+no-useless-path-segments, no-cycle, extensions, no-internal-modules,
+no-restricted-paths}.js`; minimatch 3.1 `makeRe` (observed output) and is-glob's strict
+check.
+
+## eslint-plugin-unicorn rules (round 7, h1)
+
+The three `recommended` unicorn rules that were missing, each at 100% of its oracle cases:
+`no-multiple-promise-resolver-calls` (292/292), `prefer-includes-over-repeated-comparisons`
+(201/201, 92 typed) and `no-unnecessary-polyfills` (101/101).
+`require-proxy-trap-boolean-return` goes from 166/167 to 167/167.
+
+- **CFG options (`cfg::Options`, `Cfg::function_with` / `statements_with` /
+  `expression_with`).** The defaults keep the old graph. `throws: Some(list)` makes only
+  the listed nodes able to throw: the kind-based guess is off, and a listed node gets its
+  throw edge at the end of its expression (or assignment target). `try_end_to_catch` adds an
+  edge from the end of a try block to its catch (`Cfg.try_ends` records them).
+  `fold_literals` folds literal tests even without `exits`, looking through TS wrappers and
+  templates without substitutions, so `while (false)` bodies never run. `dead_continues`
+  sends a `continue` through the `finally` blocks to a fresh dead block.
+  `abrupt_finally_continue_dead` stops the copy of an abrupt `finally` from picking up the
+  jumps that were pending before it. `static_fields` inlines static field initializers with
+  the static blocks, in member order, when `exits` is set.
+- **`no-multiple-promise-resolver-calls`.** The executor is a non-generator function that
+  is the only argument of a global `new Promise` without type arguments. The resolvers are
+  its first two identifier parameters, as long as neither is reassigned. Calls are grouped
+  by the code path that owns them: a function, a static block or a property value.
+  A first CFG (throws are `may_throw_nodes`) finds the exits that matter. An exit doesn't
+  count when the catch, or the end of the try, of its nearest catching `try` is reachable.
+  This repeats until stable (at most 8 rounds). The main CFG (`throws: Some(&[])`,
+  `try_end_to_catch`) runs a dataflow over the states {not called, called, after a call,
+  pending}. Catch, resolver-call and throw events move between them. A call that never
+  runs, a resolver used as a default value, an exit through a `default` clause that always
+  runs, and a synchronous child that can't be reached are left alone.
+- **`require-proxy-trap-boolean-return`.** In a `switch`, the case tests after `default`
+  are not counted as always evaluated for `process.exit` calls, because the plugin doesn't
+  count them. `no-unsafe-promise-all-settled-values`, which shares the walk, stays at
+  163/163.
+- **`prefer-includes-over-repeated-comparisons`.** Only the outermost `||` (`===`/`==`) or
+  `&&` (`!==`/`!=`) chain is checked, flattened through parentheses. The subject is the one
+  reference that appears on a side of every comparison (it can't be `undefined`; `NaN`
+  never counts). The chain is skipped when an operand has an optional chain or a side
+  effect. With types, a union-typed subject is skipped, and so is a non-literal `boolean`
+  (narrowing). Loose operators need types and one primitive, string or number, shared by
+  every operand.
+- **Typed unicorn cases in the generator.** `gen-rule-oracle.mjs` runs unicorn cases that
+  set `project` or `projectService` as typed cases when `--fixtures` is given, forcing
+  `projectService: true`. `GEN_DEBUG=1` prints why cases are skipped. Three of the
+  prefer-includes cases lint `file.js`, which isn't in the fixtures tsconfig, so they are
+  skipped.
+- **`no-unnecessary-polyfills` data.** `unicorn_no_unnecessary_polyfills_data.txt` is
+  generated by `tests/oracle/gen/gen-polyfills-data.mjs` from core-js-compat 3.51.0 and
+  browserslist 4.29.4 (node-releases 2.0.60, caniuse-lite 1.0.30001819); the versions are
+  in its `V` line. It holds 544 features with their minimum versions per engine, 28
+  features that only entry points name, 3,398 core-js entry points (prefix-compressed, 1,027
+  distinct feature lists), the Node.js releases, and the released versions of the 13
+  browsers core-js maps to an engine. 142 KB, parsed once (`OnceLock`). To bump it, run the
+  script with `--tools` pointing at the new packages and regenerate the oracle data.
+- **How `no-unnecessary-polyfills` decides.** A feature is missing when some target engine
+  has no version for it, or a lower one. Proposals that are already stable (`esnext.x` next
+  to `es.x`) are never missing themselves. But they count as unavailable while `es.x` is
+  missing. Targets are the lowest version per core-js engine, after Browserslist's and
+  core-js's name aliases. A version without digits turns the rule off, as core-js's throw
+  does. Polyfill names follow the plugin's patterns over each feature's segments:
+  - an optional `polyfill-` or `mdn-polyfills/` prefix;
+  - `es` and digits, or the namespace;
+  - a delimiter (`.`, `-`, `.prototype.` or `/`) or none;
+  - the constructor and method, each written as-is or with the hyphens dropped;
+  - an optional `-polyfill` suffix.
+
+  Candidates are picked by token prefix, in the plugin's order, and the first match with the
+  fewest feature segments wins. The Browserslist subset is described in the rule's doc
+  comment. Without `targets` the rule finds them as the plugin does, through
+  `LintEnv.modules`: the nearest Browserslist config (`browserslist` / `.browserslistrc`
+  file or a `browserslist` key in package.json, `production` section else defaults; two in
+  one directory give none), else the nearest package.json's `engines`. Features are cached
+  per discovered target set (`tests/import_modules.rs` covers the lookup).
+
+Read to understand (not ported), eslint-plugin-unicorn 79.0.0:
+`rules/{no-multiple-promise-resolver-calls,require-proxy-trap-boolean-return,
+prefer-includes-over-repeated-comparisons,no-unnecessary-polyfills}.js`,
+`rules/utils/{is-branch-exit,comparison,is-logical-expression,is-same-reference}.js`,
+`rules/ast/literal.js`, and the rules' docs pages. core-js-compat 3.51.0: `compat.js`,
+`targets-parser.js`, `helpers.js` (how targets are reduced and versions compared).
+browserslist 4.29.4: `index.js` and `parse.js` (the node, browser version, range and
+comparison queries, and how clauses combine).

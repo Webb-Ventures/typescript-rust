@@ -312,7 +312,24 @@ pub(crate) fn process_exit_calls(cx: &Ctx<'_, '_>, func: NodeId) -> Vec<NodeId> 
             out.push(id);
         }
         kids.clear();
-        ast.for_each_child(id, |c| kids.push(c));
+        if let Node::Switch { disc, cases } = *ast.node(id) {
+            // Upstream counts a `case` test as a path end only before the `default`
+            // clause: a test after it is not seen as always evaluated.
+            kids.push(disc);
+            let mut seen_default = false;
+            for &c in ast.list(cases) {
+                if let Node::SwitchCase { test, body } = *ast.node(c) {
+                    match test {
+                        Some(t) if !seen_default => kids.push(t),
+                        Some(_) => {}
+                        None => seen_default = true,
+                    }
+                    kids.extend(ast.list(body).iter().copied());
+                }
+            }
+        } else {
+            ast.for_each_child(id, |c| kids.push(c));
+        }
         stack.extend(kids.iter().copied());
     }
     out.sort_unstable();

@@ -95,7 +95,7 @@ impl Glob {
     }
 }
 
-fn expand_braces(p: &str) -> Vec<String> {
+pub(crate) fn expand_braces(p: &str) -> Vec<String> {
     // Find the first top-level `{...}` with a comma.
     let b: Vec<char> = p.chars().collect();
     let mut i = 0;
