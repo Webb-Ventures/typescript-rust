@@ -385,7 +385,30 @@ Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/b
   are not offered (`f(a, b = |, c)` offers `a`).
 - Members: `o.|` and `o?.|` on a possibly undefined value list the defined value's members;
   a member whose name is not an identifier is offered as `["a b"]`, its edit replacing the
-  dot; after `?.` private names are not offered.
+  dot; after `?.` private names are not offered. A value whose type is a promise also
+  lists the awaited type's members, each inserting `(await x).m` and replacing from the
+  value's start (inside async functions and at the top of a module). `import("./m").|` in
+  a type lists the module's exports (types, and namespaces holding them).
+- Template holes: a `${|}` of a template literal completes like any expression (only a
+  `TemplateElement`, the literal text, blocks completion); a word that starts with a digit
+  (`1.5|`) is a number, not a member access.
+- Generic calls (`generic_context.rs`): an object literal argument of a call to a generic
+  signature (or one nested in such a literal through property values) also lists the
+  members of the "completions type": the declared parameter type with each type parameter
+  that another given argument decides kept as inferred and the rest at their constraint
+  (`unknown` without one); written type arguments add nothing. The contextual symbol wins
+  for names in both; when only the literal's own members are known the scope list is used.
+- Import statements (`definitions.rs`): `import |` and `import f|` offer `type` (nothing in
+  JavaScript); after a clause with no module yet (`import { a } |`, `import d |`, `import *
+  as ns |`) `from`; in a specifier list of an import without a module, `type` (not in
+  `import type {` or JavaScript).
+- JSDoc (`jsdoc_items.rs`): right after `@`, or where only blanks, `*` and `/` precede the
+  word on its line, tsc's 84 tag names; the name slot of `@param`/`@arg` offers the
+  documented function's parameters not yet documented; an unclosed `{` of a tag (not
+  `{@link`) offers the types in scope at the documented node (or the exports of `A.B.`);
+  a member slot of a nested type literal offers `readonly` once a name is typed;
+  `@import ... from "|"` offers module specifiers and `with { type: "|" }` the
+  `ImportAttributes` values.
 
 ## Quick info (`tsr/features/quick_info.rs`)
 
@@ -584,6 +607,28 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
   of `new this()` in those classes' static members, and `super` of `super(...)` calls made
   by constructors (arrows in between allowed, not other functions or methods) of classes
   extending one of them. `implements` does not count.
+- **Doc comment paths** (`doc_links.rs`): each name of a `{@link A.B#c}` (also
+  `{@linkcode}`, `{@linkplain}`), `@see A` / `@see {A}` and `@throws {A}` path counts as a
+  reference, and references, rename, definition and hover may start on one. After a `#` a
+  `.` ends the path. The first name resolves at the documented node (in a function, its
+  body's scope; for a property typed by a function type, that type's parameters), else as a
+  member of the enclosing class, interface or enum (an enum's members first); later names
+  are exports, then properties of the declared type, of the type (statics), then of the
+  `prototype`'s type (`C.prototype.m`, a property holding a class expression).
+- **String literals** (`string_refs.rs`, `tsc: tsc/internal/ls/findallreferences.go`,
+  `getReferencesForStringLiteral`): a string literal or substitution-free template that
+  names no symbol finds the literals of the same text whose type is the same: the
+  contextual type, the switched type for a `case` test, the other operand of an equality,
+  or, in a type, the type of the outermost type node around it (an alias's own type when
+  that node is the alias's body); a property signature's quoted name always matches. With
+  no type every literal of the text matches (not multi-line templates); with type
+  `string` none do. Lib and `node_modules` files are searched. Rename needs the type to be
+  a string literal type or a union of them (`tsc: tsc/internal/ls/rename.go`), or the
+  literal to be a quoted export name; edits exclude the quotes.
+- **JSX**: an intrinsic tag name (`<div>`, `</div>`) is the property of
+  `JSX.IntrinsicElements`; an attribute is the property of the props type the checker
+  checks the element against (`Ck::jsx_props_type`); an attribute that sets no prop is a
+  reference to itself alone, and renames alone.
 
 ## Signature help (`tsr/features/signature_site.rs`, `signature.rs`)
 
@@ -1018,15 +1063,15 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 1967 of 2516 tests at 5628954, lists the rest by cause:
+- Features (the fourslash oracle, 2085 of 2516 tests at 682d76b, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`arguments`, `import.meta`, `new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
   `Underscore.Iterator<T>`) and does not name a type through the alias it was imported by
-  (`a<string>` for `import a = require(..)`); JSX intrinsic attributes (`<form onSubmit>`)
-  have no symbol (the checker does not type JSX yet); references do not go back up from a
+  (`a<string>` for `import a = require(..)`); references do not go back up from a
   re-export to the declaration the way tsc does from some imports (`import boom from
-  "./d"` where `d` re-exports a renamed default), nor through JSDoc, `require` or `import()`.
+  "./d"` where `d` re-exports a renamed default), nor through JSDoc `@param`/`@import`,
+  `require` or import types.
   Completions: no accessibility filtering after `.` (private members are listed),
   auto-imports only from the project's own (non-`node_modules`) modules and never
   `default` exports. Signature help: none in JSX tags, no `... N more ...` truncation, no

@@ -150,6 +150,15 @@ pub(super) fn string_items(
         {
             module_items(cx, ck, fragment, ImportKind::RequireCall)
         }
+        // `with { type: "|" }`: the literals of that property of the global
+        // `ImportAttributes` interface.
+        Node::ImportAttribute { key, value } if value == child => {
+            let name = match ast.node(key) {
+                Node::Ident { name } | Node::StringLit { value: name } => ast.atom(*name),
+                _ => return None,
+            };
+            Some(import_attribute_items(ck, name))
+        }
         Node::Index { obj, index, .. } if index == child => {
             let t = ck.check_expr(Loc::new(file, obj));
             Some(property_items(ck, t, &[]))
@@ -318,6 +327,21 @@ fn key_text(ast: &Ast, key: NodeId) -> Option<String> {
 }
 
 /// String literal types the literal's contextual type allows.
+/// The string literals the global `ImportAttributes` interface allows for `key`.
+pub(super) fn import_attribute_items(ck: &mut Ck<'_, '_>, key: &str) -> Vec<Item> {
+    let Some(s) =
+        ck.c.global_symbol("ImportAttributes", ts_r_binder::meaning::TYPE)
+    else {
+        return Vec::new();
+    };
+    let t = ck.declared_type_of_symbol(s);
+    let Some(p) = ck.property_of_type(t, key) else {
+        return Vec::new();
+    };
+    let pt = ck.type_of_symbol(p);
+    literal_items(ck, pt, &[])
+}
+
 fn contextual_items(ck: &mut Ck<'_, '_>, lit: Loc) -> Vec<Item> {
     match ck.contextual_type(lit) {
         Some(t) => literal_items(ck, t, &[]),
@@ -1153,6 +1177,16 @@ impl Modules<'_> {
 }
 
 /// Completions for a module specifier being typed (`fragment`), written as `kind`.
+/// Module specifier completions for `fragment` as a static import names it (a JSDoc
+/// `@import ... from "|"`).
+pub(super) fn static_module_items(
+    cx: &Ctx<'_, '_>,
+    ck: &Ck<'_, '_>,
+    fragment: &str,
+) -> Option<Vec<Item>> {
+    module_items(cx, ck, fragment, ImportKind::Static)
+}
+
 fn module_items(
     cx: &Ctx<'_, '_>,
     ck: &Ck<'_, '_>,

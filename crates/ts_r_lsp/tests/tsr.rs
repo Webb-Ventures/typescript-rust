@@ -1587,6 +1587,154 @@ fn completion_in_import_and_export_clauses() {
     c.shutdown();
 }
 
+/// In a JSDoc comment: tag names after `@`, `@tag`s where a tag may start, the documented
+/// function's parameters not yet documented at a `@param` name, and types (or a namespace's
+/// types) inside a tag's braces; nothing in plain comment text.
+#[test]
+fn completion_in_jsdoc_comments() {
+    if !libs_present() {
+        return;
+    }
+    let text = "/**\n * @par\n * \n * @param b\n * @param \n * @returns {Sh}\n * @type {NS.}\n * some text \n */\n\
+                function f(a: number, b: string, c: Shape) {}\n\
+                interface Shape {}\n\
+                namespace NS { export interface Inner {} export const v = 1; }\n";
+    let env = Env::new(
+        "complete-jsdoc",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 1, 7)));
+    assert!(l.iter().any(|x| x == "param") && l.len() == 84, "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 3)));
+    assert!(l.iter().any(|x| x == "@returns"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 10)));
+    assert_eq!(l, ["a", "c"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 5, 15)));
+    assert!(l.iter().any(|x| x == "Shape"), "{l:?}");
+    assert!(!l.iter().any(|x| x == "f" || x == "a"), "{l:?}");
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 13)));
+    assert_eq!(l, ["Inner"]);
+    let r = result(&mut c, "textDocument/completion", at(&uc, 7, 13));
+    assert!(r.is_null(), "{r}");
+    c.shutdown();
+}
+
+/// An object literal in a generic call offers what the declared parameter allows beyond
+/// what was inferred from it (`T` replaced by its constraint), also in nested literals; a
+/// context made only of the literal's own members offers the names in scope.
+#[test]
+fn completion_in_object_literals_of_generic_calls() {
+    if !libs_present() {
+        return;
+    }
+    let text = "interface Opts { hello?: boolean; world?: boolean; deep?: { another?: boolean } }\n\
+                declare function bar<T extends Opts>(o?: Partial<T>): void;\n\
+                bar({ hello: true,  });\n\
+                bar({ deep: {  } });\n\
+                declare function f7<T>(o: T): void;\n\
+                const local = 1;\n\
+                f7({ l });\n";
+    let env = Env::new(
+        "complete-generic-literal",
+        &[("tsconfig.json", TSCONFIG), ("src/c.ts", text)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i["sortText"].as_str().unwrap_or("") < "15")
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 2, 18)));
+    assert_eq!(l, ["deep?", "world?"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 14)));
+    assert_eq!(l, ["another?"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 6, 6)));
+    assert!(l.iter().any(|x| x == "local"), "{l:?}");
+    c.shutdown();
+}
+
+/// A promise's awaited members in an async function (written `(await p).m`), `type` after
+/// `import` and `from` after a clause with no module, and `import("m").A.|` in types.
+#[test]
+fn completion_awaited_members_import_keywords_and_import_types() {
+    if !libs_present() {
+        return;
+    }
+    let m = "export namespace NS { export interface I {} export const v = 1; }\n";
+    let text = "async function f(p: Promise<string>) {\n  p.\n}\n\
+                type A = import(\"./m.js\").NS.;\n\
+                type B = typeof import(\"./m.js\").NS.;\n\
+                import {} \n";
+    let bodies = "async function g(p: Promise<string>, ok: boolean) {\n  if (ok) p.\n}\n\
+                  async function h(p: Promise<string>) {\n  const x = 1\n  p.\n}\n";
+    let env = Env::new(
+        "complete-await-import",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/m.ts", m),
+            ("src/c.ts", text),
+            ("src/d.ts", bodies),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/c.ts");
+    let uc = env.uri("src/c.ts");
+    let r = result(&mut c, "textDocument/completion", at(&uc, 1, 4));
+    let items = r["items"].as_array().cloned().unwrap_or_default();
+    assert!(items.iter().any(|i| i["label"] == "then"), "{r}");
+    let trim = items.iter().find(|i| i["label"] == "trim").expect("trim");
+    assert_eq!(trim["insertText"], "(await p).trim");
+    // The body of an `if` gets no `;` (it would end the body); a statement after one
+    // without a `;` does.
+    env.open(&mut c, "src/d.ts");
+    let ud = env.uri("src/d.ts");
+    for (line, ch, want) in [(1, 12, "(await p).trim"), (5, 4, ";(await p).trim")] {
+        let r = result(&mut c, "textDocument/completion", at(&ud, line, ch));
+        let items = r["items"].as_array().cloned().unwrap_or_default();
+        let trim = items.iter().find(|i| i["label"] == "trim").expect("trim");
+        assert_eq!(trim["insertText"], want, "{line}:{ch}");
+    }
+    let labels = |r: &Value| -> Vec<String> {
+        r["items"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|i| i["label"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 3, 29)));
+    assert_eq!(l, ["I"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 4, 36)));
+    assert_eq!(l, ["v"]);
+    let l = labels(&result(&mut c, "textDocument/completion", at(&uc, 5, 10)));
+    assert_eq!(l, ["from"]);
+    c.shutdown();
+}
+
 /// Review fixes for import clauses and type positions: a `}` in a comment does not close the
 /// clause, an unterminated quoted name before the cursor does not panic, and modules that
 /// re-export each other as namespaces are searched once each for a type.
@@ -3006,5 +3154,241 @@ fn definitions_of_calls_literals_and_ambient_modules() {
     assert_eq!(spans(&mut c, 15, 3), vec![k(14, 20, 14, 40)]);
     // `typeof this` goes to the `this` parameter.
     assert_eq!(spans(&mut c, 16, 38), vec![k(16, 11, 16, 15)]);
+    c.shutdown();
+}
+
+const DOC_LINKS: &str = "class C {
+    m() {}
+    /** {@link m} @see {C.prototype.m} {@link C#m} */
+    p() {}
+}
+enum E {
+    /** {@link Foo} */
+    Foo,
+}
+interface Foo { x: E.Foo }
+/** @throws {C} {@link C.
+";
+
+#[test]
+fn references_rename_hover_and_definition_in_doc_comment_links() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navlinks",
+        &[("tsconfig.json", TSCONFIG), ("src/l.ts", DOC_LINKS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/l.ts");
+    let u = env.uri("src/l.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let starts = |v: &Value| -> Vec<(u64, u64)> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        starts(&r)
+    };
+    // A bare member name, `C.prototype.m` and `C#m` all name the method, from the
+    // declaration or from a link.
+    let m = vec![(1, 4), (2, 15), (2, 36), (2, 48)];
+    assert_eq!(refs(&mut c, 1, 4), m);
+    assert_eq!(refs(&mut c, 2, 15), m);
+    // The class, in links and in an unterminated comment's `@throws` and `{@link C.`.
+    assert_eq!(
+        refs(&mut c, 0, 6),
+        vec![(0, 6), (2, 24), (2, 46), (10, 13), (10, 23)]
+    );
+    // In an enum, a link names the member before an outer type of the same name.
+    assert_eq!(refs(&mut c, 6, 15), vec![(6, 15), (7, 4), (9, 21)]);
+    assert!(hover_text(&mut c, &u, 2, 15).contains("(method) C.m(): void"));
+    let d = result(&mut c, "textDocument/definition", at(&u, 2, 48));
+    assert_eq!(starts(&d), vec![(1, 4)], "{d}");
+    let e = result(
+        &mut c,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": u}, "position": {"line": 2, "character": 36}, "newName": "k"}),
+    );
+    let mut lines: Vec<u64> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    lines.sort();
+    assert_eq!(lines, vec![1, 2, 2, 2], "{e}");
+    c.shutdown();
+}
+
+const STRING_REFS: &str = "type Options = \"one\" | \"two\";
+let o: Options = \"one\";
+const d: \"one\" = \"one\";
+var x = \"plain\";
+type T = \"this\";
+let t: T = \"this\";
+";
+
+#[test]
+fn references_and_rename_of_string_literal_types() {
+    if !libs_present() {
+        return;
+    }
+    let env = Env::new(
+        "navstrings",
+        &[
+            ("tsconfig.json", TSCONFIG),
+            ("src/s.ts", STRING_REFS),
+            ("src/e.ts", "const e: \"\\u006fne\" = \"\\u006fne\";\n"),
+        ],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/s.ts");
+    let u = env.uri("src/s.ts");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let starts = |v: &Value| -> Vec<(u64, u64)> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        starts(&r)
+    };
+    // Literals of the same union type, not the `"one"` of another type.
+    assert_eq!(refs(&mut c, 0, 16), vec![(0, 16), (1, 18)]);
+    // The `"one"` type's literals here and, written with escapes, in e.ts (its line 0).
+    let mut one = refs(&mut c, 2, 18);
+    one.sort();
+    assert_eq!(one, vec![(0, 10), (0, 23), (2, 10), (2, 18)]);
+    // A literal without a contextual type is found alone.
+    assert_eq!(refs(&mut c, 3, 9), vec![(3, 9)]);
+    let rename = |c: &mut ScriptedClient, line: u32, ch: u32| -> Value {
+        result(
+            c,
+            "textDocument/rename",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch}, "newName": "uno"}),
+        )
+    };
+    let e = rename(&mut c, 1, 18);
+    let mut lines: Vec<u64> = e["changes"][u.as_str()]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["range"]["start"]["line"].as_u64().unwrap())
+        .collect();
+    lines.sort();
+    assert_eq!(lines, vec![0, 1], "{e}");
+    // A plain string is no literal type: nothing to rename.
+    assert!(rename(&mut c, 3, 9).is_null());
+    // Literals written with escapes are read by their value, in any file.
+    env.open(&mut c, "src/e.ts");
+    let ue = env.uri("src/e.ts");
+    let r = result(
+        &mut c,
+        "textDocument/references",
+        json!({"textDocument": {"uri": ue}, "position": {"line": 0, "character": 10},
+               "context": {"includeDeclaration": true}}),
+    );
+    let mut got: Vec<(bool, u64, u64)> = r
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            let s = &l["range"]["start"];
+            (
+                l["uri"].as_str().unwrap().ends_with("e.ts"),
+                s["line"].as_u64().unwrap(),
+                s["character"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(false, 2, 10), (false, 2, 18), (true, 0, 10), (true, 0, 23)],
+        "{r}"
+    );
+    // A literal whose text is `this` is renamed like any other.
+    let e = rename(&mut c, 5, 12);
+    let n = e["changes"][u.as_str()].as_array().map_or(0, Vec::len);
+    assert_eq!(n, 2, "{e}");
+    c.shutdown();
+}
+
+const JSX_REFS: &str = "declare namespace JSX {
+    interface Element { }
+    interface IntrinsicElements { div: { name?: string } }
+}
+const x = <div name=\"a\" wrong />;
+";
+
+#[test]
+fn references_of_intrinsic_tags_and_jsx_attributes() {
+    if !libs_present() {
+        return;
+    }
+    let tsconfig = r#"{"compilerOptions": {"strict": true, "jsx": "preserve", "noEmit": true}, "include": ["src"]}"#;
+    let env = Env::new(
+        "navjsx",
+        &[("tsconfig.json", tsconfig), ("src/x.tsx", JSX_REFS)],
+    );
+    let mut c = env.lsp("w1");
+    env.open(&mut c, "src/x.tsx");
+    let u = env.uri("src/x.tsx");
+    let _ = diags_for(&mut c, &u, |_| true);
+    let refs = |c: &mut ScriptedClient, line: u32, ch: u32| -> Vec<(u64, u64)> {
+        let r = result(
+            c,
+            "textDocument/references",
+            json!({"textDocument": {"uri": u}, "position": {"line": line, "character": ch},
+                   "context": {"includeDeclaration": true}}),
+        );
+        r.as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let s = &l["range"]["start"];
+                (
+                    s["line"].as_u64().unwrap(),
+                    s["character"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    // The tag is `JSX.IntrinsicElements`'s property; the attribute is its props' property.
+    assert_eq!(refs(&mut c, 4, 11), vec![(2, 34), (4, 11)]);
+    assert_eq!(refs(&mut c, 2, 34), vec![(2, 34), (4, 11)]);
+    assert_eq!(refs(&mut c, 4, 15), vec![(2, 41), (4, 15)]);
+    // An attribute that sets no prop is found alone.
+    assert_eq!(refs(&mut c, 4, 24), vec![(4, 24)]);
     c.shutdown();
 }
