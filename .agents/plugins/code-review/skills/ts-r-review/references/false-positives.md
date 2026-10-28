@@ -31,6 +31,18 @@ Each of these was posted at confidence 90-100 and each matched the oracle:
 | tsc-rust #72 | `this` aliases must not narrow across `function inner(this: ...)` | tsc 7.0.2 `--strict` accepts both the function and the arrow form |
 | tsc-rust #93 | `number[] & { tag: E.A } & { tag: 1 }` must stay iterable | tsc 7.0.2 reports TS2488 (`--lib es2015 --target es2015`, strict or not) |
 | typescript-rust #39 | `/(?<a>x)/u` must not report TS1514 ("the base validator accepted it") | tsc 7.0.2 reports TS1514 at the backslash; escapes are accepted later in the name. The bot's fix (4362d15) was reverted in 3cd16f3 |
+| typescript-rust #53 | Bare-specifier completions must still look up package.json `imports` once dependencies are listed | tsc 7 skips it too: `importsLookup` is inside `if !foundGlobal` (string_completions.go) |
+| typescript-rust #56 | The worker prelude `import "/@vite/env"\n;\n` is a stray line (partly right) | It is Vite's own text (`injectEnv + ';\n'`, plugins/worker.ts); only the source-map shift for a multi-line prelude was wrong |
+| typescript-rust #60 | `jsdoc/require-returns` breaks a one-line `/** Brief. */` block | eslint-plugin-jsdoc 63.3.3 under ESLint 10.12.0 writes the same `" * @returns\n/** Brief. */..."` (`--fix-dry-run`) |
+| typescript-rust #62 | Implicit `this.` completions must hide private members | tsc 7 adds the this-type's apparent properties unfiltered (completions.go, `symbolOriginInfoKindThisType`) |
+| typescript-rust #62 | Hover on `v["m"](x)` must show the instantiated call signature | tsc 7's `getCallOrNewExpression` (hover.go) climbs only from property-access names, so it shows the uninstantiated one |
+| typescript-rust #76 | `--keep-names` must hoist `__name(f, "f")` to the top of the scope | esbuild 0.28.2 places it right after the declaration (`TestKeepNamesAllForms`, `TestKeepNamesTreeShaking` snapshots) |
+| typescript-rust #76 | `?worker_file&type=ignore` for a `/* @vite-ignore */` worker is a wrong URL (partly right) | It is Vite's own URL (workerImportMetaUrl.ts `getWorkerType`); only the env prelude had to be inline |
+| typescript-rust #77 | Bind `import<A>("m")` type arguments to fix a stray TS2304 (partly right) | tsc 7.0.2 never resolves them (only TS1326); the fix skips them in the checker. A bare `import<T>` still gets TS2304 |
+| typescript-rust #82 | Path externals must be relative to the chunk's own directory | esbuild 0.28.2 writes them relative to the output directory (observed; `path_externals_match_after_resolution`) |
+| typescript-rust #82 | `--inject` must inject names from a plain `export * from` (partly right) | esbuild 0.28.2 leaves them global (observed; `injected_star_reexports_inject_nothing`); only the doc was wrong |
+| typescript-rust #86 | `.d.ts` emit must not treat `module.exports = v` as an export when a local `module` exists | tsc 7.0.2 writes `declare const _exports = 1; export = _exports;` (oracle run in this review) |
+| typescript-rust #94 | `rewire_type` must keep a `- description` on a collapsed multi-line type | eslint-plugin-jsdoc 63.3.3 drops it too (`rewireByParsedType` moves only the name); fixes match ESLint byte for byte |
 
 The #39 fix passed all 266 tests of the crates it touched and left the checker conformance run
 unchanged (12,350 exact before and after): none of tsc's baselines has that input. Only running
