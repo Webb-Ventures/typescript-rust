@@ -772,9 +772,15 @@ fn entity_expr(tx: &mut Tx, n: NodeId, at: u32) -> NodeId {
         _ => {
             let name = tx.name(n).to_owned();
             let id = tx.ident(&name, at);
+            // The name's own binding when scope analysis resolved it (a local class
+            // shadowing an import is not the import), else the module's.
             if tx.opts.is_cjs()
-                && let Some(atom) = tx.ast.atoms.find(&name)
-                && let Some(b) = tx.sc.module_binding(atom)
+                && let Some(b) = tx.sc.binding_of_ref(n).or_else(|| {
+                    tx.ast
+                        .atoms
+                        .find(&name)
+                        .and_then(|a| tx.sc.module_binding(a))
+                })
             {
                 crate::cjs::rewrite_ref(tx, id, b);
                 tx.cjs.detached.remove(&id);
@@ -1035,7 +1041,11 @@ fn syntactic_type_ref(tx: &Tx, n: NodeId) -> Serial {
         return obj();
     };
     let text = tx.ast.atom(name).to_owned();
-    match tx.sc.module_binding(name) {
+    match tx
+        .sc
+        .binding_of_ref(n)
+        .or_else(|| tx.sc.module_binding(name))
+    {
         Some(b) => {
             let bnd = tx.sc.binding(b);
             match bnd.kind {

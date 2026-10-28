@@ -164,8 +164,8 @@ fn cache_id_of(options: &TransformOptions) -> String {
 /// Loaded tsconfig files, shared by every clone of a [`TsTransform`].
 struct Configs {
     fs: Arc<dyn FileSystem>,
-    /// Directory → its nearest `tsconfig.json` (`None`: none up to the root).
-    nearest: Mutex<FxHashMap<String, Option<String>>>,
+    /// Directory → its nearest `tsconfig.json`, revalidated on every use.
+    nearest: Mutex<FxHashMap<String, Nearest>>,
     /// Config path → the parsed config, reloaded when one of its files changes.
     loaded: Mutex<FxHashMap<String, Arc<Loaded>>>,
 }
@@ -179,16 +179,54 @@ struct Loaded {
     files: Vec<String>,
 }
 
+/// The result of a nearest-`tsconfig.json` search from a directory.
+#[derive(Clone, Default)]
+struct Nearest {
+    /// The config found (`None`: none up to the root).
+    found: Option<String>,
+    /// The candidates nearer than it (or all of them), which did not exist: creating one
+    /// changes the answer.
+    missing: Vec<String>,
+}
+
+/// The config `file` is transformed with and every config file the choice read or looked
+/// for: when one of them appears, disappears or changes, the choice may change.
+struct Selection {
+    config: Option<Arc<Loaded>>,
+    deps: Vec<String>,
+}
+
 impl Configs {
-    fn nearest(&self, dir: &str) -> Option<String> {
-        if let Some(hit) = self.nearest.lock().ok().and_then(|m| m.get(dir).cloned()) {
+    /// The nearest `tsconfig.json` from `dir` up. A cached search is reused only while its
+    /// config still exists and none of the nearer candidates has appeared.
+    fn nearest(&self, dir: &str) -> Nearest {
+        let cached = self.nearest.lock().ok().and_then(|m| m.get(dir).cloned());
+        if let Some(hit) = cached
+            && hit.found.as_deref().is_none_or(|f| self.fs.file_exists(f))
+            && hit.missing.iter().all(|m| !self.fs.file_exists(m))
+        {
             return hit;
         }
-        let found = ts_r_config::find_config_file(&*self.fs, dir, "tsconfig.json");
-        if let Ok(mut m) = self.nearest.lock() {
-            m.insert(dir.to_owned(), found.clone());
+        // tsconfck's walk (`find_config_file`), recording the candidates that are missing.
+        let mut n = Nearest::default();
+        let mut dir_now = ts_r_config::path::normalize(dir);
+        loop {
+            let candidate = ts_r_config::path::combine(&dir_now, "tsconfig.json");
+            if self.fs.file_exists(&candidate) {
+                n.found = Some(candidate);
+                break;
+            }
+            n.missing.push(candidate);
+            let parent = ts_r_config::path::directory_of(&dir_now).to_owned();
+            if parent == dir_now || parent.is_empty() {
+                break;
+            }
+            dir_now = parent;
         }
-        found
+        if let Ok(mut m) = self.nearest.lock() {
+            m.insert(dir.to_owned(), n.clone());
+        }
+        n
     }
 
     /// The parsed config at `path` (cached; re-read when it or a config it extends changed).
@@ -241,19 +279,56 @@ impl Configs {
     /// The config `file` is transformed with (tsconfck's `parse`: nearest, then a
     /// solution's reference that includes the file).
     fn for_file(&self, file: &str) -> Option<Arc<Loaded>> {
+        self.select(file).config
+    }
+
+    /// [`Configs::for_file`] with the files the choice depends on: the missing nearer
+    /// candidates, the nearest config and what it extends, and each reference consulted
+    /// (and what it extends) up to the one chosen.
+    fn select(&self, file: &str) -> Selection {
         let dir = ts_r_config::path::directory_of(file);
-        let config = self.load(&self.nearest(dir)?)?;
+        let nearest = self.nearest(dir);
+        let mut deps = nearest.missing;
+        let Some(path) = nearest.found else {
+            return Selection { config: None, deps };
+        };
+        let Some(config) = self.load(&path) else {
+            deps.push(path);
+            return Selection { config: None, deps };
+        };
+        let add = |deps: &mut Vec<String>, c: &Loaded| {
+            for (p, _) in &c.stamps {
+                if !deps.contains(p) {
+                    deps.push(p.clone());
+                }
+            }
+        };
+        add(&mut deps, &config);
         if config.parsed.references.is_empty() || config.includes(file, &*self.fs) {
-            return Some(config);
+            return Selection {
+                config: Some(config),
+                deps,
+            };
         }
         for r in &config.parsed.references {
-            if let Some(c) = self.load(&r.config_path)
-                && c.includes(file, &*self.fs)
-            {
-                return Some(c);
+            match self.load(&r.config_path) {
+                Some(c) => {
+                    add(&mut deps, &c);
+                    if c.includes(file, &*self.fs) {
+                        return Selection {
+                            config: Some(c),
+                            deps,
+                        };
+                    }
+                }
+                None if !deps.contains(&r.config_path) => deps.push(r.config_path.clone()),
+                None => {}
             }
         }
-        Some(config)
+        Selection {
+            config: Some(config),
+            deps,
+        }
     }
 }
 
@@ -304,15 +379,18 @@ impl Transform for TsTransform {
     }
 
     fn deps(&self, input: &TransformInput<'_>) -> Vec<PathBuf> {
-        // The file's tsconfig (and what it extends) decides its options.
+        // The file's tsconfig (and what it extends) decides its options; so do the configs
+        // consulted to choose it, and nearer ones that would be chosen if they appeared.
         let Some(configs) = &self.configs else {
             return Vec::new();
         };
         let file = ts_r_config::path::normalize_slashes(&input.path.to_string_lossy());
         configs
-            .for_file(&file)
-            .map(|c| c.stamps.iter().map(|(p, _)| PathBuf::from(p)).collect())
-            .unwrap_or_default()
+            .select(&file)
+            .deps
+            .into_iter()
+            .map(PathBuf::from)
+            .collect()
     }
 
     fn transform(&self, input: &TransformInput<'_>) -> Result<TransformOutput, TransformError> {
@@ -473,6 +551,120 @@ mod tests {
         // Not included by any reference: the solution config itself (no options).
         let other = run_with(&t, "/s/other.ts", TYPE_ONLY_USE);
         assert!(!other.contains("not-used-type"), "{other}");
+    }
+
+    /// A file system whose files can change under the transform (stamps move with them).
+    #[derive(Default)]
+    struct EditFs {
+        files: Mutex<std::collections::BTreeMap<String, (String, u128)>>,
+        version: std::sync::atomic::AtomicU64,
+    }
+
+    impl EditFs {
+        fn write(&self, path: &str, text: &str) {
+            let v = self
+                .version
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u128;
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_owned(), (text.to_owned(), v + 1));
+        }
+        fn remove(&self, path: &str) {
+            self.files.lock().unwrap().remove(path);
+        }
+    }
+
+    impl FileSystem for EditFs {
+        fn read_file(&self, path: &str) -> Option<String> {
+            self.files.lock().unwrap().get(path).map(|f| f.0.clone())
+        }
+        fn file_exists(&self, path: &str) -> bool {
+            self.files.lock().unwrap().contains_key(path)
+        }
+        fn directory_exists(&self, path: &str) -> bool {
+            let dir = format!("{}/", path.trim_end_matches('/'));
+            self.files
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|k| k.starts_with(&dir))
+        }
+        fn read_dir(&self, _path: &str) -> Vec<ts_r_config::DirEntry> {
+            Vec::new()
+        }
+        fn realpath(&self, path: &str) -> String {
+            path.to_owned()
+        }
+        fn case_sensitive(&self) -> bool {
+            true
+        }
+        fn stamp(&self, path: &str) -> Option<FileStamp> {
+            self.files.lock().unwrap().get(path).map(|f| FileStamp {
+                len: f.0.len() as u64,
+                modified_ns: f.1,
+            })
+        }
+    }
+
+    fn input(path: &str) -> TransformInput<'_> {
+        TransformInput {
+            path: Path::new(path),
+            id: path.trim_start_matches('/'),
+            source: "",
+            mode: Mode::Dev,
+        }
+    }
+
+    const FIELD: &str = "export class C { y = 1; }\n";
+
+    #[test]
+    fn a_nearer_tsconfig_that_appears_or_goes_changes_the_choice() {
+        let fs = Arc::new(EditFs::default());
+        fs.write(
+            "/p/tsconfig.json",
+            r#"{ "compilerOptions": { "useDefineForClassFields": false } }"#,
+        );
+        fs.write("/p/nested/tsconfig.json", "{}");
+        let t = TsTransform::for_root_with_fs(Path::new("/p"), fs.clone());
+        assert!(!run_with(&t, "/p/nested/main.ts", FIELD).contains("this.y = 1"));
+        // Deleted: the parent's config applies again, and the missing file stays a dep.
+        fs.remove("/p/nested/tsconfig.json");
+        assert!(run_with(&t, "/p/nested/main.ts", FIELD).contains("this.y = 1"));
+        let deps = t.deps(&input("/p/nested/main.ts"));
+        assert_eq!(
+            deps,
+            [
+                PathBuf::from("/p/nested/tsconfig.json"),
+                PathBuf::from("/p/tsconfig.json")
+            ]
+        );
+        // Created again: the nearer one wins.
+        fs.write("/p/nested/tsconfig.json", "{}");
+        assert!(!run_with(&t, "/p/nested/main.ts", FIELD).contains("this.y = 1"));
+    }
+
+    #[test]
+    fn every_reference_consulted_is_a_dep() {
+        let fs = Arc::new(EditFs::default());
+        fs.write(
+            "/s/tsconfig.json",
+            r#"{ "files": [], "references": [{ "path": "./a.json" }, { "path": "./b.json" }] }"#,
+        );
+        fs.write("/s/a.json", r#"{ "include": ["other"] }"#);
+        fs.write(
+            "/s/b.json",
+            r#"{ "compilerOptions": { "verbatimModuleSyntax": true }, "include": ["src"] }"#,
+        );
+        let t = TsTransform::for_root_with_fs(Path::new("/s"), fs.clone());
+        assert!(run_with(&t, "/s/src/x.ts", TYPE_ONLY_USE).contains("not-used-type"));
+        let deps = t.deps(&input("/s/src/x.ts"));
+        for d in ["/s/tsconfig.json", "/s/a.json", "/s/b.json"] {
+            assert!(deps.contains(&PathBuf::from(d)), "{d}: {deps:?}");
+        }
+        // `a.json` now includes the file and comes first: it is chosen.
+        fs.write("/s/a.json", r#"{ "include": ["src"] }"#);
+        assert!(!run_with(&t, "/s/src/x.ts", TYPE_ONLY_USE).contains("not-used-type"));
     }
 
     #[test]

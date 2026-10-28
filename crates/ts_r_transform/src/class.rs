@@ -312,29 +312,37 @@ fn lower_accessors_for(tx: &Tx) -> bool {
 /// Strips types and lowers fields of a class in place. Decorator lists are kept (their
 /// expressions transformed) for the decorator transforms.
 pub(crate) fn class_body(tx: &mut Tx, id: NodeId) {
+    let Some(capture) = class_body_detached(tx, id) else {
+        return;
+    };
+    let at = tx.at(id);
+    if tx.kind(id) == NodeKind::ClassExpr {
+        // `(_c = () => { ... }, class { ... })`
+        let class = crate::builder::clone_node(tx.ast, id);
+        let seq = tx.seq(&[capture, class], at);
+        let paren = tx.paren(seq, at);
+        crate::builder::replace(tx.ast, id, paren);
+    } else {
+        // `_c = () => { ... };` before the declaration (`class_decl`).
+        let s = tx.expr_stmt(capture, at);
+        tx.class_pre_stmts.push(s);
+    }
+}
+
+/// [`class_body`], but the class stays where it is and the `_c = () => { ... }` capture of
+/// its computed keys, which must run before it, is returned: the TC39 decorator transform
+/// keeps working on the class and runs the capture in its IIFE, next to the temporaries
+/// it assigns.
+pub(crate) fn class_body_detached(tx: &mut Tx, id: NodeId) -> Option<NodeId> {
     // Generated storage names for computed `accessor` keys are numbered per class.
     let saved = std::mem::take(&mut tx.class_storage_count);
+    let saved_names = std::mem::take(&mut tx.class_storage_names);
     let saved_capture = tx.class_key_capture.take();
     class_body_inner(tx, id);
     tx.class_storage_count = saved;
+    tx.class_storage_names = saved_names;
     let capture = std::mem::replace(&mut tx.class_key_capture, saved_capture);
-    if let Some((c, capture)) = capture
-        && c == id
-    {
-        if tx.kind(id) == NodeKind::ClassExpr {
-            // `(_c = () => { ... }, class { ... })`
-            let at = tx.at(id);
-            let class = crate::builder::clone_node(tx.ast, id);
-            let seq = tx.seq(&[capture, class], at);
-            let paren = tx.paren(seq, at);
-            crate::builder::replace(tx.ast, id, paren);
-        } else {
-            // `_c = () => { ... };` before the declaration (`class_decl`).
-            let at = tx.at(id);
-            let s = tx.expr_stmt(capture, at);
-            tx.class_pre_stmts.push(s);
-        }
-    }
+    capture.and_then(|(c, capture)| (c == id).then_some(capture))
 }
 
 /// `v` of a synthesized `__runInitializers(this, _x_initializers, v)`.
@@ -1047,41 +1055,54 @@ pub(crate) fn is_literal(tx: &Tx, id: NodeId) -> bool {
 /// `_b_...` (numbered per class from ES2022, across the file below it) otherwise
 /// (observed, tsc 7.0.2 `autoAccessor5`, `autoAccessor10`).
 fn accessor_storage(tx: &mut Tx, key: NodeId, _key_temp: Option<ts_r_ast::Atom>) -> ts_r_ast::Atom {
+    // Never a private name of the source or a storage this class already has
+    // (`accessor _a` and `accessor [k]` would both be `#_a_accessor_storage`).
+    let taken = source_private_names(tx);
+    let used = |tx: &mut Tx, base: &str| {
+        let a = tx.ast.intern(&format!("{base}_accessor_storage"));
+        taken.contains(&a) || tx.class_storage_names.contains(&a)
+    };
+    let letter = |i: u32| {
+        if i < 26 {
+            format!("_{}", (b'a' + i as u8) as char)
+        } else {
+            format!("_{}", i - 26)
+        }
+    };
     let base = match tx.n(key) {
         Node::Ident { name } | Node::PrivateName { name } => {
             let n = tx.ast.atom(name).to_owned();
-            let taken = source_private_names(tx);
             let mut cand = n.clone();
             let mut i = 0;
-            while taken.contains(&tx.ast.intern(&format!("{cand}_accessor_storage"))) {
+            while used(tx, &cand) {
                 i += 1;
                 cand = format!("{n}_{i}");
             }
-            tx.source_private_names = Some(taken);
             cand
         }
-        _ if tx.opts.target >= ts_r_config::ScriptTarget::ES2022 => {
+        _ if tx.opts.target >= ts_r_config::ScriptTarget::ES2022 => loop {
             let i = tx.class_storage_count;
             tx.class_storage_count += 1;
-            if i < 26 {
-                format!("_{}", (b'a' + i as u8) as char)
-            } else {
-                format!("_{}", i - 26)
+            let cand = letter(i);
+            if !used(tx, &cand) {
+                break cand;
             }
-        }
-        _ => {
-            // The storage becomes a `WeakMap` named after it; the generated names are
-            // counted across the file and take no temporary (observed).
+        },
+        // The storage becomes a `WeakMap` named after it; the generated names are counted
+        // across the file and take no temporary (observed).
+        _ => loop {
             let i = tx.storage_count;
             tx.storage_count += 1;
-            if i < 26 {
-                format!("_{}", (b'a' + i as u8) as char)
-            } else {
-                format!("_{}", i - 26)
+            let cand = letter(i);
+            if !used(tx, &cand) {
+                break cand;
             }
-        }
+        },
     };
-    tx.ast.intern(&format!("{base}_accessor_storage"))
+    tx.source_private_names = Some(taken);
+    let a = tx.ast.intern(&format!("{base}_accessor_storage"));
+    tx.class_storage_names.push(a);
+    a
 }
 
 /// The private names the parser made (taken out of `tx`; the caller puts it back).

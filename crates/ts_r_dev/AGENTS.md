@@ -143,7 +143,8 @@ from the documented plugin API (no Vite code).
 `GuardTransform` wraps the TS transform: files importing `@ts-r.dev/guard` are expanded by
 `ts_r_guard::Expander` first, validators inlined per file exactly as in `ts-r-run` (record
 0007); guard errors (TSR1501, ...) go to the error overlay with their location. Cache id
-suffix `+ts-r-guard/1/<explain>/<max-depth>/<max-validator-kb>` plus `/<Type>=<module>#<export>` per refinement. `Transform::deps` reports the program's other sources (the files
+suffix `+ts-r-guard/1/<explain>/<max-depth>/<max-validator-kb>` plus `/<Type>=<module>#<export>` per refinement. `Transform::deps` reports the TS transform's own deps first (the file's tsconfig
+chain, `ts_r_transform::hmr`), then the program's other sources (the files
 the validators were generated from), so editing only a type re-emits and hot-updates every
 module that parses it. The expansion `deps` computes is memoized per path and source hash and
 handed to the `transform` that follows (one expansion per change); when the source is

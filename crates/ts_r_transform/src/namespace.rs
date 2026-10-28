@@ -14,7 +14,7 @@
 //! to `N.a` (see `Tx::ident_ref`). Non-instantiated namespaces (types only) are erased.
 
 use rustc_hash::FxHashMap;
-use ts_r_ast::{Atom, Modifiers, ModuleKind, Node, NodeId, NodeKind, VarKind};
+use ts_r_ast::{Atom, Modifiers, ModuleKind, Node, NodeId, NodeKind, NodeList, VarKind};
 
 use crate::builder::Build;
 use crate::scope::{BindingId, BindingKind, ScopeKind};
@@ -192,6 +192,16 @@ fn emit(
                 tx.map_range(prop, name_span);
             }
             rhs = tx.assign(em, rhs, at);
+            // `export { N as A }` too: `exports.A = exports.N = N = {}`.
+            if idx == 0 {
+                for alias in crate::cjs::list_aliases(tx, name_atom) {
+                    if alias != name {
+                        let e = tx.ident("exports", at);
+                        let em = tx.member_or_index(e, &alias, at);
+                        rhs = tx.assign(em, rhs, at);
+                    }
+                }
+            }
         } else if top_level && idx == 0 && tx.opts.is_cjs() {
             for alias in crate::cjs::list_aliases(tx, name_atom) {
                 let e = tx.ident("exports", at);
@@ -238,23 +248,22 @@ fn param_name(tx: &mut Tx, scope: u32, name_atom: Atom, name: &str) -> Atom {
         .unwrap_or_default();
     let declared = candidates.into_iter().any(|b| {
         let binding = &tx.sc.bindings[b as usize];
-        if binding.kind == BindingKind::Namespace && !is_instantiated_ns(tx, b) {
-            return false;
-        }
-        // Inside the body: the binding's scope is `scope` or nested in it.
+        // Inside the body: the binding's scope is `scope` or nested in it. Checked first:
+        // whether a namespace is instantiated scans every namespace body.
         let mut s = Some(binding.scope);
         let mut steps = 0usize;
-        while let Some(cur) = s {
+        let inside = loop {
+            let Some(cur) = s else { break false };
             if cur == scope {
-                return true;
+                break true;
             }
             steps += 1;
             if steps > tx.sc.scopes.len() {
-                return false;
+                break false;
             }
             s = tx.sc.scopes.get(cur as usize).and_then(|sc| sc.parent);
-        }
-        false
+        };
+        inside && (binding.kind != BindingKind::Namespace || is_instantiated_ns(tx, b))
     });
     if declared {
         tx.fresh(name, true)
@@ -958,8 +967,7 @@ pub(crate) fn entity_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
     let Node::Program { stmts } = tx.n(tx.ast.root) else {
         return None;
     };
-    let top: Vec<NodeId> = tx.ast.list(stmts).to_vec();
-    member_is_value(tx, &top, root, &path, 0, false)
+    member_is_value(tx, stmts, root, &path, 0, false)
 }
 
 /// [`entity_is_value`] with the root resolved by scope analysis: a name declared in an
@@ -1002,8 +1010,7 @@ pub(crate) fn alias_target_is_value(tx: &Tx, entity: NodeId) -> Option<bool> {
             let Node::ModuleBlock { stmts } = tx.n(body) else {
                 return None;
             };
-            let stmts: Vec<NodeId> = tx.ast.list(stmts).to_vec();
-            member_is_value(tx, &stmts, root, &path, 0, false)
+            member_is_value(tx, stmts, root, &path, 0, false)
         }
         _ => None,
     }
@@ -1023,11 +1030,72 @@ pub(crate) fn export_assignment_elided(tx: &Tx, stmt: NodeId) -> bool {
         && entity_is_value(tx, expr) == Some(false)
 }
 
-/// Whether `name` (then `rest`) declared among `stmts` is a value. `ambient`: the
-/// statements are a `declare namespace`'s body, where every member is exported.
+/// Name → the statements of one list that may declare it ([`declarations`]).
+pub(crate) type DeclIndex = std::rc::Rc<FxHashMap<Atom, Vec<NodeId>>>;
+
+/// The statements of `list` that may declare each name (variables, functions, classes,
+/// enums, import aliases and imports, interfaces, type aliases, a namespace's first
+/// segment), in order; built once per list.
+fn declarations(tx: &Tx, list: NodeList) -> DeclIndex {
+    if let Some(hit) = tx.decl_index.borrow().get(&list) {
+        return hit.clone();
+    }
+    let mut index: FxHashMap<Atom, Vec<NodeId>> = FxHashMap::default();
+    let add = |index: &mut FxHashMap<Atom, Vec<NodeId>>, id: NodeId, s: NodeId| {
+        if let Node::Ident { name } = tx.n(id) {
+            let v = index.entry(name).or_default();
+            if v.last() != Some(&s) {
+                v.push(s);
+            }
+        }
+    };
+    for &s in tx.ast.list(list) {
+        match tx.n(s) {
+            Node::VarDecl { decls, .. } => {
+                for &d in tx.ast.list(decls) {
+                    if let Node::VarDeclarator { name, .. } = tx.n(d) {
+                        add(&mut index, name, s);
+                    }
+                }
+            }
+            Node::FunctionDecl { name: Some(n), .. } | Node::ClassDecl { name: Some(n), .. } => {
+                add(&mut index, n, s)
+            }
+            Node::Enum { name: n, .. }
+            | Node::ImportEquals { name: n, .. }
+            | Node::Interface { name: n, .. }
+            | Node::TypeAlias { name: n, .. } => add(&mut index, n, s),
+            Node::ImportDecl { specifiers, .. } => {
+                for &sp in tx.ast.list(specifiers) {
+                    if let Node::ImportSpecifier { local, .. }
+                    | Node::ImportDefaultSpecifier { local }
+                    | Node::ImportNamespaceSpecifier { local } = tx.n(sp)
+                    {
+                        add(&mut index, local, s);
+                    }
+                }
+            }
+            Node::Module { name, .. } => {
+                let mut first = name;
+                while let Node::QualifiedName { left, .. } = tx.n(first) {
+                    first = left;
+                }
+                add(&mut index, first, s);
+            }
+            _ => {}
+        }
+    }
+    let index = std::rc::Rc::new(index);
+    tx.decl_index.borrow_mut().insert(list, index.clone());
+    index
+}
+
+/// Whether `name` (then `rest`) declared among the statements of `list` is a value.
+/// `ambient`: the statements are a `declare namespace`'s body, where every member is
+/// exported.
 fn member_is_value(
     tx: &Tx,
-    stmts: &[NodeId],
+    list: NodeList,
     name: Atom,
     rest: &[NodeId],
     depth: u32,
@@ -1038,6 +1106,8 @@ fn member_is_value(
     }
     let mut namespaces = Vec::new();
     let mut found_type = false;
+    let index = declarations(tx, list);
+    let stmts: &[NodeId] = index.get(&name).map_or(&[], Vec::as_slice);
     for &s in stmts {
         let n = tx.n(s);
         let mods = n.modifiers();
@@ -1132,15 +1202,14 @@ fn member_is_value(
             i += 1;
         }
         let Some(body) = body else { continue };
-        let Node::ModuleBlock { stmts } = tx.n(*body) else {
+        let Node::ModuleBlock { stmts: inner } = tx.n(*body) else {
             continue;
         };
-        let inner: Vec<NodeId> = tx.ast.list(stmts).to_vec();
         if i < segs.len() {
             // `rest` ends inside the segments (`A.B` of `namespace A.B.C`): `A.B` holds
             // namespace `C`, so it is a value when this body is.
             if rest.len() < i {
-                if body_has_value(tx, &inner, depth) {
+                if body_has_value(tx, tx.ast.list(inner), depth) {
                     return Some(true);
                 }
                 continue;
@@ -1151,7 +1220,7 @@ fn member_is_value(
         let rest_here = &rest[i - 1..];
         match rest_here.split_first() {
             None => {
-                if body_has_value(tx, &inner, depth) {
+                if body_has_value(tx, tx.ast.list(inner), depth) {
                     return Some(true);
                 }
             }
@@ -1160,7 +1229,7 @@ fn member_is_value(
                     any_unknown = true;
                     continue;
                 };
-                match member_is_value(tx, &inner, next, more, depth + 1, *amb) {
+                match member_is_value(tx, inner, next, more, depth + 1, *amb) {
                     Some(true) => return Some(true),
                     Some(false) => {}
                     None => any_unknown = true,

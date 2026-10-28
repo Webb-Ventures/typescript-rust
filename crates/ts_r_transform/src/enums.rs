@@ -260,6 +260,16 @@ pub(crate) fn enum_decl(tx: &mut Tx, id: NodeId, out: &mut Vec<NodeId>) {
                     tx.map_range(prop, name_span);
                 }
                 rhs = tx.assign(em, rhs, at);
+                // `export { E as Alias }` too: `exports.Alias = exports.E = E = {}`.
+                if !is_const {
+                    for alias in crate::cjs::list_aliases(tx, name_atom) {
+                        if alias != enum_name {
+                            let e = tx.ident("exports", at);
+                            let em = tx.member_or_index(e, &alias, at);
+                            rhs = tx.assign(em, rhs, at);
+                        }
+                    }
+                }
             } else if top_level && tx.opts.is_cjs() && !is_const {
                 for alias in crate::cjs::list_aliases(tx, name_atom) {
                     let e = tx.ident("exports", at);
@@ -350,6 +360,9 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
                         Value::Num(v) => s.push_str(&ts_r_codegen::literals::js_number(v)),
                     }
                 }
+                if s.len() > MAX_CONST_STR {
+                    return None;
+                }
             }
             Some(Value::Str(s))
         }
@@ -411,13 +424,13 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
                     BinaryOp::UShr => to_u32(a).wrapping_shr(to_u32(b) & 31) as f64,
                     _ => return None,
                 })),
-                (Value::Str(a), Value::Str(b)) if op == BinaryOp::Add => Some(Value::Str(a + &b)),
-                (Value::Str(a), Value::Num(b)) if op == BinaryOp::Add => {
-                    Some(Value::Str(a + &ts_r_codegen::literals::js_number(b)))
+                (Value::Str(a), Value::Str(b)) if op == BinaryOp::Add => {
+                    (a.len() + b.len() <= MAX_CONST_STR).then(|| Value::Str(a + &b))
                 }
-                (Value::Num(a), Value::Str(b)) if op == BinaryOp::Add => {
-                    Some(Value::Str(ts_r_codegen::literals::js_number(a) + &b))
-                }
+                (Value::Str(a), Value::Num(b)) if op == BinaryOp::Add => (a.len() < MAX_CONST_STR)
+                    .then(|| Value::Str(a + &ts_r_codegen::literals::js_number(b))),
+                (Value::Num(a), Value::Str(b)) if op == BinaryOp::Add => (b.len() < MAX_CONST_STR)
+                    .then(|| Value::Str(ts_r_codegen::literals::js_number(a) + &b)),
                 _ => None,
             }
         }
@@ -428,7 +441,14 @@ fn eval(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Value> {
 thread_local! {
     /// Nesting of [`const_value`] (a chain of constants is bounded).
     static CONST_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Set when an evaluation stopped at the depth limit: its result is not memoized (from
+    /// a shallower reference it may have a value).
+    static CONST_TRUNCATED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+/// Folded strings longer than this stay expressions: `const s1 = s0 + s0` doubles, and
+/// forty such constants would need terabytes.
+const MAX_CONST_STR: usize = 1 << 20;
 
 /// The value of a reference to a `const` declared before it without a type annotation,
 /// from its initializer (tsc: tsc/internal/checker/checker.go, `evaluateEntity`).
@@ -439,15 +459,26 @@ fn const_value(tx: &Tx, e: NodeId, own: &EnumInfo, own_name: &str) -> Option<Val
         return None;
     }
     let init = *tx.sc.const_inits.get(&decl)?;
+    // Each constant is evaluated once: `const x1 = x0 + x0` chains would otherwise take
+    // 2^n evaluations.
+    if let Some(v) = tx.const_values.borrow().get(&decl) {
+        return v.clone();
+    }
     let depth = CONST_DEPTH.with(|d| d.get());
     if depth >= 64 {
+        CONST_TRUNCATED.with(|t| t.set(true));
         return None;
     }
+    let outer_truncated = CONST_TRUNCATED.with(|t| t.replace(false));
     CONST_DEPTH.with(|d| d.set(depth + 1));
     // The initializer is outside the enum: its names are not members.
     let _ = (own, own_name);
     let v = eval(tx, init, &EnumInfo::default(), "");
     CONST_DEPTH.with(|d| d.set(depth));
+    let truncated = CONST_TRUNCATED.with(|t| t.replace(outer_truncated || t.get()));
+    if !truncated {
+        tx.const_values.borrow_mut().insert(decl, v.clone());
+    }
     v
 }
 
