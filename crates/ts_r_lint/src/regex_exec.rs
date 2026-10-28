@@ -14,6 +14,8 @@ const MAX_STEPS: u32 = 200_000;
 const MAX_DEPTH: u32 = 400;
 
 type Span = (usize, usize);
+/// Whether the input is code points, the input, and each match's group spans.
+type Matches = (bool, Vec<u32>, Vec<Vec<Option<Span>>>);
 
 struct Exec<'r, 'a> {
     r: &'r Regex<'a>,
@@ -271,24 +273,16 @@ impl Exec<'_, '_> {
     }
 }
 
-/// `text.matchAll(new RegExp(pattern, flags))`: every match's groups (index 0 is the whole
-/// match; `None` for groups that took no part). `None` when the pattern does not parse.
-/// Without the `g` flag only the first match is given.
-pub fn match_all(pattern: &str, flags: &str, text: &str) -> Option<Vec<Vec<Option<String>>>> {
+/// Every match of `pattern` in `text`: its groups as spans of the matcher's input units
+/// (code points with `u`/`v`, else UTF-16 units), and the input. `None` when the pattern
+/// does not parse.
+fn exec_all(pattern: &str, flags: &str, text: &str) -> Option<Matches> {
     let r = parse(pattern, Flags::new(flags)).ok()?;
     let unicode = r.flags.unicode || r.flags.sets;
     let input: Vec<u32> = if unicode {
         text.chars().map(|c| c as u32).collect()
     } else {
         text.encode_utf16().map(u32::from).collect()
-    };
-    let to_string = |s: &[u32]| -> String {
-        if unicode {
-            s.iter().filter_map(|&c| char::from_u32(c)).collect()
-        } else {
-            let units: Vec<u16> = s.iter().map(|&c| c as u16).collect();
-            String::from_utf16_lossy(&units)
-        }
     };
     let ex = Exec {
         r: &r,
@@ -331,17 +325,193 @@ pub fn match_all(pattern: &str, flags: &str, text: &str) -> Option<Vec<Vec<Optio
             break;
         };
         let start = caps[0].map_or(end, |c| c.0);
-        out.push(
-            caps.iter()
-                .map(|c| c.map(|(a, b)| to_string(&ex.input[a..b.max(a)])))
-                .collect(),
-        );
+        out.push(caps);
         if !global {
             break;
         }
         last = if end == start { end + 1 } else { end };
     }
+    Some((unicode, ex.input, out))
+}
+
+/// `text.matchAll(new RegExp(pattern, flags))`: every match's groups (index 0 is the whole
+/// match; `None` for groups that took no part). `None` when the pattern does not parse.
+/// Without the `g` flag only the first match is given.
+pub fn match_all(pattern: &str, flags: &str, text: &str) -> Option<Vec<Vec<Option<String>>>> {
+    let (unicode, input, matches) = exec_all(pattern, flags, text)?;
+    let to_string = |s: &[u32]| -> String {
+        if unicode {
+            s.iter().filter_map(|&c| char::from_u32(c)).collect()
+        } else {
+            let units: Vec<u16> = s.iter().map(|&c| c as u16).collect();
+            String::from_utf16_lossy(&units)
+        }
+    };
+    Some(
+        matches
+            .iter()
+            .map(|caps| {
+                caps.iter()
+                    .map(|c| c.map(|(a, b)| to_string(&input[a..b.max(a)])))
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// One match's group byte ranges (index 0 is the whole match; `None` for groups that did not
+/// take part).
+pub type Groups = Vec<Option<(usize, usize)>>;
+
+/// The group spans (index 0 is the whole match) of each match of
+/// `text.matchAll(new RegExp(pattern, flags))` as byte offsets into `text`. An offset between
+/// the two UTF-16 halves of a character (patterns without `u`) is rounded down to the
+/// character's start. `None` when the pattern does not parse.
+pub fn match_groups(pattern: &str, flags: &str, text: &str) -> Option<Vec<Groups>> {
+    let (unicode, input, matches) = exec_all(pattern, flags, text)?;
+    // Input unit index -> byte offset.
+    let mut offsets = Vec::with_capacity(input.len() + 1);
+    for (i, c) in text.char_indices() {
+        offsets.push(i);
+        if !unicode && c.len_utf16() == 2 {
+            offsets.push(i);
+        }
+    }
+    offsets.push(text.len());
+    let at = |u: usize| offsets.get(u).copied().unwrap_or(text.len());
+    Some(
+        matches
+            .iter()
+            .map(|caps| {
+                caps.iter()
+                    .map(|c| c.map(|(a, b)| (at(a), at(b.max(a)))))
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// The whole-match spans of `text.matchAll(new RegExp(pattern, flags))` as byte offsets
+/// into `text` (see [`match_groups`]). `None` when the pattern does not parse.
+pub fn match_spans(pattern: &str, flags: &str, text: &str) -> Option<Vec<(usize, usize)>> {
+    let groups = match_groups(pattern, flags, text)?;
+    Some(groups.iter().filter_map(|caps| caps[0]).collect())
+}
+
+/// Whether `new RegExp(pattern, flags).test(text)`; a pattern that does not parse never
+/// matches.
+pub fn test(pattern: &str, flags: &str, text: &str) -> bool {
+    let flags: String = flags.chars().filter(|&c| c != 'g').collect();
+    match_spans(pattern, &flags, text).is_some_and(|m| !m.is_empty())
+}
+
+/// `text.replace(new RegExp(pattern, flags), f)`: every match with `g`, else the first,
+/// replaced by what `f` makes of its groups (index 0 is the whole match). `None` when the
+/// pattern does not parse.
+pub fn replace_with(
+    pattern: &str,
+    flags: &str,
+    text: &str,
+    mut f: impl FnMut(&[Option<&str>]) -> String,
+) -> Option<String> {
+    let groups = match_groups(pattern, flags, text)?;
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for caps in &groups {
+        let Some((start, end)) = caps[0] else {
+            continue;
+        };
+        if start < last {
+            continue;
+        }
+        let strs: Vec<Option<&str>> = caps.iter().map(|c| c.map(|(a, b)| &text[a..b])).collect();
+        out.push_str(&text[last..start]);
+        out.push_str(&f(&strs));
+        last = end;
+    }
+    out.push_str(&text[last..]);
     Some(out)
+}
+
+/// `text.replace(new RegExp(pattern, flags), replacement)` with the replacement's `$$`,
+/// `$&`, `` $` ``, `$'` and `$1`..`$99` patterns.
+pub fn replace(pattern: &str, flags: &str, text: &str, replacement: &str) -> Option<String> {
+    let groups = match_groups(pattern, flags, text)?;
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for caps in &groups {
+        let Some((start, end)) = caps[0] else {
+            continue;
+        };
+        if start < last {
+            continue;
+        }
+        out.push_str(&text[last..start]);
+        expand(replacement, text, caps, &mut out);
+        last = end;
+    }
+    out.push_str(&text[last..]);
+    Some(out)
+}
+
+/// Appends `rep` with its `$` patterns filled in from one match.
+fn expand(rep: &str, text: &str, caps: &[Option<(usize, usize)>], out: &mut String) {
+    let (start, end) = caps[0].unwrap_or((0, 0));
+    let group = |n: usize| caps.get(n).copied().flatten().map(|(a, b)| &text[a..b]);
+    let b = rep.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'$' || i + 1 >= b.len() {
+            let ch = rep[i..].chars().next().unwrap_or('$');
+            out.push(ch);
+            i += ch.len_utf8();
+            continue;
+        }
+        match b[i + 1] {
+            b'$' => {
+                out.push('$');
+                i += 2;
+            }
+            b'&' => {
+                out.push_str(&text[start..end]);
+                i += 2;
+            }
+            b'`' => {
+                out.push_str(&text[..start]);
+                i += 2;
+            }
+            b'\'' => {
+                out.push_str(&text[end..]);
+                i += 2;
+            }
+            d if d.is_ascii_digit() => {
+                let one = usize::from(d - b'0');
+                let two = b
+                    .get(i + 2)
+                    .filter(|c| c.is_ascii_digit())
+                    .map(|&c| one * 10 + usize::from(c - b'0'));
+                let groups = caps.len() - 1;
+                match two {
+                    Some(n) if n >= 1 && n <= groups => {
+                        out.push_str(group(n).unwrap_or(""));
+                        i += 3;
+                    }
+                    _ if one >= 1 && one <= groups => {
+                        out.push_str(group(one).unwrap_or(""));
+                        i += 2;
+                    }
+                    _ => {
+                        out.push('$');
+                        i += 1;
+                    }
+                }
+            }
+            _ => {
+                out.push('$');
+                i += 1;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -350,6 +520,35 @@ mod tests {
 
     fn all(p: &str, f: &str, t: &str) -> Vec<Vec<Option<String>>> {
         match_all(p, f, t).unwrap()
+    }
+
+    #[test]
+    fn replacing() {
+        assert_eq!(
+            replace("(a)(b)?", "g", "xaby a", "[$1$2$&$$]").as_deref(),
+            Some("x[abab$]y [aa$]")
+        );
+        assert_eq!(replace("a", "", "aaa", "$'").as_deref(), Some("aaaa"));
+        assert_eq!(
+            replace_with("(o)", "gu", "foo", |g| g[1].unwrap_or("").to_uppercase()).as_deref(),
+            Some("fOO")
+        );
+        assert!(test("^b$", "mg", "a\nb"));
+        assert!(!test("^b$", "", "a\nb"));
+    }
+
+    #[test]
+    fn spans() {
+        assert_eq!(
+            match_spans("o", "gu", "f\u{1F984}oo"),
+            Some(vec![(5, 6), (6, 7)])
+        );
+        assert_eq!(
+            match_spans("", "gu", "ab"),
+            Some(vec![(0, 0), (1, 1), (2, 2)])
+        );
+        assert_eq!(match_spans("x", "g", "\u{1F984}x"), Some(vec![(4, 5)]));
+        assert_eq!(match_spans("(", "gu", "x"), None);
     }
 
     #[test]

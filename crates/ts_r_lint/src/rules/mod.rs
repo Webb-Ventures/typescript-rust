@@ -19,10 +19,12 @@ mod guard_for_in;
 mod import_consistent_type_specifier_style;
 mod import_default;
 mod import_dynamic_import_chunkname;
+mod import_enforce_node_protocol_usage;
 mod import_export;
 mod import_exports_last;
 mod import_extensions;
 mod import_first;
+mod import_group_exports;
 mod import_max_dependencies;
 mod import_named;
 mod import_namespace;
@@ -32,38 +34,55 @@ mod import_no_amd;
 mod import_no_anonymous_default_export;
 mod import_no_commonjs;
 mod import_no_cycle;
+mod import_no_default_export;
 mod import_no_deprecated;
 mod import_no_duplicates;
 mod import_no_dynamic_require;
 mod import_no_empty_named_blocks;
+mod import_no_extraneous_dependencies;
 mod import_no_import_module_exports;
 mod import_no_internal_modules;
 mod import_no_mutable_exports;
 mod import_no_named_as_default;
 mod import_no_named_as_default_member;
 mod import_no_named_default;
+mod import_no_named_export;
 mod import_no_namespace;
 mod import_no_nodejs_modules;
 mod import_no_relative_packages;
+mod import_no_relative_parent_imports;
 mod import_no_restricted_paths;
 mod import_no_self_import;
 mod import_no_unassigned_import;
 mod import_no_unresolved;
+mod import_no_unused_modules;
 mod import_no_useless_path_segments;
 mod import_no_webpack_loader_syntax;
+mod import_order;
 mod import_prefer_default_export;
+mod import_unambiguous;
 pub(crate) mod import_util;
 mod jsdoc_check_access;
 mod jsdoc_check_alignment;
+mod jsdoc_check_indentation;
+mod jsdoc_check_line_alignment;
 mod jsdoc_check_param_names;
 mod jsdoc_check_property_names;
+mod jsdoc_check_syntax;
 mod jsdoc_check_tag_names;
+mod jsdoc_check_template_names;
 mod jsdoc_check_types;
 mod jsdoc_check_values;
+mod jsdoc_convert_to_jsdoc_comments;
 mod jsdoc_empty_tags;
 mod jsdoc_escape_inline_tags;
 mod jsdoc_implements_on_classes;
+mod jsdoc_informative_docs;
+mod jsdoc_lines_before_block;
+mod jsdoc_match_description;
+mod jsdoc_match_name;
 mod jsdoc_multiline_blocks;
+mod jsdoc_no_bad_blocks;
 mod jsdoc_no_blank_block_descriptions;
 mod jsdoc_no_blank_blocks;
 mod jsdoc_no_defaults;
@@ -72,9 +91,15 @@ mod jsdoc_no_multi_asterisks;
 mod jsdoc_no_restricted_syntax;
 mod jsdoc_no_types;
 mod jsdoc_no_undefined_types;
+mod jsdoc_normalize_see_links;
+mod jsdoc_prefer_import_tag;
 mod jsdoc_reject_any_type;
 mod jsdoc_reject_function_type;
 mod jsdoc_require_asterisk_prefix;
+mod jsdoc_require_description;
+mod jsdoc_require_description_complete_sentence;
+mod jsdoc_require_example;
+mod jsdoc_require_file_overview;
 mod jsdoc_require_hyphen_before_param_description;
 mod jsdoc_require_jsdoc;
 mod jsdoc_require_next_description;
@@ -87,10 +112,14 @@ mod jsdoc_require_property;
 mod jsdoc_require_property_description;
 mod jsdoc_require_property_name;
 mod jsdoc_require_property_type;
+mod jsdoc_require_rejects;
 mod jsdoc_require_returns;
 mod jsdoc_require_returns_check;
 mod jsdoc_require_returns_description;
 mod jsdoc_require_returns_type;
+mod jsdoc_require_tags;
+mod jsdoc_require_template;
+mod jsdoc_require_template_description;
 mod jsdoc_require_throws;
 mod jsdoc_require_throws_description;
 mod jsdoc_require_throws_type;
@@ -98,8 +127,13 @@ mod jsdoc_require_yields;
 mod jsdoc_require_yields_check;
 mod jsdoc_require_yields_description;
 mod jsdoc_require_yields_type;
+mod jsdoc_sort_tags;
 mod jsdoc_tag_lines;
+mod jsdoc_text_escaping;
+mod jsdoc_ts_method_signature_style;
 mod jsdoc_ts_no_empty_object_type;
+mod jsdoc_ts_no_unnecessary_template_expression;
+mod jsdoc_ts_prefer_function_type;
 mod jsdoc_valid_types;
 mod max_depth;
 mod max_nested_callbacks;
@@ -691,6 +725,7 @@ mod unicorn_require_text_decoder_streaming;
 mod unicorn_single_line_block_comment_style;
 mod unicorn_splice;
 mod unicorn_static;
+mod unicorn_string_content;
 mod unicorn_switch_case_braces;
 mod unicorn_switch_case_break_position;
 mod unicorn_template_indent;
@@ -789,6 +824,16 @@ pub static ALL: &[&RuleDef] = &[
     &import_no_anonymous_default_export::RULE,
     &import_newline_after_import::RULE,
     &import_first::RULE,
+    &import_first::IMPORTS_FIRST,
+    &import_enforce_node_protocol_usage::RULE,
+    &import_group_exports::RULE,
+    &import_no_default_export::RULE,
+    &import_no_named_export::RULE,
+    &import_no_relative_parent_imports::RULE,
+    &import_unambiguous::RULE,
+    &import_no_extraneous_dependencies::RULE,
+    &import_order::RULE,
+    &import_no_unused_modules::RULE,
     &import_no_empty_named_blocks::RULE,
     &import_no_commonjs::RULE,
     &import_no_mutable_exports::RULE,
@@ -1052,6 +1097,9 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_reject_any_type::RULE,
     &jsdoc_reject_function_type::RULE,
     &jsdoc_require_asterisk_prefix::RULE,
+    &jsdoc_require_description_complete_sentence::RULE,
+    &jsdoc_require_example::RULE,
+    &jsdoc_require_file_overview::RULE,
     &jsdoc_require_hyphen_before_param_description::RULE,
     &jsdoc_require_jsdoc::RULE,
     &jsdoc_require_next_description::RULE,
@@ -1064,10 +1112,14 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_property_description::RULE,
     &jsdoc_require_property_name::RULE,
     &jsdoc_require_property_type::RULE,
+    &jsdoc_require_rejects::RULE,
     &jsdoc_require_returns::RULE,
     &jsdoc_require_returns_check::RULE,
     &jsdoc_require_returns_description::RULE,
     &jsdoc_require_returns_type::RULE,
+    &jsdoc_require_tags::RULE,
+    &jsdoc_require_template::RULE,
+    &jsdoc_require_template_description::RULE,
     &jsdoc_require_throws::RULE,
     &jsdoc_require_throws_description::RULE,
     &jsdoc_require_throws_type::RULE,
@@ -1075,12 +1127,32 @@ pub static ALL: &[&RuleDef] = &[
     &jsdoc_require_yields_check::RULE,
     &jsdoc_require_yields_description::RULE,
     &jsdoc_require_yields_type::RULE,
+    &jsdoc_sort_tags::RULE,
     &jsdoc_tag_lines::RULE,
+    &jsdoc_text_escaping::RULE,
+    &jsdoc_ts_method_signature_style::RULE,
     &jsdoc_ts_no_empty_object_type::RULE,
+    &jsdoc_ts_no_unnecessary_template_expression::RULE,
+    &jsdoc_ts_prefer_function_type::RULE,
     &jsdoc_valid_types::RULE,
     &jsdoc_check_types::RULE,
     &jsdoc_no_undefined_types::RULE,
     &jsdoc_check_values::RULE,
+    // jsdoc, round 8 (h1)
+    &jsdoc_check_indentation::RULE,
+    &jsdoc_check_line_alignment::RULE,
+    &jsdoc_check_syntax::RULE,
+    &jsdoc_check_template_names::RULE,
+    &jsdoc_convert_to_jsdoc_comments::RULE,
+    &jsdoc_informative_docs::RULE,
+    &jsdoc_lines_before_block::RULE,
+    &jsdoc_match_description::RULE,
+    &jsdoc_match_name::RULE,
+    &jsdoc_no_bad_blocks::RULE,
+    &jsdoc_normalize_see_links::RULE,
+    &jsdoc_prefer_import_tag::RULE,
+    &jsdoc_require_description::RULE,
+    // end jsdoc, round 8 (h1)
     // eslint-plugin-unicorn
     &unicorn_better_dom_traversing::RULE,
     &unicorn_consistent_assert::RULE,
@@ -1383,6 +1455,7 @@ pub static ALL: &[&RuleDef] = &[
     &unicorn_prefer_switch::RULE,
     &unicorn_prefer_ternary::RULE,
     &unicorn_prefer_top_level_await::RULE,
+    &unicorn_string_content::RULE,
     &unicorn_switch_case_braces::RULE,
     &unicorn_text_encoding_identifier_case::RULE,
     &unicorn_throw_new_error::RULE,

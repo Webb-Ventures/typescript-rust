@@ -17,6 +17,7 @@ pub(crate) mod import_type;
 pub(crate) mod minimatch;
 mod node_resolve;
 
+use std::any::Any;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -62,6 +63,9 @@ pub struct ModuleHost {
     resolutions: Mutex<FxHashMap<ResolveKey, Result<Resolved, String>>>,
     maps: Mutex<FxHashMap<(u64, String), MapEntry>>,
     packages: Mutex<FxHashMap<String, Option<Arc<Value>>>>,
+    /// Whole-project results rules compute once per run (`import/no-unused-modules`),
+    /// by settings key and the rule's own key.
+    memo: Mutex<FxHashMap<(u64, String), Arc<dyn Any + Send + Sync>>>,
 }
 
 impl fmt::Debug for ModuleHost {
@@ -83,6 +87,7 @@ impl ModuleHost {
             resolutions: Mutex::new(FxHashMap::default()),
             maps: Mutex::new(FxHashMap::default()),
             packages: Mutex::new(FxHashMap::default()),
+            memo: Mutex::new(FxHashMap::default()),
         })
     }
 
@@ -316,6 +321,23 @@ impl ModCtx {
             errored: Mutex::new(FxHashSet::default()),
             cwd,
         }
+    }
+
+    /// `make()`'s result for `key`, computed once per host (a project run shares one host;
+    /// an editor lint gets a fresh one, so nothing outlives the job).
+    pub(crate) fn memo<T: Any + Send + Sync>(&self, key: &str, make: impl FnOnce() -> T) -> Arc<T> {
+        let k = (self.key, key.to_owned());
+        if let Ok(m) = self.host.memo.lock()
+            && let Some(v) = m.get(&k)
+            && let Ok(t) = v.clone().downcast::<T>()
+        {
+            return t;
+        }
+        let v = Arc::new(make());
+        if let Ok(mut m) = self.host.memo.lock() {
+            m.insert(k, v.clone());
+        }
+        v
     }
 
     pub(crate) fn host(&self) -> &ModuleHost {

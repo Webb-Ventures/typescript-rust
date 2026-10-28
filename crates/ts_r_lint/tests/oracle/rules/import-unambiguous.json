@@ -1,0 +1,11 @@
+{"rule":"import/unambiguous","source":"eslint-plugin-import","skipped":{"unsupported case":1},"cases":[{"code":"function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"sourceType":"script"},"messages":[],"output":null},
+{"code":"\"use strict\"; function y() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"sourceType":"script"},"messages":[],"output":null},
+{"code":"import y from \"z\"; function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"import * as y from \"z\"; function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"import { y } from \"z\"; function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"import z, { y } from \"z\"; function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"function x() {}; export {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"function x() {}; export { x }","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"function x() {}; export { y } from \"z\"","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"export function x() {}","valid":true,"filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[],"output":null},
+{"code":"function x() {}","filename":"file.js","parser":"espree","languageOptions":{"ecmaVersion":2015,"sourceType":"module"},"messages":[{"ruleId":"import/unambiguous","message":"This module could be parsed as a valid script.","line":1,"column":1,"endLine":1,"endColumn":16}],"output":null}]}

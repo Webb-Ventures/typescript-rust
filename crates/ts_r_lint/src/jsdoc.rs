@@ -1412,6 +1412,8 @@ pub struct Item {
     pub context: Option<usize>,
     /// The `comment` selector the block was found through (`info.comment`).
     pub info_comment: Option<String>,
+    /// The index of the `contexts` entry the block is checked for (`info.lastIndex`).
+    pub last_index: Option<usize>,
 }
 
 /// Whether the block's ESTree view matches a `comment` selector (`commentHandler`).
@@ -1440,25 +1442,33 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
     // With `additive` (and no plain `any`), a block is checked once through every entry
     // without a `comment` or whose `comment` matches it.
     let additive = contexts.all && !contexts.plain_any && contexts.additive;
-    let via = |c: usize| -> Vec<Option<&str>> {
+    // Each entry comes with its index (`info.lastIndex`): the entry it is checked for
+    // (additive), or the one the search for a matching `comment` stopped at.
+    let via = |c: usize| -> Vec<(Option<usize>, Option<&str>)> {
         if additive {
             return contexts
                 .entries
                 .iter()
-                .filter_map(|e| match &e.comment {
-                    None => Some(None),
-                    Some(sel) if comment_matches(finder, c, sel) => Some(Some(sel.raw.as_str())),
+                .enumerate()
+                .filter_map(|(i, e)| match &e.comment {
+                    None => Some((Some(i), None)),
+                    Some(sel) if comment_matches(finder, c, sel) => {
+                        Some((Some(i), Some(sel.raw.as_str())))
+                    }
                     Some(_) => None,
                 })
                 .collect();
         }
         if !filtered {
-            return vec![None];
+            let first = (contexts.all && !contexts.plain_any).then_some(0);
+            return vec![(first, None)];
         }
-        for e in &contexts.entries {
+        for (i, e) in contexts.entries.iter().enumerate() {
             match &e.comment {
-                None => return vec![None],
-                Some(sel) if comment_matches(finder, c, sel) => return vec![Some(&sel.raw)],
+                None => return vec![(Some(i), None)],
+                Some(sel) if comment_matches(finder, c, sel) => {
+                    return vec![(Some(i), Some(&sel.raw))];
+                }
                 Some(_) => {}
             }
         }
@@ -1482,18 +1492,22 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                         && (!claimed[c] || contexts.no_tracking)
                     {
                         claimed[c] = true;
-                        for comment in via(c) {
+                        for (last_index, comment) in via(c) {
                             out.push(Item {
                                 target: Some(t),
                                 comment: c,
                                 context: contexts.found(finder, tree, Some(t), comment),
                                 info_comment: comment.map(str::to_owned),
+                                last_index,
                             });
                         }
                     }
                 } else {
                     let ty = finder.es_type(t);
-                    if contexts.entries.iter().any(|e| e.ty.as_deref() == Some(ty))
+                    if let Some(last_index) = contexts
+                        .entries
+                        .iter()
+                        .position(|e| e.ty.as_deref() == Some(ty))
                         && let Some(c) = finder.jsdoc_of_target(t)
                     {
                         out.push(Item {
@@ -1501,6 +1515,7 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                             comment: c,
                             context: contexts.found(finder, tree, Some(t), None),
                             info_comment: None,
+                            last_index: Some(last_index),
                         });
                     }
                 }
@@ -1519,12 +1534,13 @@ pub fn collect(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
         for (i, c) in ast.comments.iter().enumerate() {
             if !claimed[i] && c.kind == CommentKind::Block && is_jsdoc_text(c.span.text(finder.src))
             {
-                for comment in via(i) {
+                for (last_index, comment) in via(i) {
                     out.push(Item {
                         target: None,
                         comment: i,
                         context: contexts.found(finder, tree, None, comment),
                         info_comment: comment.map(str::to_owned),
+                        last_index,
                     });
                 }
             }
@@ -1584,6 +1600,7 @@ fn collect_listeners(finder: &Finder<'_>, contexts: &Contexts) -> Vec<Item> {
                     comment: c,
                     context: contexts.found(finder, Some(&tree), Some(t), e.comment_raw()),
                     info_comment: e.comment_raw().map(str::to_owned),
+                    last_index: Some(i),
                 });
             }
         }
@@ -1647,6 +1664,8 @@ pub struct Doc {
     pub context: Option<usize>,
     /// The `comment` selector the block was found through (`info.comment`).
     pub info_comment: Option<String>,
+    /// See [`Item::last_index`].
+    pub last_index: Option<usize>,
     /// 0-based line of the comment start.
     pub line: u32,
     /// Whitespace the comment's line starts with, repeated to the comment's column.
@@ -1671,6 +1690,7 @@ impl Doc {
             comment: c.span,
             context: item.context,
             info_comment: item.info_comment.clone(),
+            last_index: item.last_index,
             block: Block::parse(text),
             line,
             indent: std::iter::repeat_n(ch, col).collect(),

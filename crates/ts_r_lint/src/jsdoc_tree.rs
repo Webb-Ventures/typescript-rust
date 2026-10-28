@@ -108,11 +108,14 @@ pub struct JsdocTree {
     nodes: Vec<JNode>,
 }
 
-struct Inline<'s> {
-    tag: &'s str,
-    namepath: &'s str,
-    text: &'s str,
-    format: &'static str,
+/// An inline tag of a description, where it starts (its `[` for the prefix form, else its
+/// `{`) and its form: `prefix`, `pipe`, `space` or `plain` (no text).
+pub(crate) struct Inline<'s> {
+    pub tag: &'s str,
+    pub namepath: &'s str,
+    pub text: &'s str,
+    pub format: &'static str,
+    pub start: usize,
 }
 
 fn is_space(c: char) -> bool {
@@ -126,7 +129,7 @@ pub fn inline_tag_names(desc: &str) -> Vec<&str> {
 
 /// The `{@tag namepath text}` and `[text]{@tag namepath}` inline tags of a description, the
 /// prefixed ones first (`parseInlineTags`).
-fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
+pub(crate) fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
     let mut prefixed = Vec::new();
     let mut suffixed = Vec::new();
     let b = desc.as_bytes();
@@ -153,15 +156,16 @@ fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
         let namepath = &desc[p..p + np_len];
         p += np_len;
         let prefixed_text = (at > 0 && b[at - 1] == b']')
-            .then(|| desc[..at - 1].rfind('[').map(|o| &desc[o + 1..at - 1]))
+            .then(|| desc[..at - 1].rfind('[').map(|o| (o, &desc[o + 1..at - 1])))
             .flatten();
-        if let Some(text) = prefixed_text {
+        if let Some((open, text)) = prefixed_text {
             if desc[p..].starts_with('}') && !text.is_empty() {
                 prefixed.push(Inline {
                     tag,
                     namepath,
                     text,
                     format: "prefix",
+                    start: open,
                 });
             }
             continue;
@@ -206,6 +210,7 @@ fn inline_tags(desc: &str) -> Vec<Inline<'_>> {
             namepath,
             text,
             format,
+            start: at,
         });
         i = end + 1;
     }

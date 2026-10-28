@@ -76,42 +76,45 @@ impl Rule for NoRestrictedSyntax {
         true
     }
     fn run_file(&self, cx: &mut Ctx<'_, '_>) {
-        let mut settings = Settings::from_cx(cx);
-        settings.contexts = None;
-        let empty = Map::new();
-        let Ok(contexts) = Contexts::from_options(self.opts.as_ref().unwrap_or(&empty), &settings)
-        else {
+        run_forbid(cx, self.opts.as_ref(), MISSING);
+    }
+}
+
+/// eslint-plugin-jsdoc's "forbid" rules (no-restricted-syntax, require-tags): `opts` holds
+/// the `contexts` to look for (`None`: no options, so each function block reports
+/// `missing`), and a block reports when one of its entries applies to it.
+pub(crate) fn run_forbid(cx: &mut Ctx<'_, '_>, opts: Option<&Map<String, Value>>, missing: &str) {
+    let mut settings = Settings::from_cx(cx);
+    settings.contexts = None;
+    let empty = Map::new();
+    let Ok(contexts) = Contexts::from_options(opts.unwrap_or(&empty), &settings) else {
+        return;
+    };
+    let has_contexts = opts.is_some_and(|o| o.contains_key("contexts"));
+    jsdoc::for_each_doc(cx, &settings, &contexts, |cx, _finder, doc| {
+        if opts.is_none() {
+            cx.report(doc.comment, missing);
+            return;
+        }
+        if !has_contexts {
+            return;
+        }
+        let Some(entry) = contexts.find(doc) else {
             return;
         };
-        let has_contexts = self
-            .opts
-            .as_ref()
-            .is_some_and(|o| o.contains_key("contexts"));
-        jsdoc::for_each_doc(cx, &settings, &contexts, |cx, _finder, doc| {
-            if self.opts.is_none() {
-                cx.report(doc.comment, MISSING);
-                return;
-            }
-            if !has_contexts {
-                return;
-            }
-            let Some(entry) = contexts.find(doc) else {
-                return;
-            };
-            let context = entry.ty.as_deref().unwrap_or("any");
-            let comment = doc.info_comment.as_deref();
-            let template = match (&entry.message, comment) {
-                (Some(m), _) => m.clone(),
-                (None, Some(_)) => "Syntax is restricted: {{context}} with {{comment}}".into(),
-                (None, None) => "Syntax is restricted: {{context}}".into(),
-            };
-            let mut data = vec![("context", context)];
-            if let Some(c) = comment {
-                data.push(("comment", c));
-            }
-            cx.report(doc.comment, interpolate(&template, &data));
-        });
-    }
+        let context = entry.ty.as_deref().unwrap_or("any");
+        let comment = doc.info_comment.as_deref();
+        let template = match (&entry.message, comment) {
+            (Some(m), _) => m.clone(),
+            (None, Some(_)) => "Syntax is restricted: {{context}} with {{comment}}".into(),
+            (None, None) => "Syntax is restricted: {{context}}".into(),
+        };
+        let mut data = vec![("context", context)];
+        if let Some(c) = comment {
+            data.push(("comment", c));
+        }
+        cx.report(doc.comment, interpolate(&template, &data));
+    });
 }
 
 #[cfg(test)]

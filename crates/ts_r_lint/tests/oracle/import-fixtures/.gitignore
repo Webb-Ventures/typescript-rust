@@ -1,3 +1,4 @@
 # eslint-plugin-import 2.32.0 test fixtures (tests/files) and its package.json name: data the
-# module rules read in the rule oracle. Its node_modules is part of the data.
+# module rules read in the rule oracle. Its node_modules folders are part of the data.
 !tests/files/node_modules/
+!tests/files/bundled-dependencies/*/node_modules/

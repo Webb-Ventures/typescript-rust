@@ -518,3 +518,115 @@ fn deprecated_reports_references_only() {
     assert_eq!(m.len(), 4, "{m:?}");
     assert!(m.iter().all(|s| s == "Deprecated: use g"), "{m:?}");
 }
+
+#[test]
+fn no_unused_modules_export_star_cycle_and_self_import() {
+    // `export *` both ways and a file importing itself: the table is built once, no walk
+    // follows the cycle.
+    let h = host(&[
+        (
+            "/p/a.js",
+            "export * from './b';\nexport const a = 1;\n".to_owned(),
+        ),
+        (
+            "/p/b.js",
+            "export * from './a';\nexport const b = 1;\n".to_owned(),
+        ),
+        (
+            "/p/c.js",
+            "import { c } from './c';\nexport const c = 1;\nexport default 2;\n".to_owned(),
+        ),
+    ]);
+    let opts = serde_json::json!([{ "unusedExports": true, "src": ["/p"] }]);
+    let code = "export * from './b';\nexport const a = 1;\n";
+    assert!(messages(&h, "import/no-unused-modules", opts.clone(), "a.js", code).is_empty());
+    let code = "import { c } from './c';\nexport const c = 1;\nexport default 2;\n";
+    assert_eq!(
+        messages(&h, "import/no-unused-modules", opts, "c.js", code),
+        vec!["exported declaration 'default' not used within other modules".to_owned()]
+    );
+}
+
+#[test]
+fn no_unused_modules_many_files() {
+    // 2,000 files, each importing the next one's export: one table for the whole run.
+    let files: Vec<(&'static str, String)> = (0..2000)
+        .map(|i| {
+            let path: &'static str = Box::leak(format!("/p/src/f{i}.js").into_boxed_str());
+            (
+                path,
+                format!(
+                    "import {{ x{} }} from './f{}';\nexport const x{i} = 1;\n",
+                    i + 1,
+                    i + 1
+                ),
+            )
+        })
+        .collect();
+    let h = host(&files);
+    let opts = serde_json::json!([{ "unusedExports": true, "src": ["/p/src/**/*.js"] }]);
+    let start = std::time::Instant::now();
+    for i in [5, 0, 1999] {
+        let code = format!(
+            "import {{ x{} }} from './f{}';\nexport const x{i} = 1;\n",
+            i + 1,
+            i + 1
+        );
+        let m = messages(
+            &h,
+            "import/no-unused-modules",
+            opts.clone(),
+            &format!("src/f{i}.js"),
+            &code,
+        );
+        assert_eq!(m.len(), usize::from(i == 0), "f{i}: {m:?}");
+    }
+    assert!(start.elapsed().as_secs() < 60, "took {:?}", start.elapsed());
+}
+
+#[test]
+fn no_unused_modules_missing_exports() {
+    let h = host(&[]);
+    let opts = serde_json::json!([{ "missingExports": true }]);
+    let none = Vec::<String>::new();
+    assert_eq!(
+        messages(
+            &h,
+            "import/no-unused-modules",
+            opts.clone(),
+            "a.js",
+            "export {};"
+        ),
+        vec!["No exports found".to_owned()]
+    );
+    assert_eq!(
+        messages(
+            &h,
+            "import/no-unused-modules",
+            opts.clone(),
+            "a.js",
+            "export * from './x';"
+        ),
+        vec!["No exports found".to_owned()]
+    );
+    assert_eq!(
+        messages(
+            &h,
+            "import/no-unused-modules",
+            opts.clone(),
+            "a.js",
+            "// é\n"
+        ),
+        vec!["No exports found".to_owned()]
+    );
+    assert_eq!(
+        messages(
+            &h,
+            "import/no-unused-modules",
+            opts,
+            "a.js",
+            "export const [a, b] = [];"
+        ),
+        none
+    );
+}

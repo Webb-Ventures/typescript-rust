@@ -192,6 +192,52 @@ pub fn each_block_checking(
     run(cx, &settings, &all_blocks(), checks, f);
 }
 
+/// `makeMultiline`: a one-line block becomes `/**`, its content line and the closing line.
+pub fn make_multiline(b: &mut Block, indent: &str) {
+    let first = b.source[0];
+    let t = b.lines[first].tokens.clone();
+    let (mut post_name, mut post_type, mut post_tag) = (t.post_name, t.post_type, t.post_tag);
+    if t.description.is_empty() {
+        if !post_name.is_empty() {
+            post_name.clear();
+        } else if !post_type.is_empty() {
+            post_type.clear();
+        } else if !post_tag.is_empty() {
+            post_tag.clear();
+        }
+    }
+    let line_end = t.line_end.clone();
+    let delimiter = b.lines[first].tokens.delimiter.clone();
+    b.lines[first].tokens = Tokens {
+        delimiter,
+        ..Tokens::default()
+    };
+    let content = Tokens {
+        start: format!("{indent} "),
+        delimiter: "*".to_owned(),
+        post_delimiter: t.post_delimiter,
+        tag: t.tag,
+        post_tag,
+        typ: t.typ,
+        post_type,
+        name: t.name,
+        post_name,
+        description: t.description.trim_end().to_owned(),
+        ..Tokens::default()
+    };
+    let closing = Tokens {
+        start: format!("{indent} "),
+        end: "*/".to_owned(),
+        line_end,
+        ..Tokens::default()
+    };
+    let n = b.lines[first].number;
+    let a = b.new_line(n + 1, content);
+    let c = b.new_line(n + 2, closing);
+    b.source.push(a);
+    b.source.push(c);
+}
+
 /// Adds a line holding just `@tag`: after the first line of the last tag, or (with no tags)
 /// before the last line.
 pub fn add_tag(doc: &mut Doc, tag: &str) {
@@ -588,6 +634,11 @@ pub fn column_span(finder: &Finder<'_>, doc: &Doc, rel: i64) -> ts_r_span::Span 
 /// A tag's description (`getTagDescription`): the text after the tag, type and name on its
 /// first line, then its other lines, joined with newlines.
 pub fn tag_description(b: &Block, tag: usize) -> String {
+    tag_description_lines(b, tag).join("\n")
+}
+
+/// [`tag_description`] as one string per line (`getTagDescription(tag, true)`).
+pub fn tag_description_lines(b: &Block, tag: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for &id in &b.tags[tag].source {
         let t = &b.lines[id].tokens;
@@ -609,7 +660,7 @@ pub fn tag_description(b: &Block, tag: usize) -> String {
         }
         out.push(d);
     }
-    out.join("\n")
+    out
 }
 
 /// `hasThrowValue`: whether function `id` (not async) throws, looking only through
@@ -1570,5 +1621,221 @@ pub fn regex_string_matches(re: &str, text: &str) -> bool {
         _ => (re, "v"),
     };
     crate::regex::parse(pattern, crate::regex::Flags::new(flags))
-        .is_ok_and(|r| r.is_match(text, flags.contains('i')))
+        .is_ok_and(|r| r.is_match_flags(text, flags))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Round 8 (h1) helpers.
+
+/// JavaScript's `String.prototype.trim` whitespace (Unicode `White_Space` plus the BOM).
+pub fn is_js_ws(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
+/// `String.prototype.trim`.
+pub fn js_trim(s: &str) -> &str {
+    s.trim_matches(is_js_ws)
+}
+
+/// The kind of the method a target documents: the target itself or the function value of
+/// a method (`node.kind` / `node.parent.kind` in the plugin).
+fn own_or_parent_method_kind(
+    f: &Finder<'_>,
+    t: Option<Target>,
+) -> (Option<MethodKind>, Option<MethodKind>) {
+    let Some(Target::Node(id)) = t else {
+        return (None, None);
+    };
+    let own = match *f.ast.node(id) {
+        Node::MethodDef { kind, .. } => Some(kind),
+        _ => None,
+    };
+    let parent = f.parents.parent(id).and_then(|p| match *f.ast.node(p) {
+        Node::MethodDef { kind, value, .. } if value == id => Some(kind),
+        _ => None,
+    });
+    (own, parent)
+}
+
+/// The special-method options of `avoidDocs` (`checkConstructors`, `checkGetters`,
+/// `checkSetters`), each with the rule's default.
+#[derive(Debug, Clone, Copy)]
+pub struct SpecialMethods {
+    pub constructors: bool,
+    pub getters: bool,
+    pub setters: bool,
+}
+
+impl SpecialMethods {
+    pub fn from_options(o: &Map<String, Value>, defaults: SpecialMethods) -> SpecialMethods {
+        let flag = |k: &str, d: bool| o.get(k).and_then(Value::as_bool).unwrap_or(d);
+        SpecialMethods {
+            constructors: flag("checkConstructors", defaults.constructors),
+            getters: flag("checkGetters", defaults.getters),
+            setters: flag("checkSetters", defaults.setters),
+        }
+    }
+}
+
+/// `avoidDocs`: a replacing tag on the block or its class, a special method the options
+/// leave out (`special`; `None` skips that test), or an `exemptedBy` tag.
+pub fn avoid_docs(
+    f: &Finder<'_>,
+    doc: &Doc,
+    opts: &Map<String, Value>,
+    special: Option<SpecialMethods>,
+) -> bool {
+    if replaced_docs(f, doc) {
+        return true;
+    }
+    if let Some(s) = special {
+        let (own, parent) = own_or_parent_method_kind(f, doc.target);
+        let ctor = own == Some(MethodKind::Constructor) || parent == Some(MethodKind::Constructor);
+        if !s.constructors && (ctor || doc.block.has_any_tag(&["class", "constructor"])) {
+            return true;
+        }
+        if parent == Some(MethodKind::Get) && !s.getters {
+            return true;
+        }
+        if parent == Some(MethodKind::Set) && !s.setters {
+            return true;
+        }
+    }
+    let exempted = exempted_by(opts, f.settings.mode == "closure");
+    has_exempting_tag(&doc.block, &exempted)
+}
+
+/// `settings.jsdoc.structuredTags`, when given.
+pub fn structured_tags<'a>(cx: &Ctx<'_, 'a>) -> Option<&'a Map<String, Value>> {
+    cx.env()
+        .settings
+        .get("jsdoc")
+        .and_then(|s| s.get("structuredTags"))
+        .and_then(Value::as_object)
+}
+
+/// `rewireByParsedType`: tag `ti`'s type becomes `typ` (which may span lines), keeping its
+/// name and description lines, and the block's lines are rebuilt from its tags. The first
+/// type line stays on the tag's line; later ones get `indent` + one space and a `*`
+/// delimiter; `spacing` goes inside the braces. When a multiline type becomes one line, only
+/// the name moves up from the type's closing line: a description on that line is dropped,
+/// as eslint-plugin-jsdoc 63.3.3 drops it.
+pub fn rewire_type(b: &mut Block, ti: usize, typ: &str, indent: &str, spacing: &str) {
+    let Some(&first_line) = b.tags[ti].source.first() else {
+        return;
+    };
+    let mut middle: Vec<&str> = typ.split('\n').collect();
+    let first = middle.remove(0);
+    let last = middle.pop();
+    let multi = last.is_some();
+    let src = b.tags[ti].source.clone();
+    let begin = src.iter().position(|&l| {
+        let t = &b.lines[l].tokens;
+        !t.name.is_empty() || !t.description.is_empty()
+    });
+    let name_desc: Option<Vec<usize>> = begin.map(|i| src[i..].to_vec());
+    let t0 = b.lines[first_line].tokens.clone();
+    let star = |d: &str| {
+        if d == "/**" {
+            "*".to_owned()
+        } else {
+            d.to_owned()
+        }
+    };
+    let number = b.lines[first_line].number;
+    let mut head = t0.clone();
+    if multi {
+        head.end.clear();
+        head.name.clear();
+        head.post_name.clear();
+        head.post_type.clear();
+    } else if let Some(nd) = &name_desc {
+        head.name = b.lines[nd[0]].tokens.name.clone();
+        head.post_type = " ".to_owned();
+    }
+    head.typ = if multi {
+        format!("{{{spacing}{first}")
+    } else {
+        format!("{{{spacing}{first}{spacing}}}")
+    };
+    let mut out = vec![b.new_line(number, head)];
+    for (i, line) in middle.iter().enumerate() {
+        let mut t = t0.clone();
+        t.delimiter = star(&t0.delimiter);
+        t.end.clear();
+        t.name.clear();
+        t.post_name.clear();
+        t.post_tag.clear();
+        t.post_type.clear();
+        t.start = format!("{indent} ");
+        t.tag.clear();
+        t.typ = (*line).to_owned();
+        out.push(b.new_line(number + i as i64 + 1, t));
+    }
+    let closing = last.map(|l| format!("{l}{spacing}}}"));
+    match (&name_desc, begin) {
+        (Some(nd), Some(i)) if i > 0 => {
+            if let Some(c) = &closing {
+                let mut t = b.lines[nd[0]].tokens.clone();
+                t.typ = c.clone();
+                let n = number + out.len() as i64;
+                out.push(b.new_line(n, t));
+            }
+            out.extend(nd.iter().skip(1));
+        }
+        (Some(nd), _) => {
+            if let Some(c) = closing
+                .as_ref()
+                .filter(|_| last.is_some_and(|l| !l.is_empty()))
+            {
+                let mut t = b.lines[nd[0]].tokens.clone();
+                t.delimiter = star(&t.delimiter);
+                t.post_tag.clear();
+                t.start = format!("{indent} ");
+                t.tag.clear();
+                t.typ = c.clone();
+                let n = number + out.len() as i64;
+                out.push(b.new_line(n, t));
+            }
+            out.extend(nd.iter().skip(1));
+        }
+        (None, _) => {
+            if let Some(c) = closing
+                .as_ref()
+                .filter(|_| last.is_some_and(|l| !l.is_empty()))
+            {
+                let mut t = t0.clone();
+                t.delimiter = star(&t0.delimiter);
+                t.post_tag.clear();
+                t.start = format!("{indent} ");
+                t.tag.clear();
+                t.typ = c.clone();
+                let n = number + out.len() as i64;
+                out.push(b.new_line(n, t));
+            }
+        }
+    }
+    b.tags[ti].source = out;
+    let first_tag = b
+        .source
+        .iter()
+        .position(|&l| !b.lines[l].tokens.tag.is_empty())
+        .unwrap_or(b.source.len().saturating_sub(1));
+    let end_line = b
+        .source
+        .iter()
+        .copied()
+        .find(|&l| !b.lines[l].tokens.end.is_empty());
+    let mut source: Vec<usize> = b.source[..first_tag].to_vec();
+    for t in &b.tags {
+        source.extend(&t.source);
+    }
+    if let Some(e) = end_line
+        && source
+            .last()
+            .is_none_or(|&l| b.lines[l].tokens.end.is_empty())
+    {
+        source.push(e);
+    }
+    b.source = source;
 }

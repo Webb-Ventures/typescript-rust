@@ -48,7 +48,7 @@ struct TsNoEmptyObjectType;
 
 /// `tagMightHaveTypePosition`, with `settings.jsdoc.structuredTags` overriding the
 /// defaults (a required type always may be there; otherwise a `type` of `false` forbids).
-fn might_have_type(structured: Option<&Map<String, Value>>, tag: &str) -> bool {
+pub(crate) fn might_have_type(structured: Option<&Map<String, Value>>, tag: &str) -> bool {
     if let Some(s) = structured.and_then(|m| m.get(tag)) {
         let required = s
             .get("required")

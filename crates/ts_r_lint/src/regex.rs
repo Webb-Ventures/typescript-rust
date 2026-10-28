@@ -1373,6 +1373,12 @@ impl Regex<'_> {
     /// the small patterns in rule options; backreferences match the empty string and
     /// lookbehinds always succeed).
     pub fn is_match(&self, text: &str, ignore_case: bool) -> bool {
+        self.is_match_flags(text, if ignore_case { "i" } else { "" })
+    }
+
+    /// [`Regex::is_match`] with the matching flags of `flags`: `i`, `s` (`.` matches line
+    /// terminators) and `m` (`^` and `$` match at line terminators).
+    pub fn is_match_flags(&self, text: &str, flags: &str) -> bool {
         let umode = self.flags.unicode || self.flags.sets;
         let input: Vec<u32> = if umode {
             text.chars().map(|c| c as u32).collect()
@@ -1382,7 +1388,9 @@ impl Regex<'_> {
         let m = Matcher {
             r: self,
             input,
-            icase: ignore_case,
+            icase: flags.contains('i'),
+            dot_all: flags.contains('s'),
+            multiline: flags.contains('m'),
             steps: std::cell::Cell::new(0),
         };
         (0..=m.input.len()).any(|start| m.node(self.root, start, &mut |_| true))
@@ -1393,6 +1401,8 @@ struct Matcher<'r, 'a> {
     r: &'r Regex<'a>,
     input: Vec<u32>,
     icase: bool,
+    dot_all: bool,
+    multiline: bool,
     steps: std::cell::Cell<u32>,
 }
 
@@ -1404,6 +1414,21 @@ fn fold(c: u32) -> u32 {
 
 fn is_word(c: u32) -> bool {
     char::from_u32(c).is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+/// The emoji properties of strings, approximated by one code point: the pictograph and
+/// symbol blocks, the regional indicators and the code points that end a sequence
+/// (variation selector 16, the keycap mark, a skin tone, a tag terminator). A sequence
+/// therefore matches at its last code point, which is what a pattern ending in
+/// `[...\p{RGI_Emoji}]` needs.
+fn is_emoji_like(c: u32) -> bool {
+    matches!(
+        c,
+        0x203C | 0x2049 | 0x2122 | 0x2139 | 0x2194..=0x21AA | 0x231A..=0x23FF | 0x24C2
+            | 0x25AA..=0x25FE | 0x2600..=0x27BF | 0x2934 | 0x2935 | 0x2B05..=0x2B55
+            | 0x3030 | 0x303D | 0x3297 | 0x3299 | 0xFE0F | 0x20E3 | 0xE007F
+            | 0x1F000..=0x1FAFF
+    )
 }
 
 fn is_line_terminator(c: u32) -> bool {
@@ -1428,7 +1453,8 @@ impl Matcher<'_, '_> {
             SetKind::Digit => ch.is_some_and(|x| x.is_ascii_digit()),
             SetKind::Space => ch.is_some_and(|x| x.is_whitespace() || x == '\u{FEFF}'),
             SetKind::Word => is_word(c),
-            SetKind::Property | SetKind::StringProperty => ch.is_some_and(char::is_alphabetic),
+            SetKind::Property => ch.is_some_and(char::is_alphabetic),
+            SetKind::StringProperty => is_emoji_like(c),
         };
         m != negate
     }
@@ -1535,7 +1561,7 @@ impl Matcher<'_, '_> {
                 self.rep(child, *min, *max, *greedy, 0, pos, k)
             }
             RKind::Char { value } => cur.is_some_and(|c| self.char_eq(*value, c)) && k(pos + 1),
-            RKind::Dot => cur.is_some_and(|c| !is_line_terminator(c)) && k(pos + 1),
+            RKind::Dot => cur.is_some_and(|c| self.dot_all || !is_line_terminator(c)) && k(pos + 1),
             RKind::CharSet { kind, negate } => {
                 cur.is_some_and(|c| self.set_matches(*kind, *negate, c)) && k(pos + 1)
             }
@@ -1543,8 +1569,19 @@ impl Matcher<'_, '_> {
             RKind::Assertion(a) => {
                 let before = pos.checked_sub(1).and_then(|p| self.input.get(p).copied());
                 let ok = match a {
-                    AssertKind::Start => pos == 0,
-                    AssertKind::End => pos == self.input.len(),
+                    AssertKind::Start => {
+                        pos == 0
+                            || (self.multiline
+                                && self
+                                    .input
+                                    .get(pos - 1)
+                                    .is_some_and(|&c| is_line_terminator(c)))
+                    }
+                    AssertKind::End => {
+                        pos == self.input.len()
+                            || (self.multiline
+                                && self.input.get(pos).is_some_and(|&c| is_line_terminator(c)))
+                    }
                     AssertKind::WordBoundary | AssertKind::NotWordBoundary => {
                         let b = before.is_some_and(is_word) != cur.is_some_and(is_word);
                         b == (*a == AssertKind::WordBoundary)
@@ -1615,6 +1652,17 @@ mod tests {
         assert!(!m("^(?:ignored|unused)$", "unused2"));
         assert!(m("[a-c]+x", "zzbbbx"));
         assert!(compile("FALL").unwrap().is_match("fall", true));
+    }
+
+    #[test]
+    fn matching_flags() {
+        let m = |p: &str, f: &str, t: &str| parse(p, Flags::new(f)).unwrap().is_match_flags(t, f);
+        assert!(!m("^a.b$", "v", "a\nb"));
+        assert!(m("^a.b$", "vs", "a\nb"));
+        assert!(!m("^b$", "v", "a\nb"));
+        assert!(m("^b$", "vm", "a\nb"));
+        assert!(m("[.\\p{RGI_Emoji}]$", "v", "Text \u{1F642}"));
+        assert!(!m("[.\\p{RGI_Emoji}]$", "v", "Foo"));
     }
 
     #[test]

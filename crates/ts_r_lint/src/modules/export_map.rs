@@ -64,6 +64,9 @@ pub(crate) struct ImportInfo {
     pub line: u32,
     pub only_types: bool,
     pub dynamic: bool,
+    /// What it imports (`importedSpecifiers`): imported names, `ImportDefaultSpecifier`,
+    /// `ImportNamespaceSpecifier` (also for `import()`); empty for re-exports.
+    pub specifiers: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -192,6 +195,10 @@ impl ExportMap {
                 self.reexports.push((name.to_owned(), re));
             }
         }
+    }
+    /// The names the module itself exports (not its re-exports), in order.
+    pub(crate) fn namespace_names(&self) -> impl Iterator<Item = &str> {
+        self.namespace.iter().map(|(n, _)| n.as_str())
     }
     pub(crate) fn namespace_has(&self, name: &str) -> bool {
         self.ns_index.contains_key(name)
@@ -555,6 +562,7 @@ impl Builder<'_> {
                 line: self.loc_line(at),
                 only_types: false,
                 dynamic: true,
+                specifiers: vec!["ImportNamespaceSpecifier".to_owned()],
             };
             self.add_import(&v, info);
         }
@@ -628,16 +636,26 @@ impl Builder<'_> {
                 };
                 let specs = ast.list(specifiers);
                 let mut all_types = !specs.is_empty();
+                let mut imported_names = Vec::new();
                 for &sp in specs {
                     match *ast.node(sp) {
-                        Node::ImportSpecifier { type_only: t, .. } => {
+                        Node::ImportSpecifier {
+                            type_only: t,
+                            imported,
+                            local,
+                        } => {
                             all_types &= t;
+                            if let Some(n) = module_name(ast, imported.unwrap_or(local)) {
+                                imported_names.push(n.to_owned());
+                            }
                         }
                         Node::ImportDefaultSpecifier { .. } => {
                             all_types = false;
+                            imported_names.push("ImportDefaultSpecifier".to_owned());
                         }
                         Node::ImportNamespaceSpecifier { local } => {
                             all_types = false;
+                            imported_names.push("ImportNamespaceSpecifier".to_owned());
                             if let Some(n) = module_name(ast, local) {
                                 self.ns_imports.insert(n.to_owned(), v.to_owned());
                             }
@@ -650,6 +668,7 @@ impl Builder<'_> {
                     line: self.loc_line(ast.span(source).start),
                     only_types: type_only || all_types,
                     dynamic: false,
+                    specifiers: imported_names,
                 };
                 self.add_import(v, info);
             }
@@ -667,6 +686,7 @@ impl Builder<'_> {
                     line: self.loc_line(ast.span(source).start),
                     only_types: type_only,
                     dynamic: false,
+                    specifiers: Vec::new(),
                 };
                 if let Some(p) = self.add_import(v, info)
                     && !self.map.dependencies.contains(&p)
@@ -698,6 +718,7 @@ impl Builder<'_> {
                         line: self.loc_line(ast.span(source).start),
                         only_types: type_only || all_types,
                         dynamic: false,
+                        specifiers: Vec::new(),
                     };
                     self.add_import(v, info);
                 }
