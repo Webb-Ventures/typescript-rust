@@ -7,6 +7,66 @@ pull requests merged since the previous release (also on the
 
 <!-- releases -->
 
+## [v0.1.0-alpha.5](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.5) - 2026-10-29
+
+### From the core team
+
+- ts-r-build parity round: esbuild oracle 832 -> 851 of 881 (96.6%) in #51
+- Parser parity round 1: ecosystem parse 959 -> 989 of 989 (100.0%) in #52
+- ts-r-lsp parity round 1: fourslash oracle 795 -> 1048 of 2543 (41.2%) in #53
+- Emit parity round 1: tsc emit baselines 1,673 -> 1,678 of 1,728, esbuild 851 -> 852 of 881 in #55
+- ts-r-dev parity round 4: Vite oracle 274 -> 312 of 322 (96.9%) in #56
+- Resolve track round 1: resolver 0 of 158,174 mismatches, tsconfig diagnostics 114/114, incremental 60/60, Yarn PnP extends, warm check with rootDir in #57
+- ts-r-run parity round 3: tsx 98 -> 100 of 100 (100%), node 36 of 36 in #58
+- Checker parity round: conformance 12365 -> 12372 of 12750 (97.0%), Playwright exact, 55 of 57 failing ecosystem packages pass in #59
+- ts-r-lint parity round: jsdoc rules, rule oracle 15,706 of 15,732, TypeORM 7,378 of 7,750 without types in #60
+- ts-r-check glue + ecosystem: history path matches check_program; ecosystem check 652 -> 708 of 709 (99.9%), tests 2 -> 3 of 4 in #61
+- ts-r-lsp parity round 2: fourslash 1048 -> 1308 of 2541 (51.5%) in #62
+- Checker round 2: merged defaults, lib-side link diagnostics, cross-file TS2717, recursive union elements, editor print modes (ecosystem check 709/709, tests 4/4; lint 15,708/15,732) in #63
+- Emit parity round 2: tsc baselines 1,678 -> 1,697 of 1,728, emit oracle 15,500 -> 15,539 bytes-exact in #64
+- ts-r-dev parity round 4: Vite oracle 312 -> 321 of 322 (99.7%) in #65
+- ts-r-dev / ts-r-build parity round 3: Vite oracle 321 -> 322 of 322 (100.0%), esbuild 854 -> 858 of 885 (96.9%) in #66
+- ts-r-lint round 3: 91 more rules, oracle 18,892 of 18,912 across 248 rules in #67
+- Emit parity round 3: tsc baselines 1,700 of 1,728, emit oracle 15,761 bytes-exact (90.8%) in #68
+- ts-r-lsp parity round 3: fourslash oracle 1309 -> 1562 of 2540 (61.5%) in #69
+- Checker parity round 3: conformance 12,372 -> 12,389 of 12,750 (97.2%) in #70
+- ts-r-lint parity round 4: rule oracle 18,892 -> 25,040 of 25,060 (44 new rules, eslint-plugin-unicorn) in #71
+- Emit parity round 4: tsc baselines 1,700 -> 1,718 (9 differ), program emit 15,837 of 17,352 (91.3%) in #72
+- LSP parity round 4: tsc 7 oracle 1562 -> 1706 of 2517 (67.8%) in #73
+- ts-r-check parity round 4: conformance 12,389 -> 12,408 of 12,750 (97.3%) in #74
+- v1 build parity round 4: CSS bundling, copy/local-css/global-css loaders; esbuild oracle 858 -> 931 of 957 (97.3%) in #75
+- ts-r-dev/ts-r-build parity round 5: Vite 322 -> 509 of 509 compared (workers, config variants, cspNonce), esbuild 938 of 964 (--keep-names) in #76
+- Emit parity round 5: tsc emit baselines 1,718 -> 1,723 of 1,727 (99.8%), program emit 15,888 in #77
+- ts-r-lsp parity round 5: fourslash oracle 1706 -> 1864 of 2517 (74.1%) in #78
+- ts-r-lint parity round 5: rule oracle 25,042 -> 43,855 of 43,874 (99.96%), 292 -> 473 rules in #79
+- ts-r-check parity round 5: conformance 12,408 -> 12,428 of 12,750 (97.5%), 154 extra variants in #80
+- Emit round 6: JavaScript declaration emit (d.ts 1,961 -> 2,332 of 2,640), parser fixes for declare export type {} and for (let in x) in #81
+- ts-r-build parity round 6: esbuild oracle 938 -> 1,002 of 1,028 (97.5%), Vite 512 of 512 in #82
+- ts-r-check parity round 6: conformance 12,428 -> 12,433 (97.5%), 154 -> 150 extra-diagnostic variants, hover 390 -> 399 in #83
+- ts-r-lsp parity round 6: LSP oracle 1864 -> 1967 of 2516 (78.2%) in #84
+- ts-r-lint round 6: 650 rules (unicorn recommended 335 of 338, 21 eslint-plugin-import rules), rule oracle 43,855 -> 73,072 of 73,093 in #85
+- ts-r-check emit parity round 7: declaration baselines 1,365 -> 1,412 of 1,634 (86.4%, E2 gate met) in #86
+- ts-r-build parity round 7: esbuild oracle 1,002 -> 1,046 of 1,066 (98.1%), 4 skipped in #87
+- ts-r-lint round 7: module-resolving import rules, unicorn recommended complete: oracle 75,282 of 75,305 (680 rules) in #88
+- ts-r-lsp parity round 7: fourslash oracle 1967 -> 2085 of 2516 (82.9%) in #89
+- Type checker parity round 7: conformance 12,433 -> 12,446 of 12,750 (97.6%), ecosystem 709/709 in #90
+- Glue round 8: tsconfig diagnostics match tsc on 303 of 303 configs, ts-r-run -e/-p/stdin (tsx 103 of 103, node 51 of 51), xtask uses cargo's target dir in #91
+- Emit parity round 8: emit oracle ALL 16,342 -> 16,458 of 17,352 (94.8%), JS 13,847, es2015 11,306 in #92
+- ts-r-lsp parity round 8: fourslash oracle 2085 -> 2131 of 2513 (84.8%) in #93
+- ts-r-lint round 8: eslint-plugin-import complete, 25 jsdoc rules: rule oracle 76,923 of 76,963 (716 rules) in #94
+- Type checker parity round 8: conformance 12,446 -> 12,451 of 12,750 (97.7%), lint type-aware 6,998 / 7,012 in #95
+- ts-r-build round 9: esbuild's --define hoisting and value grammar, CommonJS tree shaking, HMR flake fixed in #96
+- ts-r-lint round 9: oracle 76,925 -> 77,170 / 77,196, type-aware 7,010 / 7,012, comment-content and type-formatting in #97
+- Emit parity round 9: TSR2006 refusals 86 -> 53, .d.ts 2,406 -> 2,427, JS 13,847 -> 13,869 of 14,476 in #98
+- ts-r-lsp parity round 9: LSP oracle 2136 -> 2175 of 2513 (86.5%) in #99
+- ts-r-check parity round 9: conformance 12,451 -> 12,458 / 12,750 (97.7%), CommonJS export types, strict callback parameters in #100
+- ts-r-build parity round 10: esbuild oracle 1,047 of 1,067 (98.1%); data imports as ES modules, minified top 1000 3.0% under esbuild in #101
+- Emit parity round 10: tsc emit oracle 16,506 -> 16,573 of 17,352 outputs bytes-exact (95.5%), E2 1,436 -> 1,439 in #102
+- Checker parity round 10: conformance 12,458 -> 12,460 of 12,750 (97.7%), JSDoc @overload signatures, TS4023 and typeof-require emit fixes in #103
+- ts-r-lsp parity round 10: fourslash oracle 2179 -> 2211 of 2513 (88.0%) in #104
+- ts-r-lint round 10: 814 rules (61 type-aware), rule oracle 77,171 -> 90,430 of 90,461 in #105
+- Benches: size the release build's jobs to the container's memory in #106
+
 ## [v0.1.0-alpha.4](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.4) - 2026-10-24
 
 ### From the core team
