@@ -330,20 +330,13 @@ Logs: `docker logs ts-r-review-dispatcher-1` and `/srv/ts-r-review/logs/`.
 
 ### Benches
 
-[`bench.yml`](../../../.github/workflows/bench.yml) hands benches to the box the same way: on
-pushes to a PR touching the code or the bench, for the top PR of a stack, from this repository
-by a trusted author (not `sync/` branches: the mirror's sync PRs were benched in the private
-repo). Otherwise a trusted user starts one:
+PR benches run on GitHub-hosted runners (`.github/workflows/bench-actions.yml`; bench/README.md,
+"Benches on GitHub-hosted runners"), which are free in the public repository. Since 2026-10-29
+no workflow hands benches to a box, and the review box runs `LANES=["review"]`. The bench lane
+below stays in the dispatcher for a dedicated bench machine, if one is set up again: a request
+that names `bench.yml` as its workflow is benched as described here, and a box without the lane
+refuses it (421).
 
-- by **approving** a PR from this repository (on a fork's PR the workflow gets no secrets for
-  review events, so use `/bench`): a review by a trusted user with state `APPROVED` on the PR's
-  current head (the dispatcher lists the PR's reviews itself; a later push needs another approval, and
-  `sync/` PRs are not benched on approval);
-- by commenting **`/bench`** on any PR, forks included (the box reacts with eyes); in the public
-  repository a fork's PR is also benched on GitHub's runners without the box
-  (`.public/.github/workflows/bench-actions.yml`, which also runs a nightly macOS, Windows and
-  Linux bench of `main`);
-- or by running the Bench workflow from the Actions tab with the number of any PR.
 
 The box runs what the old Actions job ran, on a quieter machine:
 

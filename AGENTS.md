@@ -85,7 +85,7 @@ moves when a person merges a reviewed branch.
   integration branch: a finished track is merged (`--no-ff`) into it, pushed as the track's branch
   (a fast-forward), and its PR is appended to the stack (`gh stack link <stack> <branch>`). Start
   new work from the top branch (today `main`: the first M8 stack is merged). CI (ci.yml,
-  bench.yml, pages.yml) runs only on the top PR, and skips jobs whose code already passed.
+  bench-actions.yml, pages.yml) runs only on the top PR, and skips jobs whose code already passed.
 - Commit at every milestone: when a coherent piece works and `cargo test`, `cargo clippy -D warnings`
   and `cargo xtask agents-check` pass for your crates. Small, reviewable commits beat one huge one.
   Commit messages say what works and the measured results (speed, oracle match counts).
