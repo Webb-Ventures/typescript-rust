@@ -66,6 +66,8 @@ pull requests merged since the previous release (also on the
 - ts-r-lsp parity round 10: fourslash oracle 2179 -> 2211 of 2513 (88.0%) in #104
 - ts-r-lint round 10: 814 rules (61 type-aware), rule oracle 77,171 -> 90,430 of 90,461 in #105
 - Benches: size the release build's jobs to the container's memory in #106
+- Benches: PRs benched on GitHub-hosted runners, Linux x64 gating, six more runners (Linux arm64, Windows x64 and arm64, macOS arm64 and x64, Linux 1 thread) reporting in #109
+- Review box: deploys itself from main after a merge in #110
 
 ## [v0.1.0-alpha.4](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.4) - 2026-10-24
 
