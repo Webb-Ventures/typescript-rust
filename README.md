@@ -113,7 +113,7 @@ request.
 ### Latest release
 
 <!-- bench:release:start -->
-Release **v0.1.0-alpha.4**:
+Release **v0.1.0-alpha.5**:
 
 | Benchmark | ts-r | Fastest other tool | ts-r is |
 |---|---:|---:|---:|
