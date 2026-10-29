@@ -61,3 +61,39 @@ test('worker counts follow small slots and stay capped at four on larger slots',
   assert.ok(args(4, { BENCH_MEMORY: '6g', BENCH_BUILD_JOB_MEMORY: '1g' }).includes('CARGO_BUILD_JOBS=4'));
   assert.ok(args(4, { BENCH_MEMORY: '6g', BENCH_BUILD_JOB_MEMORY: '6g' }).includes('CARGO_BUILD_JOBS=1'));
 });
+
+test('a build directory that moved with its checkout is dropped, its data kept', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const job = fs.readFileSync(require.resolve('../box/job.mjs'), 'utf8');
+  const helper = job.slice(job.indexOf('const MOVED_KEPT'), job.indexOf('function benchCheckout'));
+  const logs = [];
+  const drop = vm.runInNewContext(`${helper}\ndropMovedBuilds;`, { fs, path, console: { log: (m) => logs.push(m) } });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-moved-'));
+  try {
+    const listing = (checkout) => fs.readdirSync(`${checkout}/target`).sort();
+    // The single bench directory of before, its builds made without a recorded path.
+    for (const dir of ['debug', 'release', 'bench-repos', 'upstream']) fs.mkdirSync(`${root}/pr/target/${dir}`, { recursive: true });
+    fs.mkdirSync(`${root}/slot-0`);
+    fs.renameSync(`${root}/pr`, `${root}/slot-0/pr`);
+    const checkout = `${root}/slot-0/pr`;
+    drop(checkout);
+    assert.deepEqual(listing(checkout), ['.checkout-path', 'bench-repos', 'upstream']);
+    assert.match(logs.pop(), /dropped \(debug, release\)/);
+    // Built where it is: kept.
+    fs.mkdirSync(`${checkout}/target/release`);
+    drop(checkout);
+    assert.deepEqual(listing(checkout), ['.checkout-path', 'bench-repos', 'release', 'upstream']);
+    assert.equal(logs.length, 0);
+    // Moved again: dropped, and the new path recorded.
+    fs.renameSync(`${root}/slot-0`, `${root}/slot-1`);
+    drop(`${root}/slot-1/pr`);
+    assert.deepEqual(listing(`${root}/slot-1/pr`), ['.checkout-path', 'bench-repos', 'upstream']);
+    assert.equal(fs.readFileSync(`${root}/slot-1/pr/target/.checkout-path`, 'utf8'), `${root}/slot-1/pr\n`);
+    // No build directory yet: nothing to do.
+    drop(`${root}/none`);
+    assert.equal(fs.existsSync(`${root}/none`), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

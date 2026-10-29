@@ -454,7 +454,7 @@ function credentialsAbsent(files, logFile, before) {
 // disk for them): then the next run's base build is a no-op when the base is unchanged (the
 // checkout leaves unchanged files' mtimes alone) and its PR build recompiles only what changed.
 // That is why a slot goes back to the PR, or else the base, it ran last (ci/bench-lanes.cjs).
-const BENCH_KEPT = new Set(['bench-repos', 'upstream']);
+const BENCH_KEPT = new Set(['bench-repos', 'upstream', '.checkout-path']);
 const KEEP_BUILDS = env.BENCH_KEEP_BUILDS === '1';
 // Steps that run PR code can write the checkouts, so a path in one may lead through a link. This
 // removes `rel` under `root` without following one: a link on the way is removed instead.

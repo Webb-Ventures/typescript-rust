@@ -519,6 +519,36 @@ async function benchPrepare() {
   console.log(`Bench #${number}: ${head} against ${env.BASE_REF} @ ${base}.`);
 }
 
+// Cargo reuses a build directory that moved with its checkout (as the single bench directory of
+// before did when it became slot 0's): its fingerprints hold paths relative to the workspace.
+// Code that bakes its source path in at compile time does not move with it: xtask finds the repo
+// through env!("CARGO_MANIFEST_DIR"), and so does the checker's lib-file fallback, so a moved
+// xtask reads the old checkout's files, or none. target/.checkout-path records where the builds
+// were made; builds made elsewhere, or where that is unknown, go. The pinned repos and lib files
+// (data, which bench-deps refreshes) stay.
+const MOVED_KEPT = new Set(['bench-repos', 'upstream', '.checkout-path']);
+function dropMovedBuilds(checkout) {
+  const target = `${checkout}/target`;
+  let stat;
+  try {
+    stat = fs.lstatSync(target);
+  } catch {
+    return;
+  }
+  if (!stat.isDirectory()) return;
+  const stamp = `${target}/.checkout-path`;
+  let built = null;
+  try {
+    built = fs.readFileSync(stamp, 'utf8').trim();
+  } catch {}
+  if (built !== checkout) {
+    const dropped = fs.readdirSync(target).filter((entry) => !MOVED_KEPT.has(entry));
+    for (const entry of dropped) fs.rmSync(`${target}/${entry}`, { recursive: true, force: true });
+    if (dropped.length) console.log(`${path.basename(checkout)}: builds made ${built ? `in ${built}` : 'before builds recorded their path'} dropped (${dropped.join(', ')})`);
+  }
+  fs.writeFileSync(stamp, `${checkout}\n`);
+}
+
 function benchCheckout() {
   const { head, base } = JSON.parse(fs.readFileSync(`${job}/in/bench.json`, 'utf8'));
   for (const [name, sha] of [['pr', head], ['base', base]]) {
@@ -537,6 +567,7 @@ function benchCheckout() {
     // Everything untracked goes except the build directory and the installed bench tools.
     benchGit(name, ['clean', '-ffdxq', '-e', '/target/', '-e', '/bench/node_modules/']);
     fs.rmSync(`${BENCH}/${name}/bench/results`, { recursive: true, force: true });
+    dropMovedBuilds(`${BENCH}/${name}`);
     console.log(`${name}: ${sha}`);
   }
   // The binaries the PR's scenarios run, read from git (no PR code has run yet): only they are
