@@ -208,7 +208,7 @@ Everything lives in `/srv/ts-r-review` on the box:
 
 | Path | What it is |
 |---|---|
-| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for benches, `LANES`, `BENCH_KEEP_BUILDS`, `BENCH_SLOTS`, `BENCH_SLOT_CPUS`, `BENCH_CPUS`, `REVIEW_CPUS`, `BENCH_MEASURE`, `BENCH_MEMORY`, `BENCH_BUILD_JOB_MEMORY` and `BENCH_REFERENCE_DAYS` (see [Benches](#benches)) |
+| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for benches, `LANES`, `BENCH_KEEP_BUILDS`, `BENCH_SLOTS`, `BENCH_SLOT_CPUS`, `BENCH_CPUS`, `REVIEW_CPUS`, `BENCH_MEASURE`, `BENCH_MEMORY`, `BENCH_BUILD_JOB_MEMORY` and `BENCH_REFERENCE_DAYS` (see [Benches](#benches)); for deploys, `DEPLOY_REPO` and `DEPLOY_WAIT_MINUTES` (see [Deploys](#deploys)) |
 | `secrets/github-app.pem` | The App's private key |
 | `secrets/dispatch-token` | Shared with the workflow as `CODE_REVIEW_DISPATCH_TOKEN` |
 | `codex-home/` | The box's Codex login (`auth.json`); Codex refreshes it in place |
@@ -216,6 +216,7 @@ Everything lives in `/srv/ts-r-review` on the box:
 | `targets/` | A fix run's build directory while it runs (deleted when it ends) |
 | `jobs/`, `logs/` | Per-job working directories (deleted after each job) and container logs (last 200) |
 | `bench/` | Per repo (`<owner>__<name>/`): one directory per slot (`slot-<n>/`: its PR and base checkouts, sources only between runs unless `BENCH_KEEP_BUILDS=1`), the crates and package stores the slots share (`cargo/`, `pm/`, `npm/`), the kept reference-tool numbers (`reference/`) and `passed.json` |
+| `deploy/` | The plugin directory of the deployed commit (`<sha>/`, and the one waiting to deploy), and `current`, the deployed commit |
 | `queue.json` | Both lanes' queues; a restart (a redeploy) picks them up, restarting the running jobs (a bench stopped as moot is not restarted) |
 
 ### Setup
@@ -263,6 +264,38 @@ Everything lives in `/srv/ts-r-review` on the box:
    (`<box>` above).
 
 Logs: `docker logs ts-r-review-dispatcher-1` and `/srv/ts-r-review/logs/`.
+
+### Deploys
+
+After the first deploy by hand, the box deploys itself: a merge into `main` that changes this
+plugin runs [deploy-box.yml](../../../.github/workflows/deploy-box.yml), which POSTs
+`{run_id, repo}` to `/code-review/deploy` with the dispatch token, like the code review. The
+dispatcher checks the run on GitHub: that workflow, in `DEPLOY_REPO` (one of `REPOS`; unset, the
+box refuses deploys), a push to its default branch or a manual run on it by a trusted user, at the
+branch's current head. Then it:
+
+1. fetches this plugin directory of that commit (no history, no other files) into
+   `deploy/<sha>/`;
+2. starts no new job and waits for the running ones (at most `DEPLOY_WAIT_MINUTES`, default 90;
+   after that it deploys anyway, and the stopped jobs start again from the beginning);
+3. runs [box/deploy.sh](box/deploy.sh) in a container of its own (`ts-r-deploy`), from the image
+   running now: it tags that image `ts-r-review:previous`, builds the new one, restarts the box
+   with it, and checks that the new dispatcher answers `/healthz`. If it does not within three
+   minutes, the previous image comes back. If the build fails nothing is restarted and the jobs
+   carry on.
+
+The restarted dispatcher picks both queues up from `queue.json`. A newer merge replaces a deploy
+still waiting; one that arrives while a deploy runs gets a 409 (run the workflow again after it).
+`/healthz` ends with the deployed commit (`deployed by hand` before the first deploy) and any
+deploy waiting or running; each deploy's log is `logs/deploy-<sha>.log`. To roll back by hand:
+`docker tag ts-r-review:previous ts-r-review:latest` and `docker compose -f <plugin>/box/compose.yaml up -d --no-build`.
+
+Setting it up: deploy once by hand with this version (`box/install.sh`), set
+`DEPLOY_REPO=<owner>/<name>` in `config.env` and re-run `box/install.sh`, then set the
+`CODE_REVIEW_DEPLOY` repo variable to `true` in that repository (the workflow skips everywhere
+else). It uses the code review's secrets (`TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
+`CODE_REVIEW_DISPATCH_TOKEN`, `CODE_REVIEW_BOX`). A change to `install.sh` itself (the
+directories, `tailscale serve`) still needs a run by hand.
 
 ### Why it is set up this way
 
