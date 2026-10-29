@@ -208,7 +208,7 @@ Everything lives in `/srv/ts-r-review` on the box:
 
 | Path | What it is |
 |---|---|
-| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for benches, `LANES`, `BENCH_KEEP_BUILDS`, `BENCH_SLOTS`, `BENCH_SLOT_CPUS`, `BENCH_CPUS`, `REVIEW_CPUS`, `BENCH_MEASURE`, `BENCH_MEMORY` and `BENCH_REFERENCE_DAYS` (see [Benches](#benches)) |
+| `config.env` | `REPOS` (a JSON array of `owner/name`; requests without a `repo` are for the first; `REPO` alone still works), `TRUSTED_USERS`, `MODEL`, `EFFORT`, `GITHUB_APP_ID` (optionally `GITHUB_APP_INSTALLATION_ID`, the installation on the first repo's account); for benches, `LANES`, `BENCH_KEEP_BUILDS`, `BENCH_SLOTS`, `BENCH_SLOT_CPUS`, `BENCH_CPUS`, `REVIEW_CPUS`, `BENCH_MEASURE`, `BENCH_MEMORY`, `BENCH_BUILD_JOB_MEMORY` and `BENCH_REFERENCE_DAYS` (see [Benches](#benches)) |
 | `secrets/github-app.pem` | The App's private key |
 | `secrets/dispatch-token` | Shared with the workflow as `CODE_REVIEW_DISPATCH_TOKEN` |
 | `codex-home/` | The box's Codex login (`auth.json`); Codex refreshes it in place |
@@ -370,7 +370,16 @@ The box runs what the old Actions job ran, on a quieter machine:
   startup and `/healthz` shows the slots, their benches and any error. One PR has at most one
   bench running, and a slot goes back to the PR it ran last (its builds are there), else to one
   with the same base. Each container gets `BENCH_MEMORY` (default `6g`): slots times that must
-  fit in the box's memory, and each slot keeps its own checkouts and, with
+  fit in the box's memory. The release builds compile as many crates at once as that memory
+  holds at `BENCH_BUILD_JOB_MEMORY` (default `4608m`) each, at most one per core of the slot and
+  at most 4. The release profile (fat LTO, one codegen unit) puts the large crates and the
+  binaries' links at GBs each: measured one crate at a time in a 6g container, `ts_r_lint`'s
+  library peaks at 4.3 GB, the `ts-r-lint` link at 3.1 GB, `ts-r-check`'s at 2.2 GB and
+  `ts_r_checker` at 1.7 GB. So a 6g container builds one crate at a time (about 23 minutes for a
+  cold build of the bench binaries on four cores; with `BENCH_KEEP_BUILDS=1` only what changed);
+  four at once were killed for memory on every bench of #104 and #105, and a 16g one builds three. If the kernel still kills a compile for memory, the build goes on one crate at a
+  time from where it stopped. The startup log line shows the jobs per slot. Each slot keeps its
+  own checkouts and, with
   `BENCH_KEEP_BUILDS=1`, its own two release builds (a few GB) on disk.
 - **Measured alone.** Slots share the memory bus, the last-level cache and the disk even on
   disjoint cores. With `BENCH_MEASURE=alone` (the default) a slot measures only while no other

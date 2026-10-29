@@ -83,6 +83,27 @@ function benchSlots(config, cores) {
   return { slots: sets.map(formatCpus) };
 }
 
+// A Docker memory size ("6g", "6144m", "512k", or bytes) in MB, or null if malformed.
+function memoryMb(text) {
+  const match = /^(\d+)([kmg]?)$/i.exec(String(text ?? '').trim());
+  if (!match) return null;
+  const scale = { '': 1 / (1 << 20), k: 1 / 1024, m: 1, g: 1024 }[match[2].toLowerCase()];
+  const mb = Math.floor(Number(match[1]) * scale);
+  return mb > 0 ? mb : null;
+}
+
+// How many crates a bench build compiles at once (CARGO_BUILD_JOBS): one per core of the slot, at
+// most 4, but no more than the container's memory holds at `jobMemory` MB per compile, and at
+// least one. The release profile (fat LTO, one codegen unit) makes the large crates and the
+// binaries' links take GBs each, so on a box with little memory per core the memory decides.
+function buildJobs({ cores, memory, jobMemory }) {
+  const byCores = Math.min(4, Math.max(1, cores ?? 1));
+  const mb = memoryMb(memory);
+  const per = memoryMb(jobMemory);
+  if (!mb || !per) return byCores;
+  return Math.max(1, Math.min(byCores, Math.floor(mb / per)));
+}
+
 const samePr = (a, b) => a.repo === b.repo && a.pr === b.pr;
 
 // The queue and the slots. A slot remembers the PR and base it last ran, so the next bench of
@@ -218,4 +239,4 @@ function createPhaseLock(mode = 'alone') {
   return { run, acquire, state: () => ({ ...holders, waiting: waiting.length }) };
 }
 
-module.exports = { parseCpus, formatCpus, benchSlots, createLanes, supersede, enqueue, ahead, assign, finish, createPhaseLock, samePr };
+module.exports = { parseCpus, formatCpus, benchSlots, memoryMb, buildJobs, createLanes, supersede, enqueue, ahead, assign, finish, createPhaseLock, samePr };

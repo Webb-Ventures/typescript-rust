@@ -44,10 +44,20 @@ test('valid reference output is stored, and cache failures never escape', () => 
 
 test('worker counts follow small slots and stay capped at four on larger slots', () => {
   const mounts = source.slice(source.indexOf('  const mounts ='), source.indexOf('  const heavy ='));
+  const sizing = source.slice(source.indexOf('const BENCH_BUILD_JOB_MEMORY'), source.indexOf('// Reference tools (tsc'));
+  const args = (size, env) => vm.runInNewContext(`${sizing}\n${mounts}\nmounts;`, {
+    slot: { size }, SLOT: 'slot', BENCH: 'bench', dir: 'job', repo: 'o/r', cacheDir: () => 'cache',
+    env, BENCH_MEMORY: env.BENCH_MEMORY, benchLanesLib: require('./bench-lanes.cjs'),
+  });
   for (const size of [1, 2, 4, 8]) {
-    const args = vm.runInNewContext(`${mounts}\nmounts;`, {
-      slot: { size }, SLOT: 'slot', BENCH: 'bench', dir: 'job', repo: 'o/r', cacheDir: () => 'cache',
-    });
-    for (const name of ['CARGO_BUILD_JOBS', 'RAYON_NUM_THREADS']) assert.ok(args.includes(`${name}=${Math.min(4, size)}`));
+    const roomy = args(size, { BENCH_MEMORY: '64g' });
+    for (const name of ['CARGO_BUILD_JOBS', 'RAYON_NUM_THREADS']) assert.ok(roomy.includes(`${name}=${Math.min(4, size)}`), `${name} ${size}`);
   }
+  // The default 6g container builds fewer crates at once than its 4 cores, and measures on all 4.
+  const tight = args(4, { BENCH_MEMORY: '6g' });
+  assert.ok(tight.includes('RAYON_NUM_THREADS=4'));
+  const jobs = Number(tight.find((a) => a.startsWith('CARGO_BUILD_JOBS=')).split('=')[1]);
+  assert.ok(jobs >= 1 && jobs < 4, String(jobs));
+  assert.ok(args(4, { BENCH_MEMORY: '6g', BENCH_BUILD_JOB_MEMORY: '1g' }).includes('CARGO_BUILD_JOBS=4'));
+  assert.ok(args(4, { BENCH_MEMORY: '6g', BENCH_BUILD_JOB_MEMORY: '6g' }).includes('CARGO_BUILD_JOBS=1'));
 });
