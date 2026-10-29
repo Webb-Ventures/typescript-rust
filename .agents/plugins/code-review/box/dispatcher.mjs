@@ -67,6 +67,12 @@ const SLOTS = benchLanesLib.benchSlots(
 const BENCH_MEASURE = env.BENCH_MEASURE === 'parallel' ? 'parallel' : 'alone';
 // The memory of each bench container (BENCH_MEMORY, default 6g): slots times this must fit.
 const BENCH_MEMORY = /^\d+[kmg]?$/i.test(env.BENCH_MEMORY ?? '') ? env.BENCH_MEMORY : '6g';
+// What one compile of the release build can take at its peak (BENCH_BUILD_JOB_MEMORY, default
+// 4608m: ts_r_lint's library peaked at 4.3 GB, its binary's link at 3.1 GB, in a 6g container on
+// 2026-10-29): a bench build runs BENCH_MEMORY / this many compiles at once, at most one per core
+// of the slot and at most 4 (ci/bench-lanes.cjs buildJobs).
+const BENCH_BUILD_JOB_MEMORY = benchLanesLib.memoryMb(env.BENCH_BUILD_JOB_MEMORY) ? env.BENCH_BUILD_JOB_MEMORY : '4608m';
+const benchBuildJobs = (slot) => benchLanesLib.buildJobs({ cores: slot.size, memory: BENCH_MEMORY, jobMemory: BENCH_BUILD_JOB_MEMORY });
 // Reference tools (tsc, ESLint, esbuild, ...) measured on a slot are reused for this many days
 // (BENCH_REFERENCE_DAYS, default 7; 0 measures them every time) while nothing that could change
 // them changed: see referenceKey.
@@ -777,7 +783,7 @@ async function runBench(job, slot) {
   const mounts = ['-v', `${SLOT}/git:${SLOT}/git:ro`, '-v', `${cacheDir(repo)}:${cacheDir(repo)}:ro`, '-v', `${dir}/in:${dir}/in:ro`, '-v', `${dir}/out:${dir}/out`,
     ...['cargo', 'pm', 'npm'].flatMap((sub) => ['-v', `${BENCH}/${sub}:${BENCH}/${sub}`]),
     '-e', `CARGO_HOME=${BENCH}/cargo`, '-e', `TS_R_BENCH_CACHE=${BENCH}/pm`, '-e', `npm_config_cache=${BENCH}/npm`,
-    '-e', `CARGO_BUILD_JOBS=${Math.min(4, slot.size)}`, '-e', `RAYON_NUM_THREADS=${Math.min(4, slot.size)}`];
+    '-e', `CARGO_BUILD_JOBS=${benchBuildJobs(slot)}`, '-e', `RAYON_NUM_THREADS=${Math.min(4, slot.size)}`];
   const heavy = [...LOCKED_DOWN, ...cpus, '--memory', BENCH_MEMORY, '--pids-limit', '4096'];
   const offline = ['--network', 'none', '-e', 'CARGO_NET_OFFLINE=true', '-e', 'npm_config_offline=true'];
 
@@ -1045,7 +1051,7 @@ for (const repo of REPOS) {
   }
   for (const slot of benchLanes.slots) if (fs.existsSync(slotDir(repo, slot.id))) cleanBench(slotDir(repo, slot.id));
 }
-log(`bench slots: ${benchLanes.slots.map((s) => s.cpus).join(' ')} (${HOST_CORES ?? 'unknown'} cores; measure ${BENCH_MEASURE})${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`);
+log(`bench slots: ${benchLanes.slots.map((s) => s.cpus).join(' ')} (${HOST_CORES ?? 'unknown'} cores; measure ${BENCH_MEASURE}; ${BENCH_MEMORY} each, builds ${benchLanes.slots.map(benchBuildJobs).join('/')} jobs at ${BENCH_BUILD_JOB_MEMORY} per compile)${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`);
 // Synchronous, so it cannot remove the containers of the jobs restoreQueue starts.
 spawnSync('sh', ['-c', 'docker ps -aq --filter name=^tsr- | xargs -r docker rm -f'], { stdio: 'ignore' });
 server.listen(Number(env.PORT ?? 8787), '0.0.0.0', () => log(`dispatcher for ${REPOS.join(', ')} on :${env.PORT ?? 8787}; trusted: ${[...TRUSTED].join(', ')}`));

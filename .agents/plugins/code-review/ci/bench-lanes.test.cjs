@@ -14,6 +14,33 @@ test('cpusets parse and print', () => {
   assert.equal(lanes.formatCpus([2, 3, 4, 5, 8, 10, 11]), '2-5,8,10-11');
 });
 
+test('memory sizes parse as Docker writes them', () => {
+  assert.equal(lanes.memoryMb('6g'), 6144);
+  assert.equal(lanes.memoryMb('6G'), 6144);
+  assert.equal(lanes.memoryMb('2560m'), 2560);
+  assert.equal(lanes.memoryMb('2097152k'), 2048);
+  assert.equal(lanes.memoryMb(String(3 * 2 ** 30)), 3072);
+  for (const bad of ['', '6gb', '-1g', '0g', 'x', '1.5g', undefined, null]) assert.equal(lanes.memoryMb(bad), null, String(bad));
+});
+
+test('a bench build runs as many compiles as the slot has memory for', () => {
+  // The dispatcher's defaults (6g, 4608m) on the 6-core review box's one 4-core slot: one at a
+  // time, as ts_r_lint's library alone peaks at 4.3 GB; a 16g container builds three.
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '6g', jobMemory: '4608m' }), 1);
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '16g', jobMemory: '4608m' }), 3);
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '6g', jobMemory: '3g' }), 2);
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '6g', jobMemory: '4g' }), 1);
+  // Memory to spare: the cores decide, at most 4.
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '16g', jobMemory: '3g' }), 4);
+  assert.equal(lanes.buildJobs({ cores: 8, memory: '64g', jobMemory: '3g' }), 4);
+  assert.equal(lanes.buildJobs({ cores: 2, memory: '64g', jobMemory: '3g' }), 2);
+  // Never below one, even when a single compile needs more than the container has.
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '2g', jobMemory: '3g' }), 1);
+  // A malformed size leaves the cores to decide, as before.
+  assert.equal(lanes.buildJobs({ cores: 4, memory: 'x', jobMemory: '3g' }), 4);
+  assert.equal(lanes.buildJobs({ cores: 4, memory: '6g', jobMemory: 'x' }), 4);
+});
+
 test('without BENCH_SLOTS there is one slot on BENCH_CPUS, as before', () => {
   assert.deepEqual(lanes.benchSlots({}, null), { slots: ['2-5'] });
   assert.deepEqual(lanes.benchSlots({ cpus: '4-7' }, 16), { slots: ['4-7'] });

@@ -571,7 +571,16 @@ function benchDeps() {
 // scenarios run (BENCH_BINS, from bench-checkout) that this side has. The workspace stays the
 // selected package set, so features resolve as for a full build and each binary is the same; the
 // release profile's whole-program link is what the binaries nobody runs (the language server, the
-// dev server, xtask) cost. Exits 0, or 2 when the build fails.
+// dev server, xtask) cost. The dispatcher sizes CARGO_BUILD_JOBS to the container's memory; if
+// the kernel still kills a compile for memory (the container's cgroup counts it), the build goes
+// on one crate at a time, keeping what it finished. Exits 0, or 2 when the build fails.
+const oomKills = () => {
+  try {
+    return Number(/^oom_kill (\d+)$/m.exec(fs.readFileSync('/sys/fs/cgroup/memory.events', 'utf8'))?.[1] ?? 0);
+  } catch {
+    return 0;
+  }
+};
 function benchBuild() {
   const side = env.BENCH_SIDE === 'base' ? 'base' : 'pr';
   const cwd = `${BENCH}/${side}`;
@@ -588,8 +597,14 @@ function benchBuild() {
     }
   }
   const args = ['build', '--release', '--locked', ...targets];
-  console.log(`=== building the ${side === 'pr' ? 'PR' : 'base'}: cargo ${args.join(' ')}`);
-  const result = spawnSync('cargo', args, { cwd, stdio: 'inherit' });
+  console.log(`=== building the ${side === 'pr' ? 'PR' : 'base'}: cargo ${args.join(' ')} (CARGO_BUILD_JOBS=${env.CARGO_BUILD_JOBS ?? 'unset'})`);
+  const kills = oomKills();
+  let result = spawnSync('cargo', args, { cwd, stdio: 'inherit' });
+  if (result.status !== 0 && oomKills() > kills && env.CARGO_BUILD_JOBS !== '1') {
+    console.log('=== a compile ran out of the container\'s memory; building the rest one crate at a time');
+    result = spawnSync('cargo', [...args, '--jobs', '1'], { cwd, stdio: 'inherit' });
+  }
+  if (result.status !== 0 && oomKills() > kills) console.log('=== the build ran out of memory (BENCH_MEMORY) even one crate at a time');
   process.exit(result.status === 0 ? 0 : 2);
 }
 
