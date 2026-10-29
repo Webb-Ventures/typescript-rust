@@ -10,7 +10,7 @@ import { benchTable } from '../../scripts/readme-bench.mjs';
 const meta = { head: 'abcdef1234567', baseRef: 'main', base: '7654321fedcba', runUrl: 'https://example/run' };
 const table = '### Benchmarks (pr @ abcdef1, linux-x86_64)\n\n| Scenario | Tool | Median |\n|---|---|---:|\n| check-trpc | **ts-r-check** | 400.0 ms |\n| check-trpc | tsc-7 | 900.0 ms |\n';
 const legs = [
-  { label: 'macos-arm64', runner: 'macos-15', gate: false, threads: 3, code: 1, tables: '| mac |' },
+  { label: 'macos-arm64', runner: 'macos-15', gate: false, threads: 3, code: 1, tables: table.replace('linux-x86_64', 'macos-aarch64').replace('900.0 ms', '300.0 ms') },
   { label: 'linux-x64', runner: 'ubuntu-24.04', gate: true, threads: 4, code: 0, tables: table },
   { label: 'windows-arm64', runner: 'windows-11-arm', gate: false, threads: 4, code: undefined, tables: '' },
 ];
@@ -30,6 +30,7 @@ test('the gate row comes first and its tables are the results the README reads',
   assert.doesNotMatch(body, /<summary>windows-arm64/);
   // scripts/readme-bench.mjs reads the gate's tables and its runner.
   assert.match(benchTable(body, '2026-10-29'), /on linux-x86_64 \(a GitHub-hosted ubuntu-24\.04 runner\), measured 2026-10-29/);
+  assert.match(benchTable(body), /\| `check-trpc` \| `ts-r-check` 400 ms \| `tsc-7` 900 ms \| \*\*2\.3× faster\*\* \|/);
 });
 
 test('long tables are cut to fit a GitHub comment', () => {

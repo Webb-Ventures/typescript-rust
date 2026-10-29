@@ -53,7 +53,8 @@ function duration(v) {
 /** Rows of every results table in a bench comment: { scenario, tool, ours, median }. */
 export function parseBench(comment) {
   const at = comment.indexOf('<!-- ts-r-bench:results -->');
-  const text = at < 0 ? comment : comment.slice(at);
+  const end = comment.indexOf('<!-- /ts-r-bench:results -->', at);
+  const text = at < 0 ? comment : comment.slice(at, end < 0 ? undefined : end);
   const platform = /### Benchmarks \([^,)]*,\s*([^)]+)\)/.exec(text)?.[1]?.trim() ?? null;
   const machine = /<!-- ts-r-bench:machine ([^>]*?) -->/.exec(comment)?.[1]?.trim() || 'four dedicated cores';
   const rows = [];
