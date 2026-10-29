@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
 const { REFRESH_MARK } = require('./github.cjs');
-const { parseRepos, parseRequest, checkRun, reviewDecision, benchNeeds, benchDecision } = require('./trust.cjs');
+const { parseRepos, parseRequest, parseDeployRequest, checkRun, reviewDecision, benchNeeds, benchDecision, deployDecision } = require('./trust.cjs');
 
 const PRIVATE = 'Webb-Ventures/tsc-rust';
 const PUBLIC = 'Webb-Ventures/typescript-rust';
@@ -149,4 +149,25 @@ test('manual bench: a trusted user, any PR', () => {
   assert.deepEqual(benchDecision({ run: run('workflow_dispatch'), actor: 'owner', pull: fork(), repo: PUBLIC, trusted }), { by: 'owner' });
   assert.equal(status(benchDecision({ run: run('workflow_dispatch'), actor: 'stranger', pull: pull(), repo: PUBLIC, trusted })), 403);
   assert.equal(status(benchDecision({ run: run('push'), actor: 'owner', pull: pull(), repo: PUBLIC, trusted })), 403);
+});
+
+test('deploy requests: a run id and a served repository, no PR', () => {
+  assert.deepEqual(parseDeployRequest({ run_id: 5, repo: PUBLIC }, REPOS), { runId: 5, pr: 1, repo: PUBLIC, commentId: null });
+  assert.equal(parseDeployRequest({ run_id: 5, repo: 'evil/fork' }, REPOS).error[0], 403);
+  assert.equal(parseDeployRequest({ repo: PUBLIC }, REPOS).error[0], 400);
+  assert.equal(parseDeployRequest(null, REPOS).error[0], 400);
+});
+
+test('deploys: a trusted push or manual run on the deploy repo\'s default branch, at its head', () => {
+  const deployRun = (event, over = {}) => run(event, { path: '.github/workflows/deploy-box.yml', head_branch: 'main', ...over });
+  const decide = (r, over = {}) => deployDecision({ run: r, actor: 'owner', repo: PUBLIC, deployRepo: PUBLIC, branch: 'main', branchSha: HEAD, trusted, ...over });
+  assert.deepEqual(decide(deployRun('push')), { sha: HEAD, by: 'owner' });
+  assert.deepEqual(decide(deployRun('workflow_dispatch')), { sha: HEAD, by: 'owner' });
+  assert.equal(status(decide(deployRun('push'), { deployRepo: null })), 421);
+  assert.equal(status(decide(deployRun('push'), { repo: PRIVATE })), 403);
+  assert.equal(status(decide(deployRun('pull_request'))), 403);
+  assert.equal(status(decide(deployRun('push', { head_branch: 'm8/feature' }))), 403);
+  assert.equal(status(decide(deployRun('workflow_dispatch', { head_branch: 'm8/feature' }))), 403);
+  assert.equal(status(decide(deployRun('push'), { actor: 'stranger' })), 403);
+  assert.equal(status(decide(deployRun('push'), { branchSha: 'b'.repeat(40) })), 409);
 });

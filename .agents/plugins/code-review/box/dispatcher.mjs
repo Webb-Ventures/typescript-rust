@@ -8,13 +8,15 @@
 // bench measures on cores nothing else uses: Codex jobs one at a time, benches one per slot
 // (BENCH_SLOTS; one slot on BENCH_CPUS by default, see ci/bench-lanes.cjs). It acts on GitHub
 // as the ts-r review GitHub App, minting a short-lived installation token for every step, scoped
-// to the job's repository and the step's permissions.
+// to the job's repository and the step's permissions. The deploy workflow POSTs { run_id, repo }
+// to /deploy after a merge, and the box rebuilds itself from main (see "Deploys" below).
 import { createRequire } from 'node:module';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 const require = createRequire(import.meta.url);
 const review = require('./ci/github.cjs');
@@ -35,6 +37,10 @@ const IMAGE = env.IMAGE ?? 'ts-r-review:latest';
 const TRUSTED = new Set(JSON.parse(env.TRUSTED_USERS ?? '["riley-wv"]'));
 const WORKFLOW = '.github/workflows/code-review.yml';
 const BENCH_WORKFLOW = '.github/workflows/bench.yml';
+const DEPLOY_WORKFLOW = '.github/workflows/deploy-box.yml';
+// The repository whose default branch the box deploys itself from (DEPLOY_REPO, one of REPOS).
+// Unset, deploy requests are refused.
+const DEPLOY_REPO = REPOS.includes(env.DEPLOY_REPO) ? env.DEPLOY_REPO : null;
 // The bench's public repos (bench/repos.toml): small and medium ones, a few minutes each.
 const BENCH_REPOS = env.BENCH_REPOS ?? 'trpc,date-fns,rxjs,three-x10';
 // Each repo has its own bench directory (checkouts, crates, package stores, passes), so code
@@ -243,6 +249,13 @@ function enqueue(job) {
 const enqueueReview = (job) => enqueue({ ...job, kind: 'review' });
 
 async function next() {
+  // A deploy waits for the running jobs; the queued ones wait for it (they survive the restart).
+  if (deploy) {
+    running = null;
+    saveQueue();
+    maybeDeploy();
+    return;
+  }
   running = queue.shift() ?? null;
   saveQueue();
   if (!running) return;
@@ -642,6 +655,7 @@ function enqueueBench(job) {
 
 // Starts every queued bench a free slot can take; each frees its slot when it ends.
 function startBenches() {
+  if (deploy) return maybeDeploy();
   for (const { job, slot } of benchLanesLib.assign(benchLanes)) {
     runBench(job, slot)
       .catch((error) => log(`${label(job)} crashed:`, error.stack))
@@ -874,6 +888,109 @@ async function runBench(job, slot) {
   log(`bench ${repo}#${pr} done in slot ${slot.id}: ${outcome}`);
 }
 
+// Deploys. A run of the deploy workflow (a push to the default branch of DEPLOY_REPO, or a manual
+// run there) asks the box to rebuild itself from that branch's head: the plugin directory is
+// fetched into deploy/<commit>, no new job starts, and once the running ones are done (or after
+// DEPLOY_WAIT_MINUTES, default 90) box/deploy.sh, from the image running now, builds the new image
+// and restarts the box with it, which picks the queues up again. If the build fails, or the new
+// dispatcher does not come up (deploy.sh then puts the old one back), the jobs carry on here.
+const PLUGIN = '.agents/plugins/code-review';
+const DEPLOY_NAME = 'ts-r-deploy';
+const DEPLOY_WAIT_MS = (Number(env.DEPLOY_WAIT_MINUTES) || 90) * 60_000;
+const execFileAsync = promisify(execFile);
+let deploy = null;
+const deployed = () => {
+  try {
+    return fs.readFileSync(`${DATA}/deploy/current`, 'utf8').trim();
+  } catch {
+    return null;
+  }
+};
+
+// Only the plugin directory of the commit, fetched without history or other files.
+async function stageDeploy(repo, sha) {
+  const dir = `${DATA}/deploy/${sha}`;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const auth = Buffer.from(`x-access-token:${await token(repo, { contents: 'read' })}`).toString('base64');
+  const gitEnv = {
+    ...process.env, GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${auth}`,
+  };
+  const git = (...args) => execFileAsync('git', ['-C', dir, ...args], { env: gitEnv, timeout: 5 * 60_000 });
+  await git('init', '-q');
+  await git('sparse-checkout', 'set', PLUGIN);
+  await git('fetch', '-q', '--depth', '1', '--filter=blob:none', `https://github.com/${repo}.git`, sha);
+  const { stdout } = await git('rev-parse', 'FETCH_HEAD');
+  if (stdout.trim() !== sha) throw new Error(`fetched ${stdout.trim()}, not ${sha}`);
+  await git('checkout', '-q', '--detach', 'FETCH_HEAD');
+  return `${dir}/${PLUGIN}`;
+}
+
+// Starts the deploy once nothing runs (or it has waited long enough).
+async function maybeDeploy() {
+  if (!deploy || deploy.started) return;
+  const busy = running || benchLanes.slots.some((slot) => slot.job);
+  if (busy && Date.now() - deploy.at < DEPLOY_WAIT_MS) return;
+  deploy.started = true;
+  await writes;
+  await fetches;
+  const { sha, src } = deploy;
+  log(`deploying ${short(sha)} from ${src}${busy ? ' (stopping the running jobs: waited too long)' : ''}`);
+  // The deployer outlives this process: the restart it makes stops this container, and so its
+  // `docker run` client (hence no --rm: the next dispatcher removes it).
+  spawnSync('docker', ['rm', DEPLOY_NAME], { stdio: 'ignore' });
+  const socketGid = String(fs.statSync('/var/run/docker.sock').gid);
+  const deployer = spawn('docker', [
+    'run', '--name', DEPLOY_NAME, '--sig-proxy=false', '--network', 'host', '--group-add', socketGid, '-e', `DOCKER_GID=${socketGid}`,
+    '-v', '/var/run/docker.sock:/var/run/docker.sock', '-v', `${DATA}:${DATA}`,
+    IMAGE, 'sh', '/app/deploy.sh', src, sha,
+  ], { stdio: 'ignore' });
+  deployer.on('close', (code) => {
+    // Still here: the build failed, the new dispatcher was rolled back, or nothing changed.
+    log(`deploy of ${short(sha)} ended with ${code}${deployed() === sha ? '' : `; see logs/deploy-${short(sha)}.log`}`);
+    deploy = null;
+    next();
+    startBenches();
+  });
+}
+
+const seenDeploys = new Set();
+async function handleDeploy(body) {
+  const request = trust.parseDeployRequest(body, REPOS);
+  if (request.error) return request.error;
+  const { repo, runId } = request;
+  if (seenDeploys.has(runId)) return [409, 'repeated run'];
+  const { owner, name } = split(repo);
+  const github = await octokit(repo, READ);
+  const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo: name, run_id: runId });
+  const stale = trust.checkRun(run, { repo, workflows: [DEPLOY_WORKFLOW], now: Date.now() });
+  if (stale) return stale;
+  const { data: info } = await github.rest.repos.get({ owner, repo: name });
+  const { data: branch } = await github.rest.repos.getBranch({ owner, repo: name, branch: info.default_branch });
+  const actor = run.triggering_actor?.login ?? run.actor?.login;
+  const decision = trust.deployDecision({ run, actor, repo, deployRepo: DEPLOY_REPO, branch: info.default_branch, branchSha: branch.commit.sha, trusted: TRUSTED });
+  if (decision.reject) return decision.reject;
+  const { sha, by } = decision;
+  if (deploy?.started) return [409, `deploying ${short(deploy.sha)} now; run the workflow again once it is done`];
+  if (deployed() === sha) return [409, `${short(sha)} is deployed already`];
+  seenDeploys.add(runId);
+  let src;
+  try {
+    src = await stageDeploy(repo, sha);
+  } catch (error) {
+    // The workflow's retry may try again.
+    seenDeploys.delete(runId);
+    throw error;
+  }
+  // A newer commit replaces one still waiting, and keeps its place.
+  if (!deploy) setTimeout(maybeDeploy, DEPLOY_WAIT_MS + 1000);
+  deploy = { sha, src, by, at: deploy?.at ?? Date.now() };
+  log(`deploy of ${repo}@${short(sha)} for @${by} waiting for: ${running ? label(running) : 'nothing'} ${benchLanes.slots.filter((s) => s.job).map((s) => label(s.job)).join(' ')}`);
+  maybeDeploy();
+  return [202, running || benchLanes.slots.some((s) => s.job) ? 'deploy queued behind the running jobs' : 'deploying'];
+}
+
 // Requests. The body is only a pointer; what to do and for whom comes from GitHub, and who may
 // start what is decided in ci/trust.cjs.
 const seenRuns = new Set();
@@ -991,8 +1108,9 @@ const server = http.createServer((req, res) => {
   const lane = (now, waiting) => `running ${now ? label(now) : 'nothing'}; queued ${waiting.map(label).join(' ') || 'nothing'}`;
   const slots = benchLanes.slots.map((s) => `[${s.cpus}] ${s.job ? `${label(s.job)}${s.job.cancelled ? ' (stopping)' : ''}` : 'idle'}`).join(', ');
   const benches = `slots ${slots}; queued ${benchLanes.queue.map(label).join(' ') || 'nothing'}; measure ${BENCH_MEASURE}${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`;
-  if (req.method === 'GET' && url === '/healthz') return reply(200, `ok; repos: ${REPOS.join(', ')}; codex: ${lane(running, queue)}; bench: ${benches}`);
-  if (req.method !== 'POST' || url !== '/jobs') return reply(404, 'not found');
+  const deploys = `deployed ${deployed() ? short(deployed()) : 'by hand'}${deploy ? `; ${deploy.started ? 'deploying' : 'waiting to deploy'} ${short(deploy.sha)}` : ''}`;
+  if (req.method === 'GET' && url === '/healthz') return reply(200, `ok; repos: ${REPOS.join(', ')}; codex: ${lane(running, queue)}; bench: ${benches}; ${deploys}`);
+  if (req.method !== 'POST' || !['/jobs', '/deploy'].includes(url)) return reply(404, 'not found');
   const auth = Buffer.from(req.headers.authorization ?? '');
   const expected = Buffer.from(`Bearer ${DISPATCH_TOKEN}`);
   if (auth.length !== expected.length || !crypto.timingSafeEqual(auth, expected)) return reply(401, 'unauthorized');
@@ -1010,7 +1128,7 @@ const server = http.createServer((req, res) => {
         reply(400, 'malformed request');
         return;
       }
-      const [code, text] = await handle(body);
+      const [code, text] = await (url === '/deploy' ? handleDeploy(body) : handle(body));
       log(`request ${raw} -> ${code} ${text}`);
       reply(code, text);
     } catch (error) {
@@ -1020,7 +1138,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-for (const dir of ['jobs', 'logs', 'cache', 'codex-home', 'targets', 'bench']) fs.mkdirSync(`${DATA}/${dir}`, { recursive: true });
+for (const dir of ['jobs', 'logs', 'cache', 'codex-home', 'targets', 'bench', 'deploy']) fs.mkdirSync(`${DATA}/${dir}`, { recursive: true });
 // Leftovers from a restart: job directories, build directories, bench builds, and containers
 // that outlived the dispatcher.
 for (const parent of ['jobs', 'targets']) {
@@ -1052,6 +1170,15 @@ for (const repo of REPOS) {
   for (const slot of benchLanes.slots) if (fs.existsSync(slotDir(repo, slot.id))) cleanBench(slotDir(repo, slot.id));
 }
 log(`bench slots: ${benchLanes.slots.map((s) => s.cpus).join(' ')} (${HOST_CORES ?? 'unknown'} cores; measure ${BENCH_MEASURE}; ${BENCH_MEMORY} each, builds ${benchLanes.slots.map(benchBuildJobs).join('/')} jobs at ${BENCH_BUILD_JOB_MEMORY} per compile)${SLOTS.error ? `; BENCH_SLOTS ignored: ${SLOTS.error}` : ''}`);
+// Once the deployer is done (it may be the one restarting this dispatcher, and still checking on
+// it), its container goes, and so do the staged deploys other than the deployed one.
+const deployerRunning = spawnSync('docker', ['inspect', '--format', '{{.State.Running}}', DEPLOY_NAME], { encoding: 'utf8', timeout: 20_000 }).stdout?.trim() === 'true';
+if (!deployerRunning) {
+  spawnSync('docker', ['rm', DEPLOY_NAME], { stdio: 'ignore' });
+  for (const dir of fs.readdirSync(`${DATA}/deploy`)) {
+    if (dir !== deployed() && dir !== 'current') fs.rmSync(`${DATA}/deploy/${dir}`, { recursive: true, force: true });
+  }
+}
 // Synchronous, so it cannot remove the containers of the jobs restoreQueue starts.
 spawnSync('sh', ['-c', 'docker ps -aq --filter name=^tsr- | xargs -r docker rm -f'], { stdio: 'ignore' });
 server.listen(Number(env.PORT ?? 8787), '0.0.0.0', () => log(`dispatcher for ${REPOS.join(', ')} on :${env.PORT ?? 8787}; trusted: ${[...TRUSTED].join(', ')}`));
