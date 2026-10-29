@@ -1,19 +1,28 @@
 name: Bench (Actions)
 
-# Benches on GitHub-hosted runners, which are free in this public repository. The maintainers'
-# own PRs are benched on the review box before they merge (bench.yml); this workflow covers what
-# the box doesn't:
-#   - fork PRs: benched against their base on Linux, as a gate, on a throwaway runner, so a
-#     stranger's code never runs on the box (a fork PR's workflows wait for a maintainer's
-#     approval first). The result is the job's summary and its pass or fail.
-#   - nightly (and by hand): main on Linux, macOS (Apple silicon) and Windows, compared with the
-#     previous night on the same OS. Reporting only: a shared runner is too noisy to gate on
-#     across days. Windows runs the scenarios without pinned repos (their installs use limit.sh).
-#   - pushes to main: a release build of main, cached by commit, so a fork PR whose base is that
-#     commit doesn't build it again; and the crates, pinned repos and package stores, which PR
-#     runs can only read.
+# Benches on GitHub-hosted runners, which are free in this public repository:
+#   - pull requests (the top of a stack only, like CI; forks too, once a maintainer approves their
+#     runs): the PR against its base, both built and measured on the same runner, on every
+#     runner in the matrix below. Linux x64 is the gate: a regression beyond scenarios.toml's
+#     max_regression and noise_sigmas, seen again in a re-run with the PR measured first, fails
+#     its job. The other runners report only: macOS runners moved 30-190% from one night to the
+#     next on the same commit, Linux x64 1-6% on most scenarios (bench/README.md, "Benches on
+#     GitHub-hosted runners"). One comment on the PR carries every runner's tables (not on a
+#     fork's PR, whose token can't write; its runs' summaries have them).
+#   - by hand (Actions > Bench (Actions) > Run workflow, with a PR number): the same for that PR,
+#     with this workflow from main, so a PR whose branch predates it (a release PR into a branch
+#     cut from an older main) is benched without changing its tree.
+#   - pushes to main: a release build of main on each runner, cached by commit, so a PR whose
+#     base is that commit doesn't build it again; and the crates, pinned repos and package
+#     stores, which PR runs can only read.
+#   - nightly (and by hand, without a PR number): main on Linux, macOS (Apple silicon) and
+#     Windows, compared with the previous night on the same runner. Reporting only.
 # A fork PR's run uses the workflow and gate script from the PR itself: read a stranger's
 # changes to .github/ before trusting a pass.
+#
+# Build jobs: ts_r_lint's library peaks at 4.3 GB while it compiles in release (fat LTO, one
+# codegen unit), the ts-r-lint link at 3.1 GB. A 16 GB runner builds 3 crates at once, a 7 GB
+# one (macos-15) one at a time.
 
 on:
   pull_request:
@@ -27,53 +36,132 @@ on:
       - "xtask/src/bench_repos.rs"
       - ".github/workflows/bench-actions.yml"
       - ".github/scripts/bench-gate.sh"
+      - ".github/scripts/bench-comment.mjs"
   push:
     branches: [main]
     paths: *code
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to bench (empty runs the nightly bench of main)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: bench-actions-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  group: bench-actions-${{ github.event.pull_request.number || inputs.pr || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  CARGO_BUILD_JOBS: 4
-  RAYON_NUM_THREADS: 4
   BENCH_REPOS: trpc,date-fns,rxjs,three-x10
   HYPERFINE: hyperfine@1.20.0
+  # The PR's and the base's builds share one target directory (its crates are built once).
+  CARGO_TARGET_DIR: ${{ github.workspace }}/pr/target
+  TS_R_BENCH_CACHE: ${{ github.workspace }}/bench-cache
+  # Both builds read the PR's lib files (a copied binary can't find them next to itself).
+  TS_R_LIB_DIR: ${{ github.workspace }}/pr/target/upstream/typescript/tsc/internal/bundled/libs
 
 jobs:
-  fork-pr:
-    name: bench against the base (fork PR)
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+  plan:
+    name: which PR to bench
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    env: &bench-env
-      # The PR's and the base's builds share one target directory (its crates are built once).
-      CARGO_TARGET_DIR: ${{ github.workspace }}/pr/target
-      TS_R_BENCH_CACHE: ${{ github.workspace }}/bench-cache
-      # Both builds read the PR's lib files (a copied binary can't find them next to itself).
-      TS_R_LIB_DIR: ${{ github.workspace }}/pr/target/upstream/typescript/tsc/internal/bundled/libs
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      bench: ${{ steps.pr.outputs.bench }}
+      number: ${{ steps.pr.outputs.number }}
+      head: ${{ steps.pr.outputs.head }}
+      base: ${{ steps.pr.outputs.base }}
+      base-ref: ${{ steps.pr.outputs.base-ref }}
+      same-repo: ${{ steps.pr.outputs.same-repo }}
     steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          if ! [[ "$PR" =~ ^[0-9]+$ ]]; then echo "::error::Not a pull request number: $PR"; exit 1; fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" > pr.json
+          same=$(jq -r --arg r "$GITHUB_REPOSITORY" '.head.repo.full_name == $r' pr.json)
+          {
+            echo "number=$PR"
+            echo "head=$(jq -r .head.sha pr.json)"
+            echo "base=$(jq -r .base.sha pr.json)"
+            echo "base-ref=$(jq -r .base.ref pr.json)"
+            echo "same-repo=$same"
+          } >> "$GITHUB_OUTPUT"
+          # Stacked PRs: only the top is benched (a fork's branch is never the base of a PR here).
+          above=
+          if [ "$same" = true ]; then
+            above=$(gh pr list -R "$GITHUB_REPOSITORY" --base "$(jq -r .head.ref pr.json)" --state open --json number --jq 'map("#\(.number)") | join(" ")')
+          fi
+          if [ "$(jq -r .state pr.json)" != open ]; then
+            echo "::notice::Skipped: #$PR is not open."
+            echo "bench=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$above" ]; then
+            echo "::notice::Skipped: $above is stacked on #$PR, so the bench runs there."
+            echo "bench=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "bench=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  pr:
+    name: bench (${{ matrix.label }})
+    needs: plan
+    if: needs.plan.outputs.bench == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: linux-x64, runner: ubuntu-24.04, gate: true, repos: true, jobs: 3, threads: 4 }
+          - { label: linux-x64-1-thread, runner: ubuntu-24.04, gate: false, repos: true, jobs: 3, threads: 1 }
+          - { label: linux-arm64, runner: ubuntu-24.04-arm, gate: false, repos: true, jobs: 3, threads: 4 }
+          # Windows runs the scenarios without pinned repos (their installs use limit.sh).
+          - { label: windows-x64, runner: windows-2025, gate: false, repos: false, jobs: 3, threads: 4 }
+          - { label: windows-arm64, runner: windows-11-arm, gate: false, repos: false, jobs: 3, threads: 4 }
+          - { label: macos-arm64, runner: macos-15, gate: false, repos: true, jobs: 1, threads: 3 }
+          - { label: macos-x64, runner: macos-15-intel, gate: false, repos: true, jobs: 3, threads: 4 }
+    runs-on: ${{ matrix.runner }}
+    # Only the gate's result fails the workflow.
+    continue-on-error: ${{ !matrix.gate }}
+    timeout-minutes: 150
+    env:
+      CARGO_BUILD_JOBS: ${{ matrix.jobs }}
+      RAYON_NUM_THREADS: ${{ matrix.threads }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The PR's head, not the merge ref (in a GitHub stack the merge ref can pull in another
+      # stack's branches), and the base it is compared with.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.plan.outputs.head }}
           path: pr
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ needs.plan.outputs.base }}
           path: base
           persist-credentials: false
+      - &rustup
+        name: rustup (for a runner image without it)
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
       - &toolchains
         name: Rust toolchains (each checkout's own)
-        shell: bash
         run: |
           (cd pr && rustup toolchain install)
           if [ -d base ]; then (cd base && rustup toolchain install); fi
@@ -92,31 +180,32 @@ jobs:
         with:
           workspaces: pr
           shared-key: bench-release
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name == 'push' || github.event_name == 'schedule' }}
       - &upstream-cache
         uses: actions/cache/restore@v4
         with:
           path: pr/target/upstream/typescript
           key: bench-upstream-${{ runner.os }}-${{ hashFiles('pr/upstream/UPSTREAM.json', 'pr/xtask/src/upstream.rs') }}
+      # The pinned repos' node_modules hold native packages, so the key has the architecture.
       - &repos-cache
+        if: matrix.repos
         uses: actions/cache/restore@v4
         with:
           path: |
             pr/target/bench-repos
             bench-cache
-          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+          key: bench-repos-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pr/bench/repos.toml') }}
       - id: base-bin
         uses: actions/cache/restore@v4
         with:
           path: base-bin
-          key: bench-bin-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          key: bench-bin-${{ runner.os }}-${{ runner.arch }}-${{ needs.plan.outputs.base }}
       - &deps
         name: Lib files, pinned repos
         working-directory: pr
-        shell: bash
         run: |
           cargo xtask upstream sync --minimal
-          cargo xtask bench --fetch-repos --repos "$BENCH_REPOS"
+          if [ "${{ matrix.repos }}" = true ]; then cargo xtask bench --fetch-repos --repos "$BENCH_REPOS"; fi
       - name: Build the base
         if: steps.base-bin.outputs.cache-hit != 'true'
         working-directory: base
@@ -127,35 +216,111 @@ jobs:
         working-directory: pr
         run: cargo build --release --workspace --locked
       - name: Bench
+        id: bench
         working-directory: pr
-        run: bash .github/scripts/bench-gate.sh "$GITHUB_WORKSPACE/base-bin" "$BENCH_REPOS"
+        run: |
+          repos=
+          if [ "${{ matrix.repos }}" = true ]; then repos=$BENCH_REPOS; fi
+          set +e
+          bash .github/scripts/bench-gate.sh "$GITHUB_WORKSPACE/base-bin" ${repos:+"$repos"}
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # The gate fails on a regression; the others only on a bench that broke.
+          if [ "${{ matrix.gate }}" = true ]; then exit "$code"; fi
+          if [ "$code" = 2 ]; then exit 2; fi
       - name: Summary
         if: always()
         working-directory: pr
+        env:
+          CODE: ${{ steps.bench.outputs.code }}
+          LABEL: ${{ matrix.label }}
+          RUNNER: ${{ matrix.runner }}
+          GATE: ${{ matrix.gate }}
+          THREADS: ${{ matrix.threads }}
         run: |
+          mkdir -p bench/results
+          jq -n --arg label "$LABEL" --arg runner "$RUNNER" --argjson gate "$GATE" --argjson threads "$THREADS" --arg code "$CODE" \
+            '{label: $label, runner: $runner, gate: $gate, threads: $threads} + (if $code == "" then {} else {code: ($code | tonumber)} end)' \
+            > bench/results/leg.json
           if [ -f bench/results/comment.md ]; then
-            { echo "### Bench: this PR against \`${{ github.event.pull_request.base.ref }}\` @ \`${{ github.event.pull_request.base.sha }}\`"; echo; cat bench/results/comment.md; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "### Bench on $LABEL: #${{ needs.plan.outputs.number }} against \`${{ needs.plan.outputs.base-ref }}\` @ \`${{ needs.plan.outputs.base }}\`"; echo; cat bench/results/comment.md; } >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-results
+          name: bench-pr-${{ matrix.label }}
           path: pr/bench/results
           if-no-files-found: ignore
           retention-days: 30
 
-  # Pushes to main: what fork PR runs reuse (caches saved here are readable by every PR).
-  main:
-    name: cache main's release build
-    if: github.event_name == 'push'
+  report:
+    name: bench comment
+    needs: [plan, pr]
+    if: always() && needs.plan.outputs.bench == 'true' && needs.plan.outputs.same-repo == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env: *bench-env
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # The workflow's own commit (main for a run by hand), not the PR's: a PR from before this
+      # workflow, such as a release PR into a branch cut earlier, has no bench-comment.mjs.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+            scripts
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bench-pr-*
+          path: results
+      - name: Post or update the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.plan.outputs.number }}
+          HEAD_SHA: ${{ needs.plan.outputs.head }}
+          BASE_SHA: ${{ needs.plan.outputs.base }}
+          BASE_REF: ${{ needs.plan.outputs.base-ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node .github/scripts/bench-comment.mjs results comment.md
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- ts-r-bench -->"))) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            jq -n --rawfile b comment.md '{body: $b}' | gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" --input - -q .html_url
+          else
+            jq -n --rawfile b comment.md '{body: $b}' | gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --input - -q .html_url
+          fi
+
+  # Pushes to main: what PR runs reuse (caches saved here are readable by every PR).
+  main:
+    name: cache main's release build (${{ matrix.runner }})
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, repos: true, jobs: 3 }
+          - { runner: ubuntu-24.04-arm, repos: true, jobs: 3 }
+          - { runner: windows-2025, repos: false, jobs: 3 }
+          - { runner: windows-11-arm, repos: false, jobs: 3 }
+          - { runner: macos-15, repos: true, jobs: 1 }
+          - { runner: macos-15-intel, repos: true, jobs: 3 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: ${{ matrix.jobs }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
           path: pr
           persist-credentials: false
+      - *rustup
       - *toolchains
       - *hyperfine
       - *node
@@ -172,39 +337,40 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: base-bin
-          key: bench-bin-${{ runner.os }}-${{ github.sha }}
+          key: bench-bin-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
       - &upstream-save
         uses: actions/cache/save@v4
         with:
           path: pr/target/upstream/typescript
           key: bench-upstream-${{ runner.os }}-${{ hashFiles('pr/upstream/UPSTREAM.json', 'pr/xtask/src/upstream.rs') }}
         continue-on-error: true
-      - uses: actions/cache/save@v4
+      - &repos-save
+        if: matrix.repos
+        uses: actions/cache/save@v4
         with:
           path: |
             pr/target/bench-repos
             bench-cache
-          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
+          key: bench-repos-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pr/bench/repos.toml') }}
         continue-on-error: true
 
   nightly:
-    name: nightly (${{ matrix.os }})
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: nightly (${{ matrix.runner }})
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pr == '')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-            repos: true
-          - os: macos-latest
-            repos: true
-          - os: windows-2025
-            repos: false
-    runs-on: ${{ matrix.os }}
+          - { runner: ubuntu-24.04, repos: true, jobs: 3 }
+          - { runner: macos-15, repos: true, jobs: 1 }
+          - { runner: windows-2025, repos: false, jobs: 3 }
+    runs-on: ${{ matrix.runner }}
     # Windows support in the bench harness is partial; its numbers are a bonus.
-    continue-on-error: ${{ matrix.os == 'windows-2025' }}
+    continue-on-error: ${{ startsWith(matrix.runner, 'windows') }}
     timeout-minutes: 150
-    env: *bench-env
+    env:
+      CARGO_BUILD_JOBS: ${{ matrix.jobs }}
+      RAYON_NUM_THREADS: 4
     defaults:
       run:
         shell: bash
@@ -213,24 +379,15 @@ jobs:
         with:
           path: pr
           persist-credentials: false
+      - *rustup
       - *toolchains
       - *hyperfine
       - *node
       - *corepack
       - *rust-cache
       - *upstream-cache
-      - if: matrix.repos
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            pr/target/bench-repos
-            bench-cache
-          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
-      - name: Lib files, pinned repos
-        working-directory: pr
-        run: |
-          cargo xtask upstream sync --minimal
-          if [ "${{ matrix.repos }}" = true ]; then cargo xtask bench --fetch-repos --repos "$BENCH_REPOS"; fi
+      - *repos-cache
+      - *deps
       - name: Build
         working-directory: pr
         run: cargo build --release --workspace --locked
@@ -238,8 +395,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: previous
-          key: bench-nightly-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: bench-nightly-${{ runner.os }}-
+          key: bench-nightly-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: bench-nightly-${{ runner.os }}-${{ runner.arch }}-
       - name: Bench (compared with the previous night)
         working-directory: pr
         run: |
@@ -257,7 +414,7 @@ jobs:
         working-directory: pr
         run: |
           {
-            echo "### Nightly bench, ${{ runner.os }} ($(git rev-parse --short HEAD))"
+            echo "### Nightly bench, ${{ matrix.runner }} ($(git rev-parse --short HEAD))"
             if [ "${{ steps.previous.outputs.cache-matched-key }}" = "" ]; then echo; echo "No previous night to compare with."; fi
             for f in bench/results/nightly.md bench/results/nightly-repos.md; do
               if [ -f "$f" ]; then echo; cat "$f"; fi
@@ -266,16 +423,9 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: previous
-          key: bench-nightly-${{ runner.os }}-${{ github.run_id }}
+          key: bench-nightly-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
       - *upstream-save
-      - if: matrix.repos
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            pr/target/bench-repos
-            bench-cache
-          key: bench-repos-${{ runner.os }}-${{ hashFiles('pr/bench/repos.toml') }}
-        continue-on-error: true
+      - *repos-save
       - if: always()
         uses: actions/upload-artifact@v4
         with:

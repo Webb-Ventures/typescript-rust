@@ -5,8 +5,10 @@
 //   <!-- bench:release:start --> ... <!-- bench:release:end -->  the latest release
 //
 // node scripts/readme-bench.mjs main <README.md> <bench-comment.md> [--date YYYY-MM-DD]
-//   Rewrites the main section from a bench comment of the review box (the markdown after
-//   <!-- ts-r-bench:results -->): per scenario, ts-r's median next to the fastest other tool.
+//   Rewrites the main section from a PR's bench comment (bench-actions.yml; the markdown after
+//   <!-- ts-r-bench:results -->): per scenario, ts-r's median next to the fastest other tool,
+//   and the machine the comment names (<!-- ts-r-bench:machine ... -->; the review box's older
+//   comments name none: four dedicated cores).
 //   The public mirror's sync runs it with the bench of the pull request it carries over.
 // node scripts/readme-bench.mjs release <README.md> <released README.md> <version>
 //   Copies the main section of the README as released into the release section. The release
@@ -51,8 +53,10 @@ function duration(v) {
 /** Rows of every results table in a bench comment: { scenario, tool, ours, median }. */
 export function parseBench(comment) {
   const at = comment.indexOf('<!-- ts-r-bench:results -->');
-  const text = at < 0 ? comment : comment.slice(at);
+  const end = comment.indexOf('<!-- /ts-r-bench:results -->', at);
+  const text = at < 0 ? comment : comment.slice(at, end < 0 ? undefined : end);
   const platform = /### Benchmarks \([^,)]*,\s*([^)]+)\)/.exec(text)?.[1]?.trim() ?? null;
+  const machine = /<!-- ts-r-bench:machine ([^>]*?) -->/.exec(comment)?.[1]?.trim() || 'four dedicated cores';
   const rows = [];
   for (const line of text.split('\n')) {
     if (!line.startsWith('|')) continue;
@@ -62,7 +66,7 @@ export function parseBench(comment) {
     const ours = /^\*\*.+\*\*$/.test(cells[1]);
     rows.push({ scenario: cells[0], tool: cells[1].replace(/\*\*/g, ''), ours, median });
   }
-  return { platform, rows };
+  return { platform, machine, rows };
 }
 
 // Left out of the README: the lint scenarios compare different rule sets (lint-trpc) or a
@@ -72,7 +76,7 @@ const NOT_LIKE_FOR_LIKE = /^lint-/;
 
 /** The README table: per scenario, ts-r's first (cold) tool against the fastest other tool. */
 export function benchTable(comment, date) {
-  const { platform, rows } = parseBench(comment);
+  const { platform, machine, rows } = parseBench(comment);
   const scenarios = [...new Set(rows.map((r) => r.scenario))].filter((s) => !NOT_LIKE_FOR_LIKE.test(s));
   const lines = [];
   for (const s of scenarios) {
@@ -92,7 +96,7 @@ export function benchTable(comment, date) {
     '|---|---:|---:|---:|',
     ...lines,
     '',
-    `Medians${where} (four dedicated cores)${when}. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).`,
+    `Medians${where} (${machine})${when}. Scenarios: [bench/scenarios.toml](bench/scenarios.toml) and [bench/repos.toml](bench/repos.toml).`,
   ].join('\n');
 }
 

@@ -85,10 +85,10 @@ are in [npm/ts-r/README.md](npm/ts-r/README.md).
 Each table shows ts-r's median time per scenario next to the fastest other tool on the same
 workload. Workloads include type-checking pinned open-source repos (tRPC, date-fns, rxjs) and
 bundling three.js ten times over, among others. Pull requests that change the crates or the
-benchmarks are benchmarked against their base: maintainers' PRs on four dedicated cores of a
-bench machine, fork PRs on GitHub's shared Linux runners. A slowdown beyond the gate fails the
-bench check, which reviewers read before merging. Method and scenarios:
-[bench/README.md](bench/README.md).
+benchmarks are benchmarked against their base on GitHub's runners: Linux x64 is the gate, and
+Linux arm64, Windows x64 and arm64 and macOS on Apple silicon and Intel report alongside it. A
+slowdown beyond the gate fails the bench check, which reviewers read before merging. Method
+and scenarios: [bench/README.md](bench/README.md).
 
 ### Unreleased (main)
 
