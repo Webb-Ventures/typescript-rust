@@ -10,6 +10,9 @@
 //   same-repository PR at the top of its stack (not `sync/`); after a trusted user approves the
 //   PR's current head; on a trusted user's `/bench` comment; or a manual run by one. The last
 //   three work for forks too.
+// Deploys rebuild the box from this plugin as it is on the default branch of DEPLOY_REPO: after a
+//   trusted user's push there (a merge), or a manual run of the deploy workflow on that branch by
+//   one, at the branch's current head.
 'use strict';
 
 const { REFRESH_MARK } = require('./github.cjs');
@@ -154,4 +157,23 @@ function benchDecision({ run, actor, pull, repo, trusted, above = [], reviews = 
   }
 }
 
-module.exports = { SYNC_PREFIX, parseRepos, parseRequest, checkRun, reviewDecision, benchNeeds, benchDecision };
+// A deploy request is { run_id, repo }: no PR.
+function parseDeployRequest(body, repos) {
+  if (!body || typeof body !== 'object') return { error: [400, 'malformed request'] };
+  return parseRequest({ ...body, pr: 1, comment_id: null }, repos);
+}
+
+// What a deploy run asks for, given the default branch and its head as GitHub reports them now.
+// Returns { reject: [status, text] } or { sha, by }.
+function deployDecision({ run, actor, repo, deployRepo, branch, branchSha, trusted }) {
+  if (!deployRepo) return reject(421, 'this box does not deploy itself (DEPLOY_REPO is unset)');
+  if (repo !== deployRepo) return reject(403, `this box deploys from ${deployRepo}`);
+  if (!['push', 'workflow_dispatch'].includes(run.event)) return reject(403, 'not a push or a manual run');
+  if (run.head_branch !== branch) return reject(403, `not a run on ${branch}`);
+  if (!trusted.has(actor)) return reject(403, 'not trusted');
+  // A later push has its own run; deploying this one's commit would go back in time.
+  if (run.head_sha !== branchSha) return reject(409, `${branch} moved on; a newer run will follow`);
+  return { sha: run.head_sha, by: actor };
+}
+
+module.exports = { SYNC_PREFIX, parseRepos, parseRequest, parseDeployRequest, checkRun, reviewDecision, benchNeeds, benchDecision, deployDecision };

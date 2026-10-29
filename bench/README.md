@@ -186,19 +186,54 @@ A first fetch of the small and medium repos takes about 100 s and leaves about 7
 cache (pnpm 3.3 GB, Yarn 3.2 GB); a repeat takes about a second, and a fetch after
 `--clean-repos` with a warm cache about 50 s (no downloads).
 
-PR benches run on the review box (`bench.yml` hands them over; see
-[the plugin README](../.agents/plugins/code-review/README.md#benches)), which keeps the same
-directories, the crates and both release builds in `/srv/ts-r-review/bench` between runs. It
-runs one bench per slot (`BENCH_SLOTS`; one by default), each slot on a cpuset of its own with
-the PR and its base built and measured on the same cores, and by default measures one slot at a
-time while the others build. It builds only the binaries `scenarios.toml` runs, and reuses the
-reference tools' numbers from an earlier run while `bench/`, `xtask/`, `upstream/` and
-`scripts/` are unchanged (the comment says so); our tools are measured on both sides every
-time, so the gate is the same as a local `--baseline` run's.
+PR benches run on GitHub-hosted runners: see "Benches on GitHub-hosted runners" below.
 
 To clear: `rm -rf ~/.cache/ts-r/bench` (package caches), `cargo xtask bench --clean-repos
 --repos all` (checkouts and stamps), `rm -rf bench/node_modules` (reference tools), or
 `--reinstall` to redo installs without deleting anything.
+
+## Benches on GitHub-hosted runners
+
+`.github/workflows/bench-actions.yml` benches every pull request that touches the code or the
+bench (the top of a stack only, like CI), and any PR by hand (Run workflow with its number).
+On each runner the base and the PR are built in release and measured by
+`.github/scripts/bench-gate.sh`, the same steps as a local `--baseline` run: the base (our
+tools), then the PR (every tool) against it, and a re-run of any flagged scenario with the PR
+measured first, so only a regression seen in both orders counts.
+
+| Runner | Label | Role | Build jobs | Threads |
+|---|---|---|---:|---:|
+| `ubuntu-24.04` (x64, 4 vCPU, 16 GB) | `linux-x64` | **the gate** | 3 | 4 |
+| `ubuntu-24.04` | `linux-x64-1-thread` | report | 3 | 1 |
+| `ubuntu-24.04-arm` | `linux-arm64` | report | 3 | 4 |
+| `windows-2025` | `windows-x64` | report, no pinned repos | 3 | 4 |
+| `windows-11-arm` | `windows-arm64` | report, no pinned repos | 3 | 4 |
+| `macos-15` (Apple silicon, 3 vCPU, 7 GB) | `macos-arm64` | report | 1 | 3 |
+| `macos-15-intel` | `macos-x64` | report | 3 | 4 |
+
+Only `linux-x64` fails the run. The others report, because shared runners are noisy. The three
+nightly runs of 2026-10-26 to 2026-10-28 all measured the same commit (`d1f1209`), so their
+differences are the runners alone:
+
+- **Linux x64:** 1-6% between nights on most scenarios, 16-21% on the shortest (`lint-trpc`,
+  `run-startup`), up to about 10% spread within a run.
+- **macOS (Apple silicon):** 30-190% between nights, 10-50% spread within a run.
+
+A gate run compares base and PR on one runner in one job, so it sees less than the
+night-to-night numbers, which also cross machines. Build jobs follow memory: `ts_r_lint`'s
+library peaks at 4.3 GB while it compiles in release (fat LTO, one codegen unit), the
+`ts-r-lint` link at 3.1 GB, so a 16 GB runner builds 3 crates at once and the 7 GB macOS one 1.
+
+Pushes to main build main's release binaries on each runner and cache them by commit, so a PR
+whose base is main's head doesn't build the base. One comment on the PR (from
+`github-actions[bot]`, updated in place) carries every runner's tables, the gate's between the
+`ts-r-bench:results` markers that `scripts/readme-bench.mjs main` reads; a fork's PR gets the
+tables in its runs' summaries instead (its token can't write). The nightly run benches main on
+Linux, macOS and Windows against the previous night.
+
+Before 2026-10-29 maintainers' PRs were benched on the review box's four dedicated cores
+(`.agents/plugins/code-review/README.md`, "Benches"); the numbers in the sections below that
+say so come from there.
 
 ## Large repos: a dedicated machine
 

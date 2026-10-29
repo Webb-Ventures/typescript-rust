@@ -27,6 +27,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
  && rm -rf /usr/local/cargo/registry /usr/local/rustup/downloads /usr/local/rustup/tmp \
  && rustc --version && cargo clippy --version && cargo fmt --version
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+# Compose and Buildx, for the box's deploys (deploy.sh).
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" && npm cache clean --force
 # pnpm and Yarn shims for the bench repos' installs (the root file system is read-only at run time).
 RUN corepack enable
@@ -34,7 +36,7 @@ WORKDIR /app
 COPY box/package.json box/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY ci/ ./ci/
-COPY box/*.mjs ./
+COPY box/*.mjs box/deploy.sh ./
 RUN printf '#!/bin/sh\nexec node /app/run-client.mjs "$@"\n' > /usr/local/bin/box-run && chmod 755 /usr/local/bin/box-run
 # Fallback review instructions for before the plugin is on main (job.mjs prepare).
 COPY . ./plugin/

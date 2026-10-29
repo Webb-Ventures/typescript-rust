@@ -55,8 +55,8 @@ base second, and fails only if `cargo xtask bench --compare` confirms the regres
 
 ## 5. Report
 
-Paste `bench/results/comment.md` into the PR description (`bench.yml` also has the review box
-bench PRs touching `crates/` and post the tables in the PR's bench comment). Say which scenarios moved and why.
+Paste `bench/results/comment.md` into the PR description (`bench-actions.yml` also benches PRs
+touching `crates/` on GitHub's runners and posts every runner's tables in the PR's bench comment). Say which scenarios moved and why.
 
 Never edit `max_regression`, scenario commands or reference versions to make a PR pass; changes
 to `bench/` are reviewed by a person like any other gate. Flip a tool from `pending` to active

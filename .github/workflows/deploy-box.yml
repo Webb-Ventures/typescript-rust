@@ -1,0 +1,64 @@
+name: Deploy the review box
+
+# After a merge into main that changes the code-review plugin, asks the review box (on the
+# tailnet, like the code review) to rebuild itself from main: the box checks the run against
+# GitHub (this workflow, a trusted user's push to the default branch of its DEPLOY_REPO, at that
+# branch's head), fetches the plugin directory of that commit, waits for its running jobs, then
+# builds the new image and restarts with it, rolling back if the new dispatcher does not come up.
+# Progress: the box's /healthz and logs/deploy-<commit>.log.
+# Runs where the CODE_REVIEW_DEPLOY repo variable is "true" (the repository in the box's
+# DEPLOY_REPO), and by hand there. Box setup: .agents/plugins/code-review/README.md, "Deploys".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".agents/plugins/code-review/**"
+  workflow_dispatch:
+
+permissions: {}
+
+# Pushes in quick succession: the last one's hand-off is the one that counts.
+concurrency:
+  group: deploy-box
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: hand to the review box
+    if: vars.CODE_REVIEW_DEPLOY == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+      - name: Ask the review box to deploy main
+        env:
+          BOX: ${{ secrets.CODE_REVIEW_BOX || vars.CODE_REVIEW_BOX }}
+          PRIVATE_REPO: ${{ github.event.repository.private }}
+          TAG: ${{ vars.CODE_REVIEW_TS_TAG || 'tag:ci' }}
+          DISPATCH_TOKEN: ${{ secrets.CODE_REVIEW_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$BOX" ]; then echo "::error::Set CODE_REVIEW_BOX (the review box's tailnet name): a secret in a public repo, so logs mask it, or a variable."; exit 1; fi
+          jq -nc --argjson run "$GITHUB_RUN_ID" --arg repo "$GITHUB_REPOSITORY" '{run_id: $run, repo: $repo}' > request.json
+          cat request.json
+          for _ in $(seq 30); do
+            ip=$(tailscale ip -4 "$BOX" 2>/dev/null) && break
+            sleep 1
+          done
+          if [ -z "${ip:-}" ]; then
+            if [ "$PRIVATE_REPO" = true ]; then tailscale status || true; fi
+            echo "::error::$BOX is not visible from this node. The tailnet policy must let ${TAG} reach it on port 443."
+            exit 1
+          fi
+          # 409 is fine: main moved on (its own run follows), this commit is deployed already, or
+          # a deploy is running.
+          code=$(curl -sS --retry 5 --retry-all-errors --retry-delay 3 --max-time 120 -o response.txt -w '%{http_code}' \
+            --resolve "$BOX:443:$ip" \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @request.json "https://$BOX/code-review/deploy")
+          echo "$code $(cat response.txt)"
+          case "$code" in 202|409) ;; *) exit 1 ;; esac
