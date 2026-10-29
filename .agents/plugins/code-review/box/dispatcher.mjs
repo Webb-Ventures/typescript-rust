@@ -950,12 +950,13 @@ async function maybeDeploy() {
     // Still here: the build failed, the new dispatcher was rolled back, or nothing changed.
     log(`deploy of ${short(sha)} ended with ${code}${deployed() === sha ? '' : `; see logs/deploy-${short(sha)}.log`}`);
     deploy = null;
-    next();
+    if (!running) next();
     startBenches();
   });
 }
 
 const seenDeploys = new Set();
+let deployOrder = 0;
 async function handleDeploy(body) {
   const request = trust.parseDeployRequest(body, REPOS);
   if (request.error) return request.error;
@@ -975,6 +976,7 @@ async function handleDeploy(body) {
   if (deploy?.started) return [409, `deploying ${short(deploy.sha)} now; run the workflow again once it is done`];
   if (deployed() === sha) return [409, `${short(sha)} is deployed already`];
   seenDeploys.add(runId);
+  const order = ++deployOrder;
   let src;
   try {
     src = await stageDeploy(repo, sha);
@@ -983,6 +985,8 @@ async function handleDeploy(body) {
     seenDeploys.delete(runId);
     throw error;
   }
+  if (order !== deployOrder) return [409, 'superseded by a newer deploy request'];
+  if (deploy?.started) return [409, `deploying ${short(deploy.sha)} now; run the workflow again once it is done`];
   // A newer commit replaces one still waiting, and keeps its place.
   if (!deploy) setTimeout(maybeDeploy, DEPLOY_WAIT_MS + 1000);
   deploy = { sha, src, by, at: deploy?.at ?? Date.now() };

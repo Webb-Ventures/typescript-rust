@@ -24,7 +24,6 @@ fi
 docker tag ts-r-review:latest ts-r-review:previous
 docker compose -f "$src/box/compose.yaml" build
 image=$(docker image inspect --format '{{.Id}}' ts-r-review:latest)
-docker compose -f "$src/box/compose.yaml" up -d --remove-orphans
 
 # The new dispatcher must be the one running, and answer twice, ten seconds apart (it exits a
 # minute after starting when a secret is missing, and restarts).
@@ -33,10 +32,12 @@ up() {
     curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:8787/healthz
 }
 healthy=
-for _ in $(seq 36); do
-  if up && sleep 10 && up; then healthy=1; break; fi
-  sleep 5
-done
+if docker compose -f "$src/box/compose.yaml" up -d --remove-orphans; then
+  for _ in $(seq 36); do
+    if up && sleep 10 && up; then healthy=1; break; fi
+    sleep 5
+  done
+fi
 if [ -z "$healthy" ]; then
   echo "=== the new dispatcher did not come up: rolling back"
   docker logs --tail 50 ts-r-review-dispatcher-1 || true
