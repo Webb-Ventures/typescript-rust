@@ -1772,7 +1772,10 @@ Files, by layer:
   when the contextual return type takes it, a type parameter of a call being inferred
   read through what the call's contextual type implies (`const x: 0 | 1 = invoke(() =>
   1)` infers `T = 1`; tsc: `instantiateContextualType` with the return mapper;
-  `return_context_literal_callback`).
+  `return_context_literal_callback`). A nested generic call whose contextual type is such
+  a type parameter infers from what it implies too (`const n: number = f({ x: absorb()
+  })` gives `absorb` `number`; only the outer return context is read, not the outer
+  arguments' inferences; parity `nested_call_return_context`).
 - **Generic call arguments resolve once.** A generic call argument without
   context-sensitive functions inside keeps the contextual type it had while the outer call
   inferred (when that mentions the outer type parameters) for the final argument check, as
