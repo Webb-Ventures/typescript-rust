@@ -2480,6 +2480,14 @@ Files, by layer:
   type of a signature without a declaration (`call::new_of_callable`; tsc:
   tsc/internal/checker/checker.go, resolveNewExpression and checkCallExpression).
 - **Identity.** Identical object types have as many properties (`identity_property_count`).
+  Two references to one generic type are identical when their arguments are, before any
+  structural walk (a recursive global `Observable<T>` with ~150 members otherwise fails
+  identity through its own cycles). Deferred types are identical by their parts: `keyof X`
+  by `X`, `O[K]` by `O` and `K`, a conditional by distributivity, check, extends and both
+  instantiated branches, a substitution by its base (`identity_structured`;
+  `identity_deferred_types`; tsc: relater.go, structuredTypeRelatedToWorker under
+  identityRelation, and its type-reference variance branch, which runs for identity too).
+  expect-type's `toEqualTypeOf` depends on both (RxJS specs).
 - **Spread arguments.** A spread of unknown length fits a signature when it starts at or past
   the required parameters and before the last parameter or into a rest one (else TS2556);
   each spread is then checked by position, against an optional parameter's type with

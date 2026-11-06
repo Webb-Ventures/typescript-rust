@@ -3788,11 +3788,72 @@ impl<'c, 'a> Ck<'c, 'a> {
                     .any(|&x| self.related_to(y, x, RelationKind::Identity, false, None))
             });
         }
+        // Deferred types are identical by their parts (tsc: relater.go,
+        // structuredTypeRelatedToWorker under identityRelation): `keyof` by its operand,
+        // `O[K]` by object and index, a conditional by distributivity, check, extends and
+        // both branches, a substitution by its base.
+        let id = |ck: &mut Self, a: TypeId, b: TypeId| {
+            a == b || ck.related_to(a, b, RelationKind::Identity, false, None)
+        };
+        match (st.kind(s), st.kind(t)) {
+            (TypeKind::Index(a), TypeKind::Index(b)) => return id(self, a, b),
+            (
+                TypeKind::IndexedAccess { obj: o1, index: i1 },
+                TypeKind::IndexedAccess { obj: o2, index: i2 },
+            ) => return id(self, o1, o2) && id(self, i1, i2),
+            (TypeKind::Substitution { base: a, .. }, TypeKind::Substitution { base: b, .. }) => {
+                return id(self, a, b);
+            }
+            (TypeKind::Conditional(_), TypeKind::Conditional(_)) => {
+                let (Some(d1), Some(d2)) = (st.conditional_data(s), st.conditional_data(t)) else {
+                    return false;
+                };
+                let r1 = *st.conditional_root_data(d1.root);
+                let r2 = *st.conditional_root_data(d2.root);
+                if r1.distributive != r2.distributive {
+                    return false;
+                }
+                let c1 = self.instantiate(r1.check, d1.mapper);
+                let c2 = self.instantiate(r2.check, d2.mapper);
+                if !id(self, c1, c2) {
+                    return false;
+                }
+                let e1 = self.instantiate(r1.extends, d1.mapper);
+                let e2 = self.instantiate(r2.extends, d2.mapper);
+                if !id(self, e1, e2) {
+                    return false;
+                }
+                for branch in [true, false] {
+                    let a = self.conditional_branch(r1.decl, branch);
+                    let b = self.conditional_branch(r2.decl, branch);
+                    let a = self.instantiate(a, d1.mapper);
+                    let b = self.instantiate(b, d2.mapper);
+                    if !id(self, a, b) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            _ => {}
+        }
         if sf.contains(TypeFlags::OBJECT) && tf.contains(TypeFlags::OBJECT) {
             // A generic mapped type is identical only to another generic mapped type
             // (tsc: relater.go, structuredTypeRelatedToWorker).
             if self.is_generic_mapped_type(s) != self.is_generic_mapped_type(t) {
                 return false;
+            }
+            // Two references to one generic type are identical when their arguments are
+            // (tsc relates them by variances first, also under identity); otherwise
+            // structure decides. A large recursive interface such as a global `Observable<T>`
+            // is then not walked member by member.
+            if let (Some(sa), Some(ta)) = (self.generic_args(s), self.generic_args(t))
+                && sa.0 == ta.0
+                && sa.1.len() == ta.1.len()
+                && sa.1.iter().zip(&ta.1).all(|(&a, &b)| {
+                    a == b || self.related_to(a, b, RelationKind::Identity, false, None)
+                })
+            {
+                return true;
             }
             return self.structural_related(s, t, RelationKind::Identity, false);
         }
