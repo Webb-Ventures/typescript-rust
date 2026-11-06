@@ -218,6 +218,12 @@ Files, by layer:
   An `asserts c` call (no type) whose argument is a constant false condition (`false`,
   `(false)`, `false && x`) ends the flow like a `never` call; `!true`, `0`, `null`, a
   `const` holding `false` and `asserts c is T` do not (tsc 7, observed).
+  A `for (const item of items)` variable is an explicitly typed call target when `items`
+  is an identifier with an explicit type (`explicit_type_with`; tsc: checker.go
+  getExplicitTypeOfSymbol; longer dotted iterables are not followed). A union member that
+  a conflicting discriminant empties (`RuntimeValue & { type: "number" }`) takes no part
+  in `is_discriminant_property`, as tsc reads union properties through reduced members
+  (parity test `discriminant_reduced_members`).
   `(f(), x).p` is the reference `x.p`; `this` declared by a `this` parameter narrows.
   `if (x = y)` narrows `y` as the condition `y`, and `if (x &&= y)` when true;
   `isString(x?.y)` (a predicate ruling out `undefined` in the branch) makes `x` non-nullish;

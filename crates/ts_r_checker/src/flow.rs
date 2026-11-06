@@ -2618,6 +2618,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 continue;
             }
+            // A member emptied by a conflicting discriminant takes no part (tsc reads the
+            // union's property through each member's apparent, reduced type):
+            // `RuntimeValue & { type: 'number' }` has one `type`, not a discriminant.
+            if self.store().flags(m).contains(TypeFlags::INTERSECTION)
+                && self.reduced_type(m) == TypeId::NEVER
+            {
+                continue;
+            }
             let Some(p) = self.property_of_type(m, prop) else {
                 continue;
             };
@@ -5087,6 +5095,13 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn call_target_has_explicit_type(&self, s: SymId) -> bool {
+        self.explicit_type_with(s, true)
+    }
+
+    /// `for_of`: a `for (const item of items)` variable counts when `items` is an
+    /// identifier with an explicit type (tsc: checker.go getExplicitTypeOfSymbol reads the
+    /// iterated dotted name; deeper names are not followed here).
+    fn explicit_type_with(&self, s: SymId, for_of: bool) -> bool {
         let s = self.c.resolve_alias(s).unwrap_or(s);
         // A mapped type's property (`Readonly<T>`'s) has one when the property it maps does.
         if let Some(x) = self.c.synth_sym(s)
@@ -5109,6 +5124,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::Ident { .. } => self.c.parent(d).unwrap_or(d),
                 _ => d,
             };
+            if for_of
+                && matches!(*self.node(d), Node::VarDeclarator { type_ann: None, .. })
+                && let Some(list) = self.c.parent(d)
+                && let Some(stmt) = self.c.parent(list)
+                && let Node::ForOf { left, right, .. } = *self.node(stmt)
+                && left == list.node
+            {
+                let ast = self.ast(stmt.file);
+                let r = skip_parens(ast, right);
+                return matches!(ast.node(r), Node::Ident { .. })
+                    && self
+                        .c
+                        .resolve_ident(Loc::new(stmt.file, r), meaning::VALUE)
+                        .is_some_and(|x| x != s && self.explicit_type_with(x, false));
+            }
             matches!(
                 *self.node(d),
                 Node::VarDeclarator {
