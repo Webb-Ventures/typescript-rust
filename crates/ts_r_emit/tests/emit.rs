@@ -836,6 +836,8 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "export class F { constructor() { this.constructor = 1; } }\n",
         "const k = \"k\";\nexport class G { constructor() { this[k] = 1; } }\n",
         "export class H { static m() {} }\nH.m.x = 1;\n",
+        // An ES module's `module.exports` declares nothing (nodeModulesAllowJsExportAssignment).
+        "import \"fs\";\nconst a = {};\nmodule.exports = a;\n",
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
         assert!(
@@ -1060,7 +1062,19 @@ fn javascript_property_names_module_and_exports_are_not_commonjs() {
          export declare class K {\n    module(): void;\n    exports: number;\n}\n\
          export declare function f({ module: m }: {\n    module: any;\n}): any;\n"
     );
-    // A shorthand property or a computed key reads the name: CommonJS.
+    // In an ES module CommonJS assignments declare nothing (tsc 7.0.2, probed).
+    let src = "export const o = 1;\nmodule.exports.z = 1;\nexports.w = 2;\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .unwrap();
+    assert_eq!(d.text, "export declare const o = 1;\n");
+    // A shorthand property or a computed key reads the name: refused, also in an ES module
+    // (tsc writes `{ [x: number]: number }` for the computed one; the checker's index
+    // signature is `string`).
     for src in [
         "export const o = { module };\n",
         "export const o = { [exports.k]: 1 };\n",

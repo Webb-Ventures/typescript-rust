@@ -81,6 +81,9 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     });
     // Named exports alone (`exports.x = v`) are written.
     let named = export_assignment.is_none() && commonjs_named_exports(c, file).is_some();
+    // In a file with ES module syntax assignments through `module.exports` and `exports`
+    // declare nothing (tsc 7.0.2: nodeModulesAllowJsExportAssignment, probed).
+    let esm = has_es_module_syntax(ast);
     // Per class, the member names it declares (`(is static, name)`), built on first use.
     let mut members: FxHashMap<NodeId, FxHashSet<(bool, &str)>> = FxHashMap::default();
     for raw in 1..=ast.node_count() as u32 {
@@ -100,6 +103,7 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
+                    && !(esm && assigned_through(ast, parents, n))
                     && !named
                     && allowed_module != Some(n)
                     && !is_property_name(ast, parents, n)
@@ -397,6 +401,39 @@ fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
 /// renamed binding's key (`{ module: m }`), a label, a specifier's foreign name, an enum
 /// member, an import attribute key, a JSX attribute or a qualified name's right side.
 /// Shorthand properties and computed keys (`{ module }`, `[exports.k]`) are references.
+/// Whether `n` is the root object of an assignment's target (`module` of
+/// `module.exports.x = v`, `exports` of `exports["x"] = v`).
+fn assigned_through(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
+    let mut cur = n;
+    for _ in 0..8 {
+        let Some(p) = parents.parent(cur) else {
+            return false;
+        };
+        match *ast.node(p) {
+            Node::Member { obj, .. } | Node::Index { obj, .. } if obj == cur => cur = p,
+            Node::Assign { left, .. } => return left == cur && cur != n,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Whether a top-level statement is an ES import or export (the file is then no CommonJS
+/// module).
+fn has_es_module_syntax(ast: &Ast) -> bool {
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return false;
+    };
+    ast.list(stmts).iter().any(|&s| match *ast.node(s) {
+        Node::ImportDecl { .. }
+        | Node::ExportNamed { .. }
+        | Node::ExportAll { .. }
+        | Node::ExportDefaultExpr { .. }
+        | Node::ExportAssignment { .. } => true,
+        ref n => n.modifiers().contains(Modifiers::EXPORT),
+    })
+}
+
 /// The signatures (function types) of the JSDoc `@overload` tags of `host` (a function
 /// declaration, or a method's or constructor's function), in source order. tsc 7 writes
 /// one declaration per overload and none for the implementation (observed:

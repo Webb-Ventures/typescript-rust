@@ -51,7 +51,8 @@ cost both. It never mutates the checker's AST.
   so the local it names is printed too and may be TS9010 itself
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
-  does not write yet (TSR2006 naming it: CommonJS exports other than one top-level
+  does not write yet (TSR2006 naming it: CommonJS exports (in a file with ES import or
+  export syntax assignments through `module.exports`/`exports` declare nothing) other than one top-level
   `module.exports = v;` (written `export = v;` first, a class or function expression
   then as a declaration named by it or `_exports`, another value
   that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
