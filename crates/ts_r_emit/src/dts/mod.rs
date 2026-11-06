@@ -87,6 +87,7 @@ pub fn declaration_file(
         && let Some((st, value)) = js::commonjs_export_assignment(checker, file)
     {
         e.cjs_export = Some((st, value));
+        e.cjs_members = js::export_members(checker, file, st, value).unwrap_or_default();
         e.is_module = true;
         order.retain(|&s| s != st);
         order.insert(0, st);
@@ -205,6 +206,9 @@ pub(crate) struct Emitter<'c, 'a> {
     /// A CommonJS file's `module.exports = v;` statement, written as `export = v` first
     /// (`js::commonjs_export_assignment`).
     cjs_export: Option<(NodeId, NodeId)>,
+    /// The members later `module.exports.x = v;` statements add to that export
+    /// (`js::export_members`).
+    cjs_members: Vec<js::ExportMember>,
     /// A CommonJS file's `exports.x = v` exports, written first
     /// (`js::commonjs_named_exports`).
     cjs_named: Vec<js::NamedExport>,
@@ -273,6 +277,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
             host,
             is_module: f.bound.is_module,
             cjs_export: None,
+            cjs_members: Vec::new(),
             cjs_named: Vec::new(),
             out: String::new(),
             indent: 0,
@@ -1563,7 +1568,10 @@ impl<'c, 'a> Emitter<'c, 'a> {
             if self.cjs_export_declaration(s, value, scope, prev_end) {
                 return true;
             }
-            return self.export_value_named(s, value, "export = ", "_exports");
+            if self.cjs_members.is_empty() {
+                return self.export_value_named(s, value, "export = ", "_exports");
+            }
+            return self.cjs_export_with_members(s, value);
         }
         match node {
             Node::ImportDecl { .. } => self.import_decl(s, scope, prev_end),
@@ -2247,6 +2255,43 @@ impl<'c, 'a> Emitter<'c, 'a> {
         true
     }
 
+    /// `module.exports = v;` followed by `module.exports.name = value;` members
+    /// (`js::export_members`): `export = v; export { name };` for a local `v`, else an
+    /// `_exports` constant merged with a `declare namespace _exports` holding the members.
+    fn cjs_export_with_members(&mut self, s: NodeId, value: NodeId) -> bool {
+        let members = self.cjs_members.clone();
+        let inner = skip_parens(&self.ast, value);
+        let local = js::is_local_name(self.c, self.file, inner);
+        if local {
+            self.export_value_named(s, value, "export = ", "_exports");
+        } else {
+            self.export_value_const(s, value, "export = ", "_exports");
+        }
+        if !local {
+            self.w("declare namespace _exports {");
+            self.nl();
+            self.indent += 1;
+        }
+        for m in &members {
+            if matches!(self.ast.node(m.value), Node::Ident { .. }) {
+                self.reference_ident(m.value, meaning::VALUE);
+                self.w(&format!("export {{ {} }};", m.name));
+            } else {
+                let lit = self.src
+                    [self.ast.span(m.value).start as usize..self.ast.span(m.value).end as usize]
+                    .to_owned();
+                self.w(&format!("export var {}: {lit};", m.name));
+            }
+            self.nl();
+        }
+        if !local {
+            self.indent -= 1;
+            self.w("}");
+            self.nl();
+        }
+        true
+    }
+
     /// [`Emitter::export_value`] with the name of the constant written for a value that is
     /// no entity name (`_exports` for CommonJS, observed with tsc 7.0.2).
     fn export_value_named(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> bool {
@@ -2268,6 +2313,11 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if prefix.starts_with("export default") {
             self.iso_default(expr);
         }
+        self.export_value_const(s, expr, prefix, base)
+    }
+
+    /// `declare const _exports: T;` (`base`, made unique) then `{prefix}_exports;`.
+    fn export_value_const(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> bool {
         let name = self.unique_name(base);
         self.w("declare const ");
         self.w(&name);

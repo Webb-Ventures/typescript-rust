@@ -810,7 +810,8 @@ fn dropped_aliases_release_their_imports() {
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for src in [
-        "module.exports = { a: 1 };\nmodule.exports.b = 2;\n",
+        "module.exports = { a: 1 };\nmodule.exports.b = [2];\n",
+        "class K {}\nmodule.exports = class {};\nmodule.exports.K = K;\n",
         "const { y } = require(\"./y\");\nmodule.exports = y;\n",
         "exports.a = require(\"./y\");\n",
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
@@ -899,6 +900,16 @@ fn javascript_commonjs_export_assignment_is_written() {
         (
             "const module = { exports: 0 };\nmodule.exports = 1;\n",
             "declare const _exports = 1;\nexport = _exports;\n",
+        ),
+        // Later `module.exports.x = v;` members (jsDeclarationsExportSubAssignments,
+        // jsDeclarationsExportAssignedClassInstance3).
+        (
+            "const S = 1;\nclass Foo {}\nmodule.exports = Foo;\nmodule.exports.S = S;\n",
+            "export = Foo;\nexport { S };\ndeclare const S = 1;\ndeclare class Foo {\n}\n",
+        ),
+        (
+            "class Foo {}\nmodule.exports = new Foo();\nmodule.exports.n = 20;\n",
+            "declare const _exports: Foo;\nexport = _exports;\ndeclare namespace _exports {\n    export var n: 20;\n}\ndeclare class Foo {\n}\n",
         ),
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);

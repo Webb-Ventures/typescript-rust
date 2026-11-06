@@ -55,7 +55,10 @@ cost both. It never mutates the checker's AST.
   export syntax assignments through `module.exports`/`exports` declare nothing) other than one top-level
   `module.exports = v;` (written `export = v;` first, a class or function expression
   then as a declaration named by it or `_exports`, another value
-  that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
+  that is no entity name through `declare const _exports: T;`; later top-level
+  `module.exports.x = v;` members of a local name `v` or a number/string literal are
+  `export { x };` after `export = v;` when `v` is a local, else members of a
+  `declare namespace _exports` with `_exports` a constant) or top-level `exports.x = v;`
   alone (written first: `export { v as x };` for one assignment of a local name, `declare
   const _default: T; export default _default;`, else `export declare var x: T;`), a
   destructured `require` (`const x = require("m")` is `import x = require("m")`), `@enum`, a dotted

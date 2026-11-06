@@ -69,16 +69,18 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     }
     // `module.exports = v` alone is written (`export = v`); its `module` is no refusal.
     let export_assignment = commonjs_export_assignment(c, file);
-    let allowed_module = export_assignment.and_then(|(stmt, _)| match *ast.node(stmt) {
-        Node::ExprStmt { expr } => match *ast.node(expr) {
-            Node::Assign { left, .. } => match *ast.node(left) {
-                Node::Member { obj, .. } => Some(obj),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    });
+    let mut allowed_module: Vec<NodeId> = Vec::new();
+    if let Some((stmt, value)) = export_assignment {
+        if let Node::ExprStmt { expr } = *ast.node(stmt)
+            && let Node::Assign { left, .. } = *ast.node(expr)
+            && let Node::Member { obj, .. } = *ast.node(left)
+        {
+            allowed_module.push(obj);
+        }
+        // `module.exports.x = v` adding a member to it (`export_members`).
+        let members = export_members(c, file, stmt, value).unwrap_or_default();
+        allowed_module.extend(members.iter().map(|m| m.module));
+    }
     // Named exports alone (`exports.x = v`) are written.
     let named = export_assignment.is_none() && commonjs_named_exports(c, file).is_some();
     // In a file with ES module syntax assignments through `module.exports` and `exports`
@@ -103,9 +105,9 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
-                    && !(esm && assigned_through(ast, parents, n))
+                    && (!esm || !assigned_through(ast, parents, n))
                     && !named
-                    && allowed_module != Some(n)
+                    && !allowed_module.contains(&n)
                     && !is_property_name(ast, parents, n)
                     && is_module_object(c, file, n))
                 .then_some("a CommonJS module")
@@ -172,11 +174,12 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         },
         _ => return None,
     };
+    let members = export_members(c, file, st, value)?;
     for raw in 1..=ast.node_count() as u32 {
         let Some(n) = NodeId::from_raw(raw) else {
             continue;
         };
-        if n == module || ast.is_jsdoc(n) {
+        if n == module || ast.is_jsdoc(n) || members.iter().any(|m| m.module == n) {
             continue;
         }
         // `const x = require("m")` is written `import x = require("m")`; the emitter
@@ -192,6 +195,115 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         }
     }
     Some((st, value))
+}
+
+/// Whether `n` is an identifier naming a declaration of `file` itself.
+pub(super) fn is_local_name(c: &Checker, file: FileId, n: NodeId) -> bool {
+    matches!(*c.file(file).ast.node(n), Node::Ident { .. })
+        && c.resolve_ident(Loc { file, node: n }, meaning::VALUE)
+            .and_then(|s| c.decls(s).first().copied())
+            .is_some_and(|d| d.file == file)
+}
+
+/// A member added to a CommonJS `module.exports = v;` export by a later top-level
+/// `module.exports.name = value;` ([`export_members`]).
+#[derive(Clone, Debug)]
+pub(super) struct ExportMember {
+    pub name: String,
+    pub value: NodeId,
+    /// The statement's `module` identifier.
+    pub module: NodeId,
+}
+
+/// The members later top-level `module.exports.name = value;` statements add to the export
+/// `module.exports = v;` (statement `st`), in source order; `None` when one is a form the
+/// emitter does not write. tsc 7.0.2 writes them (observed: jsDeclarationsExportSubAssignments,
+/// jsDeclarationsExportAssignmentExpressionPlusSecondary,
+/// jsDeclarationsExportAssignedClassInstance3, jsDeclarationsCrossfileMerge):
+/// - when `v` is a name declared in the file, `export = v;` then `export { name };` for
+///   each member assigned the local of its own name;
+/// - when `v` is another value but no class or function expression, `declare const
+///   _exports: T; export = _exports;` then `declare namespace _exports { ... }` holding
+///   `export { name };` for such a member and `export var name: L;` for a number or
+///   string literal `L` (its literal type).
+///
+/// Other values, members of a class or function expression export and members before the
+/// export are not written yet.
+pub(super) fn export_members(
+    c: &Checker,
+    file: FileId,
+    st: NodeId,
+    value: NodeId,
+) -> Option<Vec<ExportMember>> {
+    let f = c.file(file);
+    let ast = &f.ast;
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return None;
+    };
+    let is_name = |n: NodeId, text: &str| matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == text);
+    let local = |n: NodeId| is_local_name(c, file, n);
+    let inner = super::skip_parens(ast, value);
+    let export_is_local = local(inner);
+    let expression_export = matches!(
+        *ast.node(inner),
+        Node::ClassExpr { .. } | Node::FunctionExpr { .. } | Node::Arrow { .. }
+    );
+    let mut out = Vec::new();
+    let mut after = false;
+    for &s in ast.list(stmts) {
+        if s == st {
+            after = true;
+            continue;
+        }
+        let Node::ExprStmt { expr } = *ast.node(s) else {
+            continue;
+        };
+        let Node::Assign {
+            op: ts_r_ast::AssignOp::Assign,
+            left,
+            right,
+        } = *ast.node(expr)
+        else {
+            continue;
+        };
+        let Node::Member { obj, prop, .. } = *ast.node(left) else {
+            continue;
+        };
+        let Node::Member {
+            obj: module,
+            prop: exports,
+            ..
+        } = *ast.node(obj)
+        else {
+            continue;
+        };
+        if !is_name(module, "module") || !is_name(exports, "exports") {
+            continue;
+        }
+        let name = ast.name_of(prop)?.to_owned();
+        let same_local = is_name(right, &name) && local(right);
+        let literal = match *ast.node(right) {
+            Node::NumberLit { .. } => true,
+            Node::StringLit { .. } => {
+                f.text.as_bytes().get(ast.span(right).start as usize) == Some(&b'"')
+            }
+            _ => false,
+        };
+        let written = if export_is_local {
+            same_local
+        } else {
+            !expression_export && (same_local || literal)
+        };
+        if !after || !written || out.iter().any(|m: &ExportMember| m.name == name) {
+            return None;
+        }
+        out.push(ExportMember {
+            name,
+            value: right,
+            module,
+        });
+    }
+    Some(out)
 }
 
 /// One CommonJS named export: `(name, its first assignment target, the assigned name)`.
