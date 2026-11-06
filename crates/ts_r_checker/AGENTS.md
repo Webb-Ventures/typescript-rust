@@ -1538,7 +1538,10 @@ Files, by layer:
   `{ [K in C]: X }[C]` relates as `X[K := C]` (and any `{ [K in C]: X }[I]` has the base
   constraint `X[K := I]`; one that leads back to itself has none); `(A & B)[K]`'s base
   constraint is the intersection of `A[K]`'s and `B[K]`'s, without a union part that contains
-  another part. A conditional without `infer` relates to a generic `keyof X` through its
+  another part, when the intersection is generic. A concrete one (`ElementTagNameMap =
+  HTMLElementTagNameMap & Pick<...>`) is indexed whole by the key's constraint, as tsc's
+  getBaseConstraint does: a member that lacks some key may not decide alone, and its
+  constraint for writing is the intersection's (`concrete_intersection_index`). A conditional without `infer` relates to a generic `keyof X` through its
   branches' union. Type predicates narrow a conditional member with no concrete base
   constraint by intersection (`DeepPartial<T> & any[]`). A concrete source never relates to
   `(M & O)[K]` with a generic key when the intersection holds a generic mapped type: tsc

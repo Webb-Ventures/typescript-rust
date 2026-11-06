@@ -768,9 +768,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.store().type_param_data(obj).is_some_and(|d| d.is_this) {
                 return None;
             }
-        } else if of.intersects(TypeFlags::INSTANTIABLE | TypeFlags::UNION_OR_INTERSECTION)
+        } else if of.intersects(TypeFlags::INSTANTIABLE | TypeFlags::UNION)
+            || (of.contains(TypeFlags::INTERSECTION) && self.is_generic_type(obj))
             || self.is_generic_object_type(obj)
         {
+            // (A concrete intersection, `A & Pick<B, "c">`, is indexed like an object.)
             return None;
         }
         let constraint_or_self = |this: &mut Self, x: TypeId| -> Option<TypeId> {
@@ -3187,11 +3189,28 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // `(A & B)[K]` is `A[K] & B[K]`: it relates when one member's access does
         // (`({ [P in keyof U]: P } & { [x: string]: never })[keyof U]` to `keyof U`).
+        // A member of a concrete intersection counts only when it takes every key the index
+        // may be (`(A & B)[T]` with `T extends "a" | "c"` relates through `(A & B)["a" |
+        // "c"]`, not through `A[T]`, whose constraint `A["c"]` does not exist).
         if sf.contains(TypeFlags::INDEXED_ACCESS)
             && let TypeKind::IndexedAccess { obj, index } = st.kind(s)
             && st.flags(obj).contains(TypeFlags::INTERSECTION)
         {
+            let generic_obj = self.is_generic_type(obj);
+            let index_c = if generic_obj {
+                index
+            } else {
+                self.base_constraint(index)
+            };
             for m in st.members_of_union(obj).to_vec() {
+                if !generic_obj
+                    && (index_c == TypeId::UNRESOLVED
+                        || self
+                            .indexed_access_type(m, index_c, None)
+                            .is_none_or(|x| x == TypeId::UNRESOLVED || self.store().is_error(x)))
+                {
+                    continue;
+                }
                 if let Some(x) = self.indexed_access_type(m, index, None)
                     && x != s
                     && x != TypeId::UNRESOLVED

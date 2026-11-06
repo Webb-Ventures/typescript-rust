@@ -1,0 +1,6 @@
+a.ts(12,9): error TS2322: Type 'EM[T]' is not assignable to type '1'.
+  Type 'string | number | boolean' is not assignable to type '1'.
+    Type 'string' is not assignable to type '1'.
+a.ts(16,9): error TS2322: Type 'EM3[T]' is not assignable to type '1'.
+  Type 'string | number | boolean' is not assignable to type '1'.
+    Type 'string' is not assignable to type '1'.
