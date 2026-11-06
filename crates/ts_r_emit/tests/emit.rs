@@ -897,6 +897,12 @@ fn javascript_commonjs_export_assignment_is_written() {
             "/** @typedef {number} N */\nfunction foo() {}\nmodule.exports = foo;\n",
             "export = foo;\nexport type N = number;\n/** @typedef {number} N */\ndeclare function foo(): void;\n",
         ),
+        // The `_exports` constant takes the comment before the statement (tsbuild
+        // javascriptProjectEmit scenario).
+        (
+            "/** @typedef {number} N */\nmodule.exports = {};\n",
+            "/** @typedef {number} N */\ndeclare const _exports: {};\nexport = _exports;\nexport type N = number;\n",
+        ),
         // A local `module` does not stop it: tsc 7.0.2 writes the same `export =`.
         (
             "const module = { exports: 0 };\nmodule.exports = 1;\n",

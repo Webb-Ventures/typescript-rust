@@ -1569,6 +1569,9 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 return true;
             }
             if self.cjs_members.is_empty() {
+                if !is_entity_expr(&self.ast, skip_parens(&self.ast, value)) {
+                    self.cjs_leading_comment(s, prev_end);
+                }
                 return self.export_value_named(s, value, "export = ", "_exports");
             }
             return self.cjs_export_with_members(s, value);
@@ -2245,24 +2248,30 @@ impl<'c, 'a> Emitter<'c, 'a> {
             let rename = name.is_none().then_some(text.as_str());
             self.class_decl(inner, scope, false, prev_end, rename);
         } else {
-            // The statement is written first without comments (`prev_end` is its start):
-            // the function takes the JSDoc comment right before it.
-            let start = self.ast.span(s).start;
-            let from = self
-                .ast
-                .comments_between(0, start)
-                .last()
-                .filter(|c| {
-                    self.src
-                        .get(c.span.end as usize..start as usize)
-                        .is_some_and(|t| t.trim().is_empty())
-                })
-                .map_or(prev_end, |c| c.span.start);
-            self.leading_comments(s, from);
+            self.cjs_leading_comment(s, prev_end);
             self.w("declare ");
             self.function_from_expr(&text, inner);
         }
         true
+    }
+
+    /// The comment right before `module.exports = v;` statement `s`: the statement is
+    /// written first without comments (`prev_end` is its start), so the declaration written
+    /// for it takes that comment (observed with tsc 7.0.2: a function expression's
+    /// declaration, an `_exports` constant).
+    fn cjs_leading_comment(&mut self, s: NodeId, prev_end: u32) {
+        let start = self.ast.span(s).start;
+        let from = self
+            .ast
+            .comments_between(0, start)
+            .last()
+            .filter(|c| {
+                self.src
+                    .get(c.span.end as usize..start as usize)
+                    .is_some_and(|t| t.trim().is_empty())
+            })
+            .map_or(prev_end, |c| c.span.start);
+        self.leading_comments(s, from);
     }
 
     /// `module.exports = v;` followed by `module.exports.name = value;` members
