@@ -1038,6 +1038,55 @@ fn ts_r_check_watch(dir: &Path, args: &[&str], looks: usize) -> (String, i32) {
     (reader.join().unwrap_or_default(), code)
 }
 
+/// An ambiguous project root (TS2209) is a program diagnostic: tsc 7.0.2 then prints no
+/// semantic diagnostics, with or without emit, and a second run (history) prints the same.
+#[test]
+fn ambiguous_project_root_hides_semantic_diagnostics() {
+    if ts_r_checker::LibStore::locate().is_none() {
+        eprintln!("lib files missing: skipped");
+        return;
+    }
+    let dir = temp_project(
+        "ts-r-check-cli-ts2209",
+        &[
+            (
+                "package.json",
+                r#"{"name":"pkg","type":"module","exports":{".":"./index.js"}}"#,
+            ),
+            (
+                "index.ts",
+                "import * as me from \"pkg\";\nexport const x: number = \"s\";\nexport const y = me;\n",
+            ),
+        ],
+    );
+    let base = [
+        "--pretty", "false", "--module", "nodenext", "--outDir", "out",
+    ];
+    let run = |extra: &[&str], history: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ts-r-check"));
+        if !history {
+            cmd.arg("--no-history");
+        }
+        cmd.env("TS_R_CACHE_DIR", dir.join(".cache"))
+            .arg("--sound=off")
+            .args(base)
+            .args(extra)
+            .arg("index.ts");
+        run(&mut cmd, &dir)
+    };
+    for (extra, history, want_code) in [
+        (&[][..], false, 2),
+        (&["--noEmit"][..], false, 1),
+        (&["--noEmit"][..], true, 1),
+        (&["--noEmit"][..], true, 1),
+    ] {
+        let (out, code) = run(extra, history);
+        assert_eq!(code, want_code, "{extra:?}: {out}");
+        assert!(out.starts_with("error TS2209: "), "{extra:?}: {out}");
+        assert_eq!(out.lines().count(), 1, "{extra:?}: {out}");
+    }
+}
+
 /// `--watch` (record 0012, E4): tsc's status lines, the screen cleared before each build
 /// only with pretty output and without `--preserveWatchOutput`; the session's exit status is
 /// 0 for `-p` and the first build's for `-b`; a look that finds no change prints nothing.
