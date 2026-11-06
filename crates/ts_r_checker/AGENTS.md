@@ -2954,6 +2954,14 @@ Files, by layer:
   a type parameter relates only through its constraint. `${M}` for a single non-generic
   pattern `M` is `M` itself (tsc: relater.go, structuredTypeRelatedToWorker; checker.go,
   getTemplateLiteralType; `generic_template_target`).
+- **Comparing template literals** (`templates_maybe_overlap`; tsc: relater.go,
+  templateLiteralTypesDefinitelyUnrelated, replacePrimitivesWithLiterals in checker.go).
+  Two template literals are comparable unless their first texts differ over the shorter
+  one's length or their last texts at the end (`foo-${string}` and `${string}-bar`
+  overlap). A pattern source compared with a string literal is the literal matching the
+  pattern. A pattern literal property type is a literal part of a discriminant
+  (`{ type: `${string}_SUCCESS` }`), and `=== "FOO_SUCCESS"` narrows a matching pattern
+  to the literal (parity test `template_discriminants`).
 - **A union source against a type parameter** elaborates its first failing member like any
   union, except that the "could be instantiated with an arbitrary type" hint drops what was
   reported inside it (tsc: relater.go, reportRelationError resets the chain). Type argument

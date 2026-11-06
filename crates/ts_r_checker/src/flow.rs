@@ -2635,6 +2635,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 literal = true;
             }
+            // A pattern literal (`${string}_SUCCESS`) is a literal part too (tsc:
+            // checker.go createUnionOrIntersectionProperty, isPatternLiteralType).
+            if self.is_pattern_literal_type(pt) {
+                literal = true;
+            }
         }
         non_uniform && literal
     }
@@ -3643,6 +3648,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                             | TypeFlags::ENUM
                             | TypeFlags::ES_SYMBOL,
                     ) && ck.is_assignable(v, m)
+                    {
+                        return v;
+                    }
+                    // A pattern literal compared with a string literal it matches is that
+                    // literal (tsc: checker.go replacePrimitivesWithLiterals).
+                    if ck.is_pattern_literal_type(m)
+                        && ck.store().flags(v).contains(TypeFlags::STRING_LITERAL)
+                        && ck.is_assignable(v, m)
                     {
                         return v;
                     }

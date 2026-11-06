@@ -2819,6 +2819,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return false;
             }
         }
+        // Two template literals are comparable unless their leading or trailing texts
+        // disagree over the shorter one's length (`foo-${string}` and `${string}-bar`
+        // overlap; tsc: relater.go templateLiteralTypesDefinitelyUnrelated).
+        if rel == RelationKind::Comparable
+            && tf.contains(TypeFlags::TEMPLATE_LITERAL)
+            && sf.contains(TypeFlags::TEMPLATE_LITERAL)
+            && let Some(r) = self.templates_maybe_overlap(s, t)
+        {
+            return r;
+        }
         // Non-generic template literal and string mapping targets match by pattern.
         if tf.intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
             && let Some(r) = self.template_target_related(s, t)
@@ -2892,6 +2902,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             && !st.traits(s).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
             && !tf.intersects(TypeFlags::INSTANTIABLE)
         {
+            // Comparing with a string literal is the literal matching the pattern (the
+            // other direction): `${string}_REQUEST` is not comparable to "FOO_SUCCESS".
+            if rel == RelationKind::Comparable && tf.contains(TypeFlags::STRING_LITERAL) {
+                return self.template_target_related(t, s).unwrap_or(false);
+            }
             let r = self.related_to(TypeId::STRING, t, rel, false, None);
             if !r && report {
                 self.report_pattern_source_constraint(s, t, rel);
