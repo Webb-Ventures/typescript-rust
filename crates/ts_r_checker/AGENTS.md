@@ -349,6 +349,11 @@ Files, by layer:
   narrowed parent (a pattern without a reference is keyed by its first binding's symbol).
   A parent narrowed to `never` (the default clause after every `kind` case) makes the
   sibling `never` (`destructured_sibling_never`; tsc: checker.go getNarrowedTypeOfSymbol).
+  A generic parent narrows through its base constraint (`{ kind, payload }: T` with `T
+  extends Action`), a rest parameter's pattern is one (`...[kind, data]: Args`), and the
+  sibling's narrowed property still gets the narrowing of the read where it is declared
+  (`if (a.payload) { const { kind, payload } = a; ... }`: tsc's getFlowTypeOfDestructuring
+  on the narrowed parent; parity test `dependent_destructuring`).
   An aliased condition (`const ok = isSuccess && x; if (ok)`) narrows a constant reference;
   an unassigned binding of a parameter or catch variable pattern is one, like the
   parameter itself (`aliased_condition_param_pattern`; tsc: checker/flow.go,

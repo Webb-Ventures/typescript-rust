@@ -2565,11 +2565,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // Any other source (a call, `for (const { k, v } of xs)`): the pattern alone.
                 self.pattern_alias(pattern, pp, prop)
             }
-            Node::Param {
-                pattern: pat,
-                rest: false,
-                ..
-            } if pat == pattern.node => {
+            // `(...[kind, data]: Args)` too: the rest parameter's type is the tuple union.
+            Node::Param { pattern: pat, .. } if pat == pattern.node => {
                 if self.is_symbol_assigned(s, f) {
                     return None;
                 }
@@ -2702,6 +2699,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let a = self.binding_alias(sym)?;
         let pattern = a.pattern?;
         let parent = self.pattern_parent_type(pattern);
+        // A generic parent narrows through its constraint (`{ kind, payload }: T` with
+        // `T extends Action`; tsc: checker.go getNarrowedTypeOfSymbol).
+        let parent = self.map_type(parent, |ck, m| ck.base_constraint_or_self(m));
         if !self.store().flags(parent).contains(TypeFlags::UNION) {
             return None;
         }
@@ -2737,7 +2737,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let idx: usize = a.prop.parse().ok()?;
                 self.array_element_at(nt, idx)
             }
-            _ => self.destructured_property_type(nt, &a.prop),
+            _ => {
+                let t = self.destructured_property_type(nt, &a.prop);
+                // The property read where the variable is declared keeps its narrowing
+                // (`if (action.payload) { const { kind, payload } = action; ... }`).
+                match self.c.value_decl(sym).and_then(|d| self.c.parent(d)) {
+                    Some(bp) => self.destructured_flow_type(bp, t),
+                    None => t,
+                }
+            }
         })
     }
 

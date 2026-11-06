@@ -513,7 +513,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
-    fn base_constraint_or_self(&mut self, t: TypeId) -> TypeId {
+    pub(crate) fn base_constraint_or_self(&mut self, t: TypeId) -> TypeId {
         if self.store().flags(t).intersects(TypeFlags::INSTANTIABLE) {
             let c = self.base_constraint(t);
             if c != TypeId::UNKNOWN && c != TypeId::UNRESOLVED {
