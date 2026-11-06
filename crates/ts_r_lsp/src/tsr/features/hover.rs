@@ -251,6 +251,10 @@ fn this_expression_type(ck: &mut Ck<'_, '_>, l: Loc) -> Option<TypeId> {
 
 /// The hover reply: `display` as a code block, then `doc`, for the span `start..end`.
 fn contents(lines: &LspLines, text: &str, display: &str, doc: &str, start: u32, end: u32) -> Value {
+    // Nothing to show (an unresolved import's name, a broken declaration): tsc answers null.
+    if display.trim().is_empty() {
+        return Value::Null;
+    }
     let display = super::multiline::multiline_objects(display);
     let mut value = format!("```typescript\n{display}\n```");
     if !doc.is_empty() {

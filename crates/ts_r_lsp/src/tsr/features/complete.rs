@@ -163,7 +163,7 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     let text = c.file(file).text.as_str();
     let (ws, prefix) = word_before(text, offset);
     let prefix = prefix.to_string();
-    if in_comment(ast, offset) {
+    if in_comment(ast, text, offset) {
         if let Some(spot) = super::jsdoc_items::spot(c, file, offset) {
             return (Context::JsDoc(spot), prefix);
         }
@@ -226,6 +226,15 @@ fn context(ck: &Ck<'_, '_>, file: FileId, offset: u32) -> (Context, String) {
     }
     // `1.5|` is a number being written, not a member.
     let number = prefix.as_bytes().first().is_some_and(u8::is_ascii_digit);
+    // `..|` (two dots, not a spread's three, not `1..`): a member access of a missing name,
+    // no list.
+    if !number
+        && d > 1
+        && &b[d - 2..d] == b".."
+        && !(d > 2 && (b[d - 3] == b'.' || b[d - 3].is_ascii_digit()))
+    {
+        return (Context::None, prefix);
+    }
     if !number && d > 0 && b[d - 1] == b'.' && !(d > 1 && b[d - 2] == b'.') {
         let dot = (d - 1) as u32;
         let mut cur = node_at(ast, dot + 1);
@@ -458,6 +467,24 @@ fn scope_anchor(c: &Checker<'_>, file: FileId, offset: u32, ws: u32, anchor: Nod
     anchor
 }
 
+/// `anchor`, or the nearest ancestor that starts before `offset`: a node that starts at the
+/// cursor does not hold it (`|function f(a) {}`, `|(a) => {}` have no `a` in scope).
+fn outside_start(c: &Checker<'_>, file: FileId, anchor: NodeId, offset: u32) -> NodeId {
+    let ast = c.ast(file);
+    let parents = c.file(file).parents();
+    let mut n = anchor;
+    for _ in 0..10_000 {
+        if n == ast.root || ast.span(n).start < offset {
+            break;
+        }
+        match parents.parent(n) {
+            Some(p) => n = p,
+            None => break,
+        }
+    }
+    n
+}
+
 /// The node the token before an empty word ends (the word's own node otherwise).
 fn token_node(c: &Checker<'_>, file: FileId, offset: u32, anchor: NodeId) -> NodeId {
     let ast = c.ast(file);
@@ -622,7 +649,7 @@ fn binding_names(ast: &Ast, n: NodeId, out: &mut HashSet<String>, depth: u32) {
 }
 
 /// Whether `name` is the name a declaration `parent` introduces.
-fn declares(parent: &Node, name: NodeId) -> bool {
+pub(super) fn declares(parent: &Node, name: NodeId) -> bool {
     match *parent {
         Node::VarDeclarator { name: n, .. }
         | Node::Interface { name: n, .. }
@@ -639,12 +666,21 @@ fn declares(parent: &Node, name: NodeId) -> bool {
     }
 }
 
-fn in_comment(ast: &Ast, offset: u32) -> bool {
+/// Whether `offset` is inside a comment: a line comment up to its end, a block comment before
+/// its `*/` (at its end when it is unterminated: `/* |` at the end of the file).
+fn in_comment(ast: &Ast, text: &str, offset: u32) -> bool {
     let i = ast.comments.partition_point(|c| c.span.end < offset);
     ast.comments.get(i).is_some_and(|c| {
+        let unterminated = || {
+            let body = text
+                .get(c.span.start as usize..c.span.end as usize)
+                .unwrap_or("");
+            body.len() < 4 || !body.ends_with("*/")
+        };
         c.span.start < offset
             && (offset < c.span.end
-                || (c.kind == ts_r_ast::CommentKind::Line && offset == c.span.end))
+                || (offset == c.span.end
+                    && (c.kind == ts_r_ast::CommentKind::Line || unterminated())))
     })
 }
 
@@ -1082,7 +1118,10 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 Loc::new(cx.file, token_node(c, cx.file, offset, anchor)),
                 offset,
             );
-            for (name, s) in scope_names(c, Loc::new(cx.file, anchor)) {
+            for (name, s) in scope_names(
+                c,
+                Loc::new(cx.file, outside_start(c, cx.file, anchor, offset)),
+            ) {
                 if !has_meaning_through_alias(c, s, want) || later.contains(&name) {
                     continue;
                 }
@@ -1118,7 +1157,10 @@ pub fn completion(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
                 }
             }
             if !types_only
-                && has_arguments(c, Loc::new(cx.file, anchor))
+                && has_arguments(
+                    c,
+                    Loc::new(cx.file, outside_start(c, cx.file, anchor, offset)),
+                )
                 && seen.insert("arguments".to_string())
             {
                 items.push(json!({

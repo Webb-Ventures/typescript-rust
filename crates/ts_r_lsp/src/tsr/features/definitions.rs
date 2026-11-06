@@ -106,6 +106,18 @@ pub fn definition_spot(
             Node::ArrayPattern { .. } | Node::Rest { .. } if in_declaration_pattern(c, file, p) => {
                 Some(Spot::Nothing)
             }
+            // `var { x: n| }`: the local name of a binding property.
+            Node::BindingProperty { value: Some(v), .. }
+                if v == word_node && in_declaration_pattern(c, file, p) =>
+            {
+                Some(Spot::Nothing)
+            }
+            // `(...a|`: a rest parameter's name, in a constructor too.
+            Node::Param {
+                pattern,
+                rest: true,
+                ..
+            } if pattern == word_node => Some(Spot::Nothing),
             Node::Param { pattern, .. } if pattern == word_node => {
                 Some(if in_constructor(c, file, p) {
                     Spot::Keywords(PARAMETER_KEYWORDS)
@@ -127,11 +139,62 @@ pub fn definition_spot(
     }
     let holder = node_covering(ast, tok_at)?;
     let before = token_before(ast, text, tok_at).map(|(_, t)| t);
+    let after_dot = before == Some(".");
     match tok {
-        "var" | "let" | "const" | "using" => {
+        // These keywords (or names spelled like them, as `interface` before a line break is)
+        // are always followed by a name being declared.
+        "var" | "let" | "const" | "abstract" | "declare" if !after_dot => {
+            return Some(Spot::Nothing);
+        }
+        "using" => {
             return ancestors(c, file, holder)
                 .any(|n| matches!(ast.node(n), Node::VarDecl { .. }))
                 .then_some(Spot::Nothing);
+        }
+        "interface" | "enum" if !after_dot => return Some(Spot::Nothing),
+        // A parameter property modifier: only the other modifiers in a constructor; nothing in
+        // any other parameter list.
+        "public" | "private" | "protected" | "readonly" | "override"
+            if matches!(ast.node(holder), Node::Param { .. })
+                || (matches!(
+                    before,
+                    Some("(" | "," | "public" | "private" | "protected" | "readonly" | "override")
+                ) && in_constructor(c, file, holder)) =>
+        {
+            return Some(if in_constructor(c, file, holder) {
+                Spot::Keywords(PARAMETER_KEYWORDS)
+            } else {
+                Spot::Nothing
+            });
+        }
+        // `(...|` in a parameter list, `[...|` in a binding pattern.
+        "." if text[..tok_at as usize].ends_with("..")
+            && ancestors(c, file, holder)
+                .take(3)
+                .any(|n| match ast.node(n) {
+                    Node::Param { .. } => true,
+                    Node::Rest { .. } | Node::ArrayPattern { .. } => {
+                        in_declaration_pattern(c, file, n)
+                    }
+                    _ => false,
+                }) =>
+        {
+            return Some(Spot::Nothing);
+        }
+        // `var { x: |`: the local name of a binding property comes next.
+        ":" if matches!(ast.node(holder), Node::BindingProperty { .. })
+            && in_declaration_pattern(c, file, holder) =>
+        {
+            return Some(Spot::Nothing);
+        }
+        // `var a, |`: the next declarator's name (not `new Foo<A, |`, a type argument list
+        // the parser cut short: more `<` than `>` before the comma).
+        "," if matches!(ast.node(holder), Node::VarDecl { .. }) => {
+            let head = text
+                .get(ast.span(holder).start as usize..tok_at as usize)
+                .unwrap_or("");
+            let open = head.matches('<').count() > head.matches('>').count();
+            return (!open).then_some(Spot::Nothing);
         }
         "class" | "interface" | "enum" | "function" | "type" => {
             let ok = matches!(
@@ -169,6 +232,27 @@ pub fn definition_spot(
         }
         "(" if before == Some("catch") => return Some(Spot::Nothing),
         _ => {}
+    }
+    // Right after a declared name (`let foo |`, `function f |`): nothing, except after a
+    // class, interface or type parameter name (`extends` may follow) and after a variable's
+    // name on an earlier line (a new statement starts there).
+    if matches!(ast.node(holder), Node::Ident { .. })
+        && ast.span(holder).start == tok_at
+        && let Some(p) = parents.parent(holder)
+        && super::complete::declares(ast.node(p), holder)
+    {
+        match ast.node(p) {
+            Node::ClassDecl { .. }
+            | Node::ClassExpr { .. }
+            | Node::Interface { .. }
+            | Node::TypeParam { .. } => {}
+            Node::VarDeclarator { .. } => {
+                if !text[ast.span(holder).end as usize..word as usize].contains('\n') {
+                    return Some(Spot::Nothing);
+                }
+            }
+            _ => return Some(Spot::Nothing),
+        }
     }
     // Lists: type parameters, parameters, enum members, array patterns.
     for n in ancestors(c, file, holder).take(MAX_UP) {
