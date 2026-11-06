@@ -42,20 +42,18 @@ every skip reason.
 
 ## Results
 
-a191679 (2026-10-27, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
-**2211 of 2513 compared tests pass (88.0%)**; 8431 of 8948 queries agree.
-3806 of the 6319 test files are skipped (3698 verify no compared feature, 160 get no answer
-from either server). Three tests tsc timed out on
-(`completionForStringLiteralNonrelativeImport16`, `completionsJSDocNoCrash3`,
-`pathCompletionsPackageJsonExportsWildcard7`) were rerun with `--filter` and counted.
+b3e973c (2026-11-06, macOS arm64 (Apple M4 Max), tsc 7.0.2, `--jobs 4`):
+**2234 of 2505 compared tests pass (89.2%)**; 8479 of 8933 queries agree.
+3923 of the 6319 test files have no compared test (3698 verify no compared feature, 159 get
+no answer from either server). tsc answered every test in this run.
 
 | Feature | Pass | Fail | Skip | Queries agree |
 | --- | ---: | ---: | ---: | ---: |
-| hover | 441 | 79 | 18 | 2377 / 2515 |
-| completion | 892 | 131 | 110 | 2584 / 2780 |
-| references | 300 | 45 | 12 | 1328 / 1442 |
+| hover | 448 | 69 | 21 | 2395 / 2509 |
+| completion | 898 | 120 | 115 | 2588 / 2771 |
+| references | 303 | 42 | 12 | 1346 / 1442 |
 | rename | 170 | 6 | 13 | 535 / 543 |
-| definition | 142 | 24 | 26 | 492 / 526 |
+| definition | 149 | 17 | 26 | 500 / 526 |
 | signatureHelp | 141 | 9 | 26 | 645 / 656 |
 | highlights | 110 | 7 | 20 | 416 / 431 |
 | typeDefinition | 15 | 1 | 3 | 54 / 55 |
@@ -87,9 +85,11 @@ Remaining failures by cause (example tests in parentheses):
   re-export of a renamed default (`import boom from "./d"`), constructors reached through
   export specifiers (`findAllRefsOfConstructor_multipleFiles`).
 - **Definition (ts_r_lsp)**: decorator and JSX overloads (the checker records no resolved
-  signature for them), JavaScript expandos and `require` destructuring
-  (`goToDefinitionExpandoClass*`, `goToDefinitionDestructuredRequire`), `instanceof`
-  (`Symbol.hasInstance`), a `yield` edge (`goToDefinitionYield3`), import types.
+  signature for them), `module.exports.X = X` followed to `X` (`goToDefinitionImportedNames10`),
+  `instanceof` (`Symbol.hasInstance`), a `yield` edge (`goToDefinitionYield3`), import types.
+- **Object spread (ts_r_checker)**: a property spread from a required and an optional
+  member has only the optional one's declaration (`goToDefinitionObjectSpread`,
+  `renameObjectSpread`, `findAllRefsForObjectSpread`).
 - **Completion (ts_r_lsp)**: JSX in tags the parser closes early
   (`jsxTagNameCompletionUnderElementUnclosed`), `this` in property initializers
   (`completionsThisPropertiesInPropertyDeclaration2`) and contextual `this`
@@ -126,3 +126,4 @@ Remaining failures by cause (example tests in parentheses):
 | 49b91eb | 2026-10-27 | 2179 | 2513 | 86.7% | Re-measured after checker round 9 (no ts-r-lsp change) |
 | 12ed8c6 | 2026-10-27 | 2200 | 2513 | 87.5% | `export =` reached through `import * as`, `import x = require` and default imports (and its `export` keyword renamed); `node_modules` files searched for symbols declared there, an open package file in the project that imports it, tsc's rename rule for packages; `import.meta` references, hover and type definition, `new.target` definition, `@typedef` type literals, JSX tag highlights |
 | a191679 | 2026-10-27 | 2211 | 2513 | 88.0% | Hover: object literal getters and setters as `(accessor)`, `arguments` and `undefined` as properties, `any` on unresolved intrinsic JSX tags; parameter modifiers parsed as modifiers (emit10); JSDoc `@overload` signatures (checker10) |
+| b3e973c | 2026-11-06 | 2234 | 2505 | 89.2% | No completion list where a name is being declared (binding patterns, rest parameters, modifiers outside a constructor, a declared variable before a newline) or in an unterminated block comment; scope names outside a closed function; hover: nothing for an empty display, no owner or docs for mapped-type and union members (a union's method shows as a property), JSDoc text with tsc 7's margin; references between unresolved type names; definition at expando property names and through JavaScript `const { a } = require()` |
