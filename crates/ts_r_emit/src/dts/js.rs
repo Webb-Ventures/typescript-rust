@@ -669,8 +669,34 @@ fn assignment_target<'a>(
         Node::Ident { .. } => {
             let sym = c.resolve_ident(Loc { file, node: obj }, meaning::VALUE)?;
             let flags = c.sym_flags(sym);
-            (flags.intersects(SymbolFlags::CLASS) && !flags.intersects(SymbolFlags::FUNCTION))
-                .then_some("a property assigned to a class")
+            if !flags.intersects(SymbolFlags::CLASS) || flags.intersects(SymbolFlags::FUNCTION) {
+                return None;
+            }
+            // `C.x = v;` as a top-level statement, for a class declaration of this file
+            // without a base class or a static `x` of its own, is written as a namespace
+            // merged with the class (`Emitter::statement`).
+            let top_level = parents
+                .parent(target)
+                .and_then(|a| parents.parent(a))
+                .filter(|&st| matches!(ast.node(st), Node::ExprStmt { .. }))
+                .and_then(|st| parents.parent(st))
+                == Some(ast.root);
+            let class = c
+                .decls(sym)
+                .into_iter()
+                .filter(|d| d.file == file)
+                .map(|d| d.node)
+                .find(|&d| matches!(ast.node(d), Node::ClassDecl { .. }));
+            let written = top_level
+                && matches!(ast.node(target), Node::Member { .. })
+                && class.is_some_and(|k| {
+                    matches!(*ast.node(k), Node::ClassDecl { heritage, .. } if ast.list(heritage).is_empty())
+                        && !members
+                            .entry(k)
+                            .or_insert_with(|| member_names(ast, k))
+                            .contains(&(true, name))
+                });
+            (!written).then_some("a property assigned to a class")
         }
         _ => None,
     }

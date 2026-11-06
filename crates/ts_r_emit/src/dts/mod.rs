@@ -1797,6 +1797,16 @@ impl<'c, 'a> Emitter<'c, 'a> {
                     return false;
                 }
                 self.class_decl(s, scope, keep_export, prev_end, None);
+                // A JavaScript class's statics assigned from outside (`C.x = v`) are a
+                // namespace merged with it (jsDeclarationsClassStatic).
+                if !self.ast.source_kind.is_typescript()
+                    && let Node::ClassDecl { name: Some(n), .. } = *self.ast.node(s)
+                    && let Some(sym) = self.c.sym_of_decl(self.loc(s))
+                {
+                    let prefix = self.expando_prefix(s, scope, keep_export);
+                    let name = self.raw(n).to_owned();
+                    self.expando_namespace(s, sym, &name, &prefix);
+                }
                 true
             }
             Node::Interface {

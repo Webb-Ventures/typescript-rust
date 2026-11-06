@@ -818,7 +818,8 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
         "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
         "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
-        "export class C {}\nC.count = 1;\n",
+        "class A {}\nexport class C extends A {}\nC.count = 1;\n",
+        "export class C {}\nfunction f() { C.count = 1; }\nf();\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
         "export class E { constructor() { this[\"k\"] = 1; } }\n",
     ] {
@@ -910,6 +911,13 @@ fn javascript_commonjs_export_assignment_is_written() {
         (
             "class Foo {}\nmodule.exports = new Foo();\nmodule.exports.n = 20;\n",
             "declare const _exports: Foo;\nexport = _exports;\ndeclare namespace _exports {\n    export var n: 20;\n}\ndeclare class Foo {\n}\n",
+        ),
+        // A class's statics assigned from outside are a namespace merged with it, a static
+        // block's `this.x` a static member (jsDeclarationsClassStatic,
+        // jsDeclarationEmitThisAssignment).
+        (
+            "class H {\n  static {\n    this.a = 1;\n  }\n}\nH.f = function () {};\nmodule.exports = H;\n",
+            "export = H;\ndeclare class H {\n    static a: number | undefined;\n}\ndeclare namespace H {\n    var f: () => void;\n}\n",
         ),
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);

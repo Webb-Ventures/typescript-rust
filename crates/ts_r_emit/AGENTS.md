@@ -63,7 +63,9 @@ cost both. It never mutates the checker's AST.
   const _default: T; export default _default;`, else `export declare var x: T;`), a
   destructured `require` (`const x = require("m")` is `import x = require("m")`), `@enum`, a dotted
   `@typedef` name, a `@callback` rest parameter, `@type` on a function declaration, a
-  class's statics assigned from outside, `this["x"] = v`; the list and the observed rules
+  class's statics assigned from outside other than top-level `C.x = v;` on a class
+  declaration without a base class (written as a namespace merged with the class, like a
+  function's expandos), `this["x"] = v`; the list and the observed rules
   are in `dts/js.rs`). `@overload` is written: one declaration per overload of a function
   declaration (no comments), method (every comment of the implementation, repeated) or
   constructor (no comments), with the type parameters of the overload's comment; on other
