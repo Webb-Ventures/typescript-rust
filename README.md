@@ -22,8 +22,7 @@ npx ts-r dev             # dev server with HMR and Vite's import.meta.hot
 
 > **Status: preview.** The type checker is the most mature tool. It gives tsc 7's exact output on
 > 97.7% of TypeScript's own conformance tests. It also matches tsc 7 exactly on tRPC, date-fns,
-> TypeORM and Playwright, and is within a few diagnostics on RxJS (none extra, 5 missing, of
-> about 21,900). Every other tool works on real projects
+> TypeORM, Playwright and RxJS (about 21,900 diagnostics). Every other tool works on real projects
 > but has known gaps (below). Version numbers stay below 1.0 until that changes.
 
 ## Contents

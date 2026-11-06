@@ -269,9 +269,9 @@ Yarn 4 install needs corepack).
 ## Diagnostics against tsc 7 (2026-10-24)
 
 Each `check-*` scenario's project at `ea41eac`, `--pretty false`, ts-r-check with
-`--no-history`, compared with tsc 7.0.2 by file, line, column and code. Playwright and RxJS
-were measured again on 2026-10-26 at `687b025` (the v1 checker round); the React Compiler row
-is still from `ea41eac`:
+`--no-history`, compared with tsc 7.0.2 by file, line, column and code. Playwright, RxJS and
+the React Compiler were measured again on 2026-11-06 at `3042fe0` (parity/checker-3), through
+their `tsconfig.ts-r-bench.json` wrappers:
 
 | Project | tsc 7 | ts-r-check | Only ts-r-check | Only tsc |
 |---|---:|---:|---:|---:|
@@ -279,11 +279,12 @@ is still from `ea41eac`:
 | date-fns `pkgs/core` | 0 | 0 | 0 | 0 |
 | TypeORM `packages/typeorm` | 31 | 31 | 0 | 0 |
 | Playwright | 13 | 13 | 0 | 0 |
-| RxJS `packages/rxjs` | 21,908 | 21,903 | 0 | 5 |
+| RxJS `packages/rxjs` | 21,908 | 21,908 | 0 | 0 |
 | React Compiler | 156 | 227 | 71 | 0 |
 
-4 of the 6 match tsc 7 exactly (tRPC, date-fns, TypeORM, Playwright). RxJS has none only
-ours; its 5 missing are TS2344 in `*.spec.ts` from expect-type's `toEqualTypeOf`. The React Compiler's 71 extra are 65 TS4111
+5 of the 6 match tsc 7 exactly (tRPC, date-fns, TypeORM, Playwright, RxJS). RxJS's expect-type
+`toEqualTypeOf` assertions now agree: identity compares two `Observable<T>` references by their
+arguments and deferred types by their parts. The React Compiler's 71 extra are 65 TS4111
 (property access on `env.config.*`, whose type is zod 4's `z.infer` of a schema), 4 TS7022,
 1 TS7006 and 1 TS2345.
 
