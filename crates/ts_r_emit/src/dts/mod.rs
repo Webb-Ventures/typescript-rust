@@ -1744,9 +1744,27 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 } else {
                     None
                 };
-                self.leading_jsdoc(s, prev_end);
+                // JSDoc `@overload`s: one declaration each, without the comments (observed:
+                // `overloadTag1`, `jsFileFunctionOverloads`).
+                let overloads = js::jsdoc_overloads(&self.ast, s);
+                if overloads.is_empty() {
+                    self.leading_jsdoc(s, prev_end);
+                } else {
+                    self.last_written_end = Some(self.ast.span(s).end);
+                    self.start(s);
+                }
                 let default = self.ast.node(s).modifiers().contains(Modifiers::DEFAULT);
-                if expando.is_some() && default {
+                if !overloads.is_empty() {
+                    for ty in overloads {
+                        self.decl_prefix(s, scope, keep_export, true);
+                        self.w("function ");
+                        if let Some(n) = name {
+                            self.name_text(n);
+                        }
+                        self.overload_signature(ty, false);
+                        self.semi_end(s);
+                    }
+                } else if expando.is_some() && default {
                     // `declare function f(): T; export default f;` and the namespace.
                     if scope.top() {
                         self.w("declare ");
@@ -2685,6 +2703,28 @@ impl<'c, 'a> Emitter<'c, 'a> {
         self.semi_end(s);
     }
 
+    /// One JSDoc `@overload` signature (`ty`, the function type it desugared into): type
+    /// parameters, parameters and `: ` with the return type; a constructor's has only its
+    /// parameters.
+    fn overload_signature(&mut self, ty: NodeId, constructor: bool) {
+        let Node::FunctionType {
+            type_params,
+            params,
+            return_type,
+        } = *self.ast.node(ty)
+        else {
+            return;
+        };
+        if !constructor {
+            self.type_params(type_params);
+        }
+        self.params(params, ty);
+        if !constructor {
+            self.w(": ");
+            self.type_node(return_type);
+        }
+    }
+
     /// The inferred return type of a function-like declaration.
     fn inferred_return(&mut self, f: NodeId) {
         let sig = self.ck.signature_from_decl(self.loc(f));
@@ -3299,6 +3339,38 @@ impl<'c, 'a> Emitter<'c, 'a> {
                         continue;
                     }
                     let private = modifiers.contains(Modifiers::PRIVATE);
+                    // JSDoc `@overload`s: one member each. A method's carries every comment
+                    // of the implementation, a constructor's none (observed:
+                    // `jsFileMethodOverloads`, `jsdocVariadicInOverload`, `overloadTag2`).
+                    let overloads = match kind {
+                        MethodKind::Method | MethodKind::Constructor if !private => {
+                            js::jsdoc_overloads(&self.ast, value)
+                        }
+                        _ => Vec::new(),
+                    };
+                    if !overloads.is_empty() {
+                        let constructor = kind == MethodKind::Constructor;
+                        for ty in overloads {
+                            if constructor {
+                                self.last_written_end = Some(self.ast.span(m).end);
+                                self.start(m);
+                            } else {
+                                self.leading_jsdoc(m, pe);
+                            }
+                            self.member_modifiers(m, modifiers);
+                            if constructor {
+                                self.w("constructor");
+                            } else {
+                                self.property_key(key);
+                                if optional {
+                                    self.question(key);
+                                }
+                            }
+                            self.overload_signature(ty, constructor);
+                            self.semi_end(m);
+                        }
+                        continue;
+                    }
                     if private && kind == MethodKind::Method {
                         // `private m;` once for an overloaded method.
                         let k = self.raw(key).to_owned();

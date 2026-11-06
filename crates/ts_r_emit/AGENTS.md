@@ -57,10 +57,13 @@ cost both. It never mutates the checker's AST.
   that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
   alone (written first: `export { v as x };` for one assignment of a local name, `declare
   const _default: T; export default _default;`, else `export declare var x: T;`), a
-  destructured `require` (`const x = require("m")` is `import x = require("m")`), `@overload`/`@enum`, a dotted
+  destructured `require` (`const x = require("m")` is `import x = require("m")`), `@enum`, a dotted
   `@typedef` name, a `@callback` rest parameter, `@type` on a function declaration, a
   class's statics assigned from outside, `this["x"] = v`; the list and the observed rules
-  are in `dts/js.rs`). `@typedef`/`@callback`/`@template`/`@import` are written: the
+  are in `dts/js.rs`). `@overload` is written: one declaration per overload of a function
+  declaration (no comments), method (every comment of the implementation, repeated) or
+  constructor (no comments), with the type parameters of the overload's comment; on other
+  hosts the implementation's type is declared, as tsc does. `@typedef`/`@callback`/`@template`/`@import` are written: the
   aliases and imports are exported in a module, print no comments of their own (the
   comment holding them stays the comment of the statement it documents, or an
   end-of-file comment), and a `@property` description is the member's JSDoc. Other JavaScript

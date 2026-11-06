@@ -20,10 +20,12 @@
 //! - `this["x"] = v` in a class, and `this.x = v` where the checker's type is not yet tsc's
 //!   (a property a base class declares, a value that reads the property itself);
 //! - `C.x = v` on a class (tsc adds a static);
-//! - `@enum`, `@overload`, `@private` / `@protected` on an assignment, `@this` without a
+//! - `@enum`, `@private` / `@protected` on an assignment, `@this` without a
 //!   type, `@type` on a function declaration, a dotted `@typedef` name (a namespace), a
 //!   `@callback` rest parameter.
 //!
+//! `@overload` is written: one declaration per overload of a function declaration, method
+//! or constructor ([`jsdoc_overloads`]).
 //! `@typedef`, `@callback`, `@template` and `@import` are written: the aliases and imports
 //! JSDoc desugared into are statements of the tree, exported in a module, and print no
 //! comments of their own (the comment holding them stays the comment of the statement it
@@ -47,10 +49,10 @@ use ts_r_types::TypeId;
 pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     let f = c.file(file);
     let ast = &f.ast;
+    let parents = f.parents();
     for t in &ast.jsdoc_tags {
         let why = match t.kind {
             JsDocTagKind::Enum => "a JSDoc @enum",
-            JsDocTagKind::Overload => "a JSDoc @overload",
             JsDocTagKind::Private | JsDocTagKind::Protected => "a JSDoc modifier on an assignment",
             JsDocTagKind::This if t.ty.is_none() => "a JSDoc @this without a type",
             // tsc takes the function's signature from the type (its type parameters too).
@@ -65,7 +67,6 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     if !ast.jsdoc_namespaces.is_empty() {
         return Some((Span::EMPTY, "a JSDoc @typedef with a dotted name"));
     }
-    let parents = f.parents();
     // `module.exports = v` alone is written (`export = v`); its `module` is no refusal.
     let export_assignment = commonjs_export_assignment(c, file);
     let allowed_module = export_assignment.and_then(|(stmt, _)| match *ast.node(stmt) {
@@ -396,6 +397,21 @@ fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
 /// renamed binding's key (`{ module: m }`), a label, a specifier's foreign name, an enum
 /// member, an import attribute key, a JSX attribute or a qualified name's right side.
 /// Shorthand properties and computed keys (`{ module }`, `[exports.k]`) are references.
+/// The signatures (function types) of the JSDoc `@overload` tags of `host` (a function
+/// declaration, or a method's or constructor's function), in source order. tsc 7 writes
+/// one declaration per overload and none for the implementation (observed:
+/// `overloadTag1`, `jsFileMethodOverloads`): an overload's type parameters are the
+/// `@template`s of its comment, a constructor's has no return type. On other hosts (a
+/// function expression, a prototype assignment) tsc declares the implementation's type,
+/// as the emitter does without looking at the tags (`jsFileMethodOverloads5`).
+pub(super) fn jsdoc_overloads(ast: &Ast, host: NodeId) -> Vec<NodeId> {
+    ast.jsdoc_tags_of(host)
+        .iter()
+        .filter(|t| t.kind == JsDocTagKind::Overload)
+        .filter_map(|t| t.ty)
+        .collect()
+}
+
 fn is_property_name(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
     let Some(p) = parents.parent(n) else {
         return false;

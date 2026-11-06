@@ -847,6 +847,37 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
     }
 }
 
+/// JSDoc `@overload`s are one declaration each (tsc 7.0.2, overloadTag1, overloadTag2,
+/// jsFileMethodOverloads): a function's without comments, a method's with every comment of
+/// the implementation, a constructor's with only its parameters.
+#[test]
+fn javascript_overloads_are_written() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "/**\n * @overload\n * @param {number} a\n * @returns {number}\n *\n * @overload\n * @param {string} a\n * @returns {string}\n *\n * @param {string | number} a\n */\nexport function f(a) { return a; }\n",
+            "export declare function f(a: number): number;\nexport declare function f(a: string): string;\n",
+        ),
+        (
+            "export class C {\n  /**\n   * @overload\n   * @param {number} a\n   */\n  /**\n   * @param {number | string} a\n   */\n  constructor(a) {}\n  /**\n   * @overload\n   * @returns {void}\n   */\n  m() {}\n}\n",
+            "export declare class C {\n    constructor(a: number);\n    /**\n     * @overload\n     * @returns {void}\n     */\n    m(): void;\n}\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .unwrap();
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
 /// A CommonJS file whose only export is `module.exports = v;` is `export = v;` first, then
 /// its declarations (tsc 7.0.2, jsDeclarationsExportAssignedClassInstance1); a value that
 /// is no entity name goes through `declare const _exports`.
