@@ -1,0 +1,28 @@
+a.ts(7,1): error TS2741: Property 'n' is missing in type '{ m(this: { n: number; }, s: TemplateStringsArray): number; }' but required in type '{ n: number; }'.
+a.ts(8,1): error TS2741: Property 'n' is missing in type '{ m(this: { n: number; }, s: TemplateStringsArray): number; }' but required in type '{ n: number; }'.
+a.ts(10,1): error TS2684: The 'this' context of type '{ f(this: string, s: TemplateStringsArray): void; }' is not assignable to method's 'this' of type 'string'.
+a.ts(11,2): error TS2684: The 'this' context of type '{ f(this: string, s: TemplateStringsArray): void; }' is not assignable to method's 'this' of type 'string'.
+a.ts(13,1): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type 'string'.
+a.ts(18,1): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    The 'this' context of type '{ f(this: string, s: TemplateStringsArray, a: number): void; f(this: number, s: TemplateStringsArray, a: string): void; }' is not assignable to method's 'this' of type 'number'.
+a.ts(21,1): error TS2349: This expression is not callable.
+  Not all constituents of type '((s: TemplateStringsArray) => void) | undefined' are callable.
+    Type 'undefined' has no call signatures.
+a.ts(21,9): error TS1358: Tagged template expressions are not permitted in an optional chain.
+a.ts(23,1): error TS2349: This expression is not callable.
+  Not all constituents of type '((s: TemplateStringsArray) => void) | undefined' are callable.
+    Type 'undefined' has no call signatures.
+a.ts(25,1): error TS2349: This expression is not callable.
+  Type 'undefined' has no call signatures.
+a.ts(27,1): error TS2349: This expression is not callable.
+  Type 'unknown' has no call signatures.
+a.ts(29,1): error TS2349: This expression is not callable.
+  Type 'Number' has no call signatures.
+a.ts(30,1): error TS2349: This expression is not callable.
+  Not all constituents of type '((s: TemplateStringsArray) => void) | undefined' are callable.
+    Type 'undefined' has no call signatures.
+a.ts(33,4): error TS2304: Cannot find name 'Missing'.
+a.ts(36,2): error TS2684: The 'this' context of type '{ f: F; }' is not assignable to method's 'this' of type 'string'.
+a.ts(37,2): error TS2684: The 'this' context of type '{ f: F; }' is not assignable to method's 'this' of type 'string'.
+a.ts(38,2): error TS2684: The 'this' context of type '{ f: F; }' is not assignable to method's 'this' of type 'string'.

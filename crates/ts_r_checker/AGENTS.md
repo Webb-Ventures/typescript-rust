@@ -860,8 +860,8 @@ Files, by layer:
   as `type_mentions` save and restore both flags and the count. Conditional tail recursion
   stops at 1000 steps, tuples at 10 000 elements, template cross products at 100 000.
 - **The `this` argument** (`check_this_arg`, observed): a candidate with a declared `this`
-  parameter checks the call's receiver (through parentheses, `!` and `?.`), or `void`
-  without one, before its arguments; a failure is TS2684 at the receiver (or the whole
+  parameter checks the call's or tag's receiver (through parentheses, `!`, `as`,
+  `satisfies`, type assertions and `?.`), or `void` without one, before its arguments; a failure is TS2684 at the receiver (or the whole
   call), a missing property replacing that head like TS2345's, and under TS2769 for
   overloads. `super.m()` is not checked. A union's combined signature intersects the
   members' `this` types. In signature relations a strict function type's `this` is
@@ -2536,11 +2536,27 @@ Files, by layer:
   `U | NonNullable<T>`; `&&`'s left operand has no contextual type
   (`logical_operator_generics`). A tuple's minimum length counts its required elements, and
   an optional source element for a required target one is TS2623 (`tuple_arity_messages`).
-- **Tagged templates.** Resolved like calls (`call::Args::Tagged`): the effective arguments are
-  a `TemplateStringsArray` (`Arg::Elem` at the template) and each substitution, contextually
-  typed as argument `1 + i`; an unterminated template accepts too few arguments. A
-  constructable tag is TS2349 (no TS2348, no untyped `Function` call); two templates in an
-  array literal are TS2796; a `super` tag is not resolved (`tagged_template_calls`).
+- **Tagged templates** (design note for the parity round's gap 5; tsc: checker.go,
+  resolveTaggedTemplateExpression, getEffectiveCallArguments, getThisArgumentOfCall). A
+  tagged template is a call through `resolve_call_like` with `call::Args::Tagged`, the same
+  overload, arity, inference, explicit type argument and elaboration path as calls, `new`
+  and JSX. Its effective arguments are the strings array (`Arg::Elem` at the template) and
+  then each substitution, contextually typed as argument `1 + i`, so arity counts the array
+  (`f\`\`` against `(s, a)` is TS2554 "Expected 2 arguments, but got 1"); an unterminated
+  template accepts too few arguments. The array is the global `TemplateStringsArray`, or
+  `{}` with global TS2318 when no file declares it (`noLib`). Where it differs from a call:
+  the tag is not checked for null or undefined (no TS2721-TS2723: a possibly undefined tag
+  has no call signatures and is TS2349 "Not all constituents", `unknown` printed as
+  `unknown`); a not-callable error sits at the whole tag, not at a member name; an untyped
+  `Function` tag takes type arguments without TS2347 (an `any` tag returns before
+  resolution); a constructable tag is TS2349 (no TS2348); the tag's object is the `this`
+  argument (TS2684, TS2741) as a callee's is. Two templates in an array literal are TS2796;
+  a `super` tag is not resolved (`tagged_template_calls`, `tagged_template_tags`,
+  `tagged_template_no_strings_array`). Affected conformance tests: the 97
+  `taggedTemplate*` tests (144 TS2769, 90 TS2345, 16 TS2554 in their baselines) were all
+  exact before this round and stay exact; the round's fixes (this argument, nullable and
+  `unknown` tags, TS2347, missing `TemplateStringsArray`) are covered by no conformance
+  baseline, only by the parity fixtures and tsc 7.0.2 probes.
 - **`new` of a callable.** A callee with call signatures but no construct signatures is
   resolved against its call signatures, so `new f()` gets the same arity and argument
   errors as `f()` (JS functions, `@constructor` ones too, are never constructable in tsc 7).
@@ -3636,8 +3652,10 @@ and integration tests allow: they link the one library build).
   overloaded functions and merged declarations are not reported (silent).
 - Sibling type parameters in the constraints of a cloned generic method signature keep
   their original identity (`<K extends keyof T, U extends K>` instantiated by a receiver).
-- Calls and patterns: TS2769 for tagged-template overloads (only call, `new` and JSX
-  arguments are elaborated), TS2671
+- Inferred type predicates: `(x: boolean) => x` is inferred as `(x: boolean) => x is true`
+  where tsc 7 keeps `(x: boolean) => boolean` (seen in a TS2345 argument message, calls and
+  tagged templates alike; found in gap 5, not fixed).
+- Calls and patterns: TS2671
   for an `export =` that is only a function, TS2300 for duplicate late-bound methods and
   accessors in object literals, TS2465 (`this` in a computed name), implied index signatures merged across
   several declarations of one interface (the first declaration's win).

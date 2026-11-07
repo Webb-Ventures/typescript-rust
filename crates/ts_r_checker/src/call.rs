@@ -662,7 +662,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 TypeId::ANY
             };
         }
-        let nt = self.check_non_null_callee(cl, ft);
+        // A tag is not checked for `null`/`undefined` (no TS2722): a possibly undefined tag
+        // has no call signatures and is TS2349 (tsc: checker.go,
+        // resolveTaggedTemplateExpression).
+        let nt = if matches!(args, Args::Tagged(_)) {
+            ft
+        } else {
+            self.check_non_null_callee(cl, ft)
+        };
         if self.store().is_error(nt) {
             self.check_args_plain(e, args);
             return TypeId::ERROR;
@@ -703,12 +710,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             self.resolved_calls.insert(e, None);
             self.check_args_plain(e, args);
             let r = self.report_not_callable(e, cl, nt, kind);
-            // Untyped calls of `Function`-typed values take no type arguments either.
+            // Untyped calls of `Function`-typed values take no type arguments either; a
+            // tagged template's are checked but not reported (tsc's tagged-template path
+            // has no TS2347).
             if r == TypeId::ANY
                 && kind == SigKind::Call
                 && let Some(ta) = type_args
             {
                 self.check_type_args_node(Loc::new(e.file, ta));
+            }
+            if r == TypeId::ANY
+                && kind == SigKind::Call
+                && type_args.is_some()
+                && matches!(args, Args::List(_))
+            {
                 self.error(
                     e,
                     dg::UNTYPED_FUNCTION_CALLS_MAY_NOT_ACCEPT_TYPE_ARGUMENTS_2347,
@@ -1023,7 +1038,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        let a = self.apparent_type(t);
+        // `unknown` keeps its name under strictNullChecks (a tag is not checked for
+        // nullishness first, so `u\`x\`` reaches here); otherwise its apparent type is `{}`.
+        let a = if t == TypeId::UNKNOWN && self.c.opts.strict_null_checks {
+            t
+        } else {
+            self.apparent_type(t)
+        };
         let ts = self.type_to_string(a);
         chain.push_back(none_info, &[&ts]);
     }
@@ -1113,10 +1134,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                     chain.push_back(dg::THIS_EXPRESSION_IS_NOT_CALLABLE_2349, &[]);
                 }
                 self.no_signatures_chain(&mut chain, t, kind);
-                // A property access callee reports at the name (`o.m()`).
+                // A property access callee reports at the name (`o.m()`); a tag reports at
+                // the whole tag (`o.m\`x\``).
                 let ast = self.ast(cl.file);
                 let at = match *ast.node(cl.node) {
-                    Node::Member { prop, .. } => Loc::new(cl.file, prop),
+                    Node::Member { prop, .. } if !tagged => Loc::new(cl.file, prop),
                     _ => cl,
                 };
                 self.error_chain(at, &chain);
@@ -1149,10 +1171,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         let list = match args {
             Args::List(l) => ast.list(l),
             Args::Tagged(q) => {
-                // The strings array, then each substitution expression.
-                let tsa = self
-                    .global_type(GlobalType::TemplateStringsArray)
-                    .unwrap_or(TypeId::UNRESOLVED);
+                // The strings array, then each substitution expression. Without a global
+                // `TemplateStringsArray` it is `{}`, with global TS2318.
+                let tsa = match self.global_type(GlobalType::TemplateStringsArray) {
+                    Some(t) => t,
+                    None => {
+                        if self.reporting(e.file) {
+                            self.report_missing_global_type("TemplateStringsArray");
+                        }
+                        TypeId::EMPTY_OBJECT
+                    }
+                };
                 out.push(Arg::Elem(q, tsa));
                 return match *ast.node(q) {
                     Node::TemplateLit { parts } => {
@@ -2671,18 +2700,16 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// reached through `?.` (`o?.m()`).
     fn call_receiver(&self, e: Loc) -> Option<(Loc, bool)> {
         let ast = self.ast(e.file);
-        let Node::Call { callee, .. } = *ast.node(e.node) else {
-            return None;
+        // A tagged template's receiver is its tag's object (`o.tag\`x\``).
+        let callee = match *ast.node(e.node) {
+            Node::Call { callee, .. } => callee,
+            Node::TaggedTemplate { tag, .. } => tag,
+            _ => return None,
         };
-        // Parentheses and non-null assertions around the callee keep its receiver
-        // (`(o.f)()`, `o.f!()`).
-        let mut callee = crate::nodes::skip_parens(ast, callee);
-        for _ in 0..10_000 {
-            let Node::NonNull { expr } = *ast.node(callee) else {
-                break;
-            };
-            callee = crate::nodes::skip_parens(ast, expr);
-        }
+        // Parentheses, non-null assertions, `as`, `satisfies` and type assertions around the
+        // callee keep its receiver (`(o.f)()`, `o.f!()`, `(o.f as F)\`x\``; tsc: checker.go,
+        // getThisArgumentOfCall).
+        let callee = crate::nodes::skip_outer_expressions(ast, callee);
         match *ast.node(callee) {
             Node::Member { obj, optional, .. } | Node::Index { obj, optional, .. } => {
                 Some((Loc::new(e.file, obj), optional))
@@ -4271,7 +4298,12 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// receiver or the whole call.
     fn check_this_arg(&mut self, e: Loc, sig: SigId, rel: RelationKind) -> Option<Failure> {
         let tt = self.store().sig(sig).this_type?;
-        if tt == TypeId::VOID || !matches!(self.ast(e.file).node(e.node), Node::Call { .. }) {
+        if tt == TypeId::VOID
+            || !matches!(
+                self.ast(e.file).node(e.node),
+                Node::Call { .. } | Node::TaggedTemplate { .. }
+            )
+        {
             return None;
         }
         let (arg_type, at) = match self.call_receiver(e) {
