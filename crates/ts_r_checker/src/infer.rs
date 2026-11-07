@@ -431,6 +431,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         }
         if sf.contains(TypeFlags::UNION) {
+            // (An indexed access target gets nothing from a union source; see below.)
+            if tf.contains(TypeFlags::INDEXED_ACCESS) {
+                return;
+            }
             for m in s.members_of_union(source).to_vec() {
                 self.infer_from(ctx, m, target, contra, depth + 1);
             }
@@ -485,6 +489,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.infer_from(ctx, source, b, contra, depth + 1);
                 ctx.weak_mode = saved;
             }
+            return;
+        }
+        // `{ [P in K]: X }[I]` infers to `X` with `P` replaced by `I`, exposing more of the
+        // type parameters (tsc: inference.go, inferFromTypes infers to the simplified access).
+        // Not from a union source: tsc infers nothing from one to an object target, which
+        // inference here does not model yet.
+        if tf.contains(TypeFlags::INDEXED_ACCESS)
+            && !self.store().flags(source).contains(TypeFlags::UNION)
+            && let Some(simplified) = self.indexed_mapped_substitution_ext(target, true)
+            && simplified != target
+        {
+            self.infer_from(ctx, source, simplified, contra, depth + 1);
             return;
         }
         if tf.intersects(TypeFlags::INDEXED_ACCESS | TypeFlags::INDEX) {

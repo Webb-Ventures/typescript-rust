@@ -1952,10 +1952,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return t;
         }
-        let Some(sym) = self.resolve_entity(name, meaning::TYPE) else {
+        let Some(written) = self.resolve_entity(name, meaning::TYPE) else {
             return self.unresolved_reference_type(name, type_args);
         };
-        let Some(sym) = self.c.resolve_alias(sym) else {
+        let Some(sym) = self.c.resolve_alias(written) else {
             return self.unresolved_reference_type(name, type_args);
         };
         // `J[]` inside `type J = string | J[]` (or inside `type A = J[]` with `type J =
@@ -2031,6 +2031,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.alias_carries_over(d, t) {
                 return self.with_alias(t, alias);
             }
+        }
+        // A generic alias reached through an import names the type with the arguments as
+        // written, defaults left out (`import { Component }` then `Component` prints as
+        // `Component`, not `Component<any, {}, {}>`; tsc: checker.go,
+        // getTypeFromTypeAliasReference).
+        if alias == AliasId::NONE
+            && written != sym
+            && self.c.sym_flags(sym).intersects(SymbolFlags::TYPE_ALIAS)
+            && let local = self.local_type_params(sym)
+            && args.len() < local.len()
+            && let Some(info) = self.store().alias_of(t)
+            && info.sym == sym
+        {
+            let a = self.store().list(&args);
+            let a = self.store().alias(sym, a);
+            return self.with_alias(t, a);
         }
         t
     }
