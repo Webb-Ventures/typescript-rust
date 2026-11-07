@@ -876,7 +876,22 @@ Files, by layer:
   a syntactic pass over the binder's resolved references; its observed rules are listed in
   the module doc; JavaScript files too: a JSDoc `@import` is a value import reported from
   its `@`, top-level `@typedef`/`@callback`s are never reported, and TS6205 for `@template`
-  lists starts just before the first tag's `@`), `classes.rs` (accessors and class members), `heritage.rs` (class
+  lists starts just before the first tag's `@`. Merges and overloads (gap 8): tsc walks
+  each scope's locals and, for an unreferenced symbol, reports every declaration that is
+  not a variable, parameter or import on its own, with the message of that declaration's
+  kind (types TS6196, everything else TS6133), so overloads, `function`/`class`/`enum` +
+  `namespace` and `interface`/`type` + `const` each give one report per declaration;
+  private members are walked one by one too, so method overloads report every signature.
+  `merged_ok` admits only conflict-free merges whose declarations are all in the file
+  (overloads with one body, one value kind, no decorated class), and a merge with an
+  enum or namespace keeps counting its self reads, so a doubt stays silent. A report is
+  dropped when its declaration node holds a parse error: tsc checks the node flag
+  that marks a subtree with a parse error before reporting, and a binding element reports
+  at its root declaration (tsc: tsc/internal/checker/checker.go, checkUnusedLocalsAndParameters,
+  reportUnused, reportUnusedVariable, checkUnusedClassMembers;
+  tsc/internal/binder/nameresolver.go, isSelfReferenceLocation). Cross-file element
+  access to a private member never counts as a read in tsc 7 either (probed with both
+  file orders), as here), `classes.rs` (accessors and class members), `heritage.rs` (class
   `extends`/`implements` and interface `extends` compatibility, `extends` cycles TS2506: TS2415/2416/2417/2420/2422/
   2430/2720/2320, ambient `declare class`es included; observed rules in the module doc), `indexes.rs` (members against index
   signatures: TS2411/2413), `redeclare.rs` (`var` and merged property redeclarations
@@ -3462,7 +3477,10 @@ Small changes a lint rule needed, each with a `tests/parity` fixture:
 - Inferring a type predicate for a function expression's signature (TypeScript 5.5) checks
   its body with that signature's parameter types, speculatively, so a callback of an
   overloaded generic method (`find`, `filter`) never gets its parameters fixed as implicit
-  `any` while the call is still resolving (`overload_callback_predicate`).
+  `any` while the call is still resolving (`overload_callback_predicate`). A parameter
+  declared `boolean` (or `true | false`) is never refined: `(x: boolean) => x` stays
+  `(x: boolean) => boolean` (`boolean_parameter_not_a_predicate`; tsc:
+  checkIfExpressionRefinesAnyParameter in tsc/internal/checker/checker.go).
 - The error type narrows like `any`: a type predicate, `typeof` or `instanceof` on a value
   from an unresolved import gives the narrowed type (`error_type_narrowing`).
 - Under `strictBindCallApply`, function types get `call`/`apply`/`bind` from
@@ -3679,12 +3697,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-08, parity/checker-gap-7: JSX overloads, inference, tags and children;
-  12750 compared variants):
-  12501 exact (98.0%; all diagnostics and chains), 12521 (98.2%) exact on first lines;
-  118 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-08, parity/checker-gap-8: unused merges and overloads, boolean
+  predicates; 12750 compared variants):
+  12502 exact (98.1%; all diagnostics and chains), 12522 (98.2%) exact on first lines;
+  117 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12489, 126 and 4 (babed30, parity/checker-gap-6); 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12501, 118 and 4 (c98bdfc, parity/checker-gap-7); 12489, 126 and 4 (babed30, parity/checker-gap-6); 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3783,13 +3801,11 @@ and integration tests allow: they link the one library build).
   openapi, react-query, tanstack-react-query, tests, upgrade): no TS2430 left; the extras
   are TS2339 on `TRPCClient<TRouter>` / `CreateQueryUtils<TRouter>` proxies, TS7006,
   TS2344, TS2322 in openapi's `params.gen.ts`, and TS2688 for `jest` types.
-- Unused checks: write-only private properties through element access in another file,
-  overloaded functions and merged declarations are not reported (silent).
+- Unused checks: a merge with an ambient declaration (`declare namespace D {}` +
+  `interface D {}`, tsc reports the interface) and overloaded private methods read only
+  through element access stay silent.
 - Sibling type parameters in the constraints of a cloned generic method signature keep
   their original identity (`<K extends keyof T, U extends K>` instantiated by a receiver).
-- Inferred type predicates: `(x: boolean) => x` is inferred as `(x: boolean) => x is true`
-  where tsc 7 keeps `(x: boolean) => boolean` (seen in a TS2345 argument message, calls and
-  tagged templates alike; found in gap 5, not fixed).
 - Calls and patterns: TS2671
   for an `export =` that is only a function, TS2300 for duplicate late-bound methods and
   accessors in object literals, TS2465 (`this` in a computed name), implied index signatures merged across

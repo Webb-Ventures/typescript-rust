@@ -33,6 +33,11 @@
 //! - A type parameter and a parameter of one name (`function f<T>(T: T)`) share a symbol;
 //!   a read as a type reference's name uses the type parameter, any other read the
 //!   parameter, and each is reported on its own.
+//! - An unread merged symbol is reported at every declaration, each with its own kind's
+//!   message: overloads (`function f(): void; function f(x?) {}` twice), `function`/
+//!   `class`/`enum` + `namespace`, `class` + `interface`, `interface`/`type` + `const`,
+//!   namespace + namespace; private method overloads at every signature (`merged_ok`).
+//! - A variable's report is dropped when its declaration holds a parse error.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{AssignOp, Ast, BinaryOp, MethodKind, Modifiers, Node, NodeId, Span, VarKind};
