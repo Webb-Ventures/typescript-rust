@@ -1,0 +1,10 @@
+a.tsx(7,13): error TS2559: Type 'number' has no properties in common with type '{ a?: number | undefined; b?: string | undefined; }'.
+a.tsx(7,21): error TS2698: Spread types may only be created from object types.
+a.tsx(8,17): error TS2783: 'a' is specified more than once, so this usage will be overwritten.
+a.tsx(10,23): error TS2698: Spread types may only be created from object types.
+a.tsx(11,23): error TS2783: 'a' is specified more than once, so this usage will be overwritten.
+a.tsx(14,13): error TS2322: Type 'undefined' is not assignable to type '{ a?: number | undefined; b?: string | undefined; }'.
+a.tsx(14,21): error TS2698: Spread types may only be created from object types.
+a.tsx(15,14): error TS2698: Spread types may only be created from object types.
+a.tsx(16,14): error TS2783: 'a' is specified more than once, so this usage will be overwritten.
+a.tsx(17,14): error TS2698: Spread types may only be created from object types.

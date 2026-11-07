@@ -32,13 +32,22 @@
 //!   for classes) in that order, when declared.
 //! - **Overloads**: the first signature whose props the attributes satisfy (a subtype pass,
 //!   then an assignability pass, as for calls); when none does, the last one's errors are
-//!   reported under TS2769 "The last overload gave the following error.".
+//!   reported under TS2769 "The last overload gave the following error.". Each candidate
+//!   first sees its context-sensitive functions as `(...args: any[]) => any` and its
+//!   attributes without the excess check; the first to pass that fixes the functions'
+//!   contextual types (the last candidate when none does).
 //! - **Arity**: under the classic factory, a function component whose every call signature
 //!   needs more arguments than any function-component parameter of the factory's
 //!   overloads takes (`(props, context?)`: two) is TS6229 at the tag, and its attributes
 //!   are not checked. A rest parameter there accepts any arity.
 //! - **Generic components** infer their type arguments from the attributes that are not
-//!   context sensitive; explicit type arguments of the wrong count are TS2558.
+//!   context sensitive, typed in the context of the generic props; a lone candidate whose
+//!   naked type parameters only context-sensitive attributes infer gets a second pass.
+//!   Explicit type arguments of the wrong count are TS2558 (any on an intrinsic tag),
+//!   failing constraints TS2344, a trailing comma TS1009.
+//! - **Union and generic tags**: a string literal member is an intrinsic signature (an
+//!   unknown one is TS2339 at the element, then TS2604); a type parameter goes through its
+//!   constraint, and one constrained to a single string is TS2604.
 //! - **Children** are an attribute when `JSX.ElementChildrenAttribute` names one (always
 //!   `children` under the automatic runtime): one child is its type, several an array of
 //!   their union. Whitespace-only text containing a line break is not a child; text is
