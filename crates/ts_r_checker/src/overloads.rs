@@ -41,6 +41,7 @@
 
 use rustc_hash::FxHashMap;
 use ts_r_ast::{MethodKind, Modifiers, Node, NodeId};
+use ts_r_binder::SymbolFlags;
 use ts_r_diagnostics::FileId;
 use ts_r_types::{SigId, TypeFlags, TypeId};
 
@@ -548,6 +549,104 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// The class method symbol declared by `n` when its declarations span a class and an
+    /// interface merged with it (`abstract class A { abstract m(): void }` plus
+    /// `interface A { m(): void }`).
+    fn class_interface_method(&mut self, file: FileId, n: NodeId) -> Option<Vec<Loc>> {
+        let here = Loc::new(file, n);
+        let container = self.c.parent(here)?;
+        if !matches!(
+            self.node(container),
+            Node::ClassDecl { .. } | Node::Interface { .. }
+        ) {
+            return None;
+        }
+        let own = self.c.sym_of_decl(here)?;
+        let csym = self.c.sym_of_decl(container)?;
+        let flags = self.c.sym_flags(csym);
+        if !(flags.contains(SymbolFlags::CLASS) && flags.contains(SymbolFlags::INTERFACE)) {
+            return None;
+        }
+        // The class's own members merge same-named methods of every declaration into
+        // one symbol whose origins are each declaration's.
+        let raw = self.raw_members(csym);
+        let merged = raw.props.iter().copied().find(|&p| {
+            self.c
+                .synth_sym(p)
+                .is_some_and(|x| x.origins.len() > 1 && x.origins.contains(&own))
+        })?;
+        let origins = self.c.synth_sym(merged)?.origins.clone();
+        let mut decls: Vec<Loc> = origins
+            .iter()
+            .flat_map(|&o| self.c.decls(o))
+            .filter(|d| {
+                matches!(
+                    self.c.file(d.file).ast.node(d.node),
+                    Node::MethodDef {
+                        kind: MethodKind::Method,
+                        ..
+                    } | Node::MethodSignature {
+                        kind: MethodKind::Method,
+                        ..
+                    }
+                )
+            })
+            .collect();
+        // Declaration order: the binder's, in source order within one file.
+        if decls.iter().any(|d| d.file != file) {
+            return None;
+        }
+        decls.sort_by_key(|d| self.ast(d.file).span(d.node).start);
+        Some(decls)
+    }
+
+    /// TS2512 at method `n` (a class method or an interface method signature) of a symbol
+    /// declared by a class and a merged interface, when its `abstract` differs from the
+    /// canonical declaration's: the implementation when it shares a container with the
+    /// first declaration, else the first declaration (tsc: checker.go,
+    /// checkFunctionOrConstructorSymbol, getCanonicalOverload). Within the class body alone
+    /// `check_overload_modifiers` does this, and leaves such symbols to this check.
+    pub(crate) fn check_merged_abstract_agreement(&mut self, file: FileId, n: NodeId) {
+        if !self.reporting(file) {
+            return;
+        }
+        let Some(decls) = self.class_interface_method(file, n) else {
+            return;
+        };
+        let info = |ck: &Self, d: Loc| -> (bool, bool, NodeId) {
+            match *ck.c.file(d.file).ast.node(d.node) {
+                Node::MethodDef {
+                    modifiers,
+                    value,
+                    key,
+                    ..
+                } => (
+                    modifiers.contains(Modifiers::ABSTRACT),
+                    crate::nodes::fn_parts(ck.ast(d.file), value).is_some_and(|p| p.body.is_some()),
+                    key,
+                ),
+                Node::MethodSignature { key, .. } => (false, false, key),
+                _ => (false, false, d.node),
+            }
+        };
+        let Some(&first) = decls.first() else {
+            return;
+        };
+        let implementation = decls.iter().copied().find(|&d| info(self, d).1);
+        let canonical = match implementation {
+            Some(i) if self.c.parent(i) == self.c.parent(first) => i,
+            _ => first,
+        };
+        let (abstract_here, _, key) = info(self, Loc::new(file, n));
+        if abstract_here != info(self, canonical).0 {
+            self.error(
+                Loc::new(file, key),
+                dg::OVERLOAD_SIGNATURES_MUST_ALL_BE_ABSTRACT_OR_NON_ABSTRACT_2512,
+                &[],
+            );
+        }
+    }
+
     /// TS2383/2384/2385/2386/2512: modifiers that must agree across an overload set.
     /// TS2386 at the method signature `n` (interface or type literal) when its `?` differs
     /// from the first method signature of the same symbol, merged declarations included.
@@ -664,6 +763,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             if d.kind == Kind::Method
                 && d.modifiers.contains(Modifiers::ABSTRACT)
                     != canon.modifiers.contains(Modifiers::ABSTRACT)
+                && self.class_interface_method(file, d.node).is_none()
             {
                 self.error_span(
                     file,

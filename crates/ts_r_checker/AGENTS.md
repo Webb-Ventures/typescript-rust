@@ -553,6 +553,15 @@ Files, by layer:
   `T2`. An intersection of class references is rebuilt without its alias and prints as
   `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
   getTypeWithThisArgument).
+- A method declared by a class and a merged interface (`class_interface_method` in
+  `overloads.rs`: one merged member whose origins span both) checks `abstract` across all
+  its declarations in source order (one file only): TS2512 at each declaration whose
+  `abstract` differs from the canonical one, the implementation when it shares the first
+  declaration's container, else the first (`check_merged_abstract_agreement`; the class
+  body's own group check leaves such methods alone). `super.m` of such a member reads the
+  modifiers of the origin declared first, so an abstract class method declared before the
+  interface's signature is TS2513 (tsc: checker.go, checkFunctionOrConstructorSymbol,
+  getCanonicalOverload; the symbol's value declaration).
 - Signature parameters under strictFunctionTypes (`relate.rs`, `signature_related_mode`)
   relate contravariantly unless the target signature was declared by a method or a class
   `constructor` (`is_class_constructor_sig`): construct signatures of `new (x: T) => U`

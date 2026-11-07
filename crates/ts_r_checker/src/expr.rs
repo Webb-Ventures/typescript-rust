@@ -4377,8 +4377,41 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.reporting(pl.file) {
             return;
         }
+        // (`super.m` of an instantiated member of a merged one: the merged symbol.)
+        let p = match self.c.synth_sym(p) {
+            Some(x)
+                if is_super
+                    && x.origins.len() == 1
+                    && self
+                        .c
+                        .synth_sym(x.origins[0])
+                        .is_some_and(|y| y.origins.len() > 1) =>
+            {
+                x.origins[0]
+            }
+            _ => p,
+        };
         let sym = match self.c.synth_sym(p) {
             Some(x) if x.origins.len() == 1 => Some(x.origins[0]),
+            // A class member merged with an interface's (`super.m` with `abstract m()` in
+            // the class and `m()` in a merged interface): tsc reads the symbol's first
+            // declaration, so the origin declared first (in one file) stands for it.
+            Some(x) if is_super && x.flags.contains(SymbolFlags::METHOD) => {
+                let firsts: Vec<(SymId, Loc)> = x
+                    .origins
+                    .iter()
+                    .filter_map(|&o| Some((o, self.c.first_decl(o)?)))
+                    .collect();
+                let one_file = firsts.windows(2).all(|w| w[0].1.file == w[1].1.file);
+                if one_file {
+                    firsts
+                        .iter()
+                        .min_by_key(|(_, d)| self.ast(d.file).span(d.node).start)
+                        .map(|(o, _)| *o)
+                } else {
+                    None
+                }
+            }
             Some(_) => None,
             None => Some(p),
         };

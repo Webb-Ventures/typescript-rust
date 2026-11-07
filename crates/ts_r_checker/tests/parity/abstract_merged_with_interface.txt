@@ -1,0 +1,6 @@
+a.ts(5,5): error TS2512: Overload signatures must all be abstract or non-abstract.
+a.ts(9,17): error TS2513: Abstract method 'm' in class 'A' cannot be accessed via super expression.
+a.ts(13,15): error TS2512: Overload signatures must all be abstract or non-abstract.
+a.ts(16,5): error TS2391: Function implementation is missing or not immediately following the declaration.
+a.ts(16,5): error TS2512: Overload signatures must all be abstract or non-abstract.
+a.ts(19,29): error TS2512: Overload signatures must all be abstract or non-abstract.

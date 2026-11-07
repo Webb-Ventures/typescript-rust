@@ -9831,6 +9831,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.check_accessor_signature_implicit_any(file, n);
                 self.check_method_signature_optionality(file, n);
             }
+            if let Node::MethodSignature { .. } | Node::MethodDef { .. } = node {
+                self.check_merged_abstract_agreement(file, n);
+            }
             if let Node::Ident { .. } | Node::Member { .. } | Node::Call { .. } | Node::New { .. } =
                 node
             {
