@@ -2726,6 +2726,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                             return Some(true);
                         }
                     }
+                    // Other templates relate `S[P]` to the template in tsc; our relations of
+                    // such generic accesses are not exact enough to rule the source out
+                    // (`U[P]` to `U[keyof U]`).
                     _ => return None,
                 }
             }

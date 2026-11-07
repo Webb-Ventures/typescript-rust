@@ -2588,7 +2588,10 @@ Files, by layer:
      mapped `X`), a bare `K` gives none, literal keys give themselves, and an `as` type still
      generic in an outer parameter (`` `${K}${S}` ``) gives none. So a fresh literal
      against `Partial<T>`, `Record<K, V>`, `Pick<T, K>` or `MappedModel<T>` is TS2353 for
-     properties outside that set, before the relation is tried.
+     properties outside that set, before the relation is tried. A generic mapped type
+     known to have no member at all is its own apparent type (`apparent_type`), so
+     `pick.foo` on `Pick<T, K>` and `rec.foo` on `Record<K, V>` are TS2339 (with members
+     known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
   A `?` generic mapped type prints its template with `| undefined` (`print_mapped`), as tsc
   prints the template type it relates.
   What stays silent (related, never a new error): templates other than `X[P]` when the keys
@@ -2602,7 +2605,7 @@ Files, by layer:
   type's parts (`mapped_info`, `mapped_constraint`, `mapped_template_and_name_for_key`).
   Affected conformance tests: `genericMappedTypeAsClause` (6 missing errors) and
   `indexSignatureAndMappedType` (3), now exact; `keyofAndIndexedAccess2` (2 of 10),
-  `templateLiteralTypes1` (1 of 4) and `mappedTypeErrors` (4 TS2403 of 6) closer.
+  `templateLiteralTypes1` (1 of 4) closer, `mappedTypeErrors` (4 TS2403, 2 TS2339) exact.
   `complicatedIndexedAccessKeyofReliesOnKeyofNeverUpperBound` now reports its line through
   the `Partial<Omit<..>>` member, which tsc also rejects; tsc names the `Pick<.., "type">`
   member first (a separate gap). Probes against tsc 7.0.2 in the `generic_mapped_*` parity
