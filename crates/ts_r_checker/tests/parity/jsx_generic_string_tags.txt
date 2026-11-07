@@ -1,0 +1,8 @@
+a.tsx(9,16): error TS2322: Type '{}' is not assignable to type 'IntrinsicAttributes & LibraryManagedAttributes<Tag, { a?: string | undefined; b?: number | undefined; }>'.
+  Type '{}' is not assignable to type 'LibraryManagedAttributes<Tag, { a?: string | undefined; b?: number | undefined; }>'.
+a.tsx(10,16): error TS2322: Type '{ a: string; }' is not assignable to type 'IntrinsicAttributes & LibraryManagedAttributes<Tag, { a?: string | undefined; b?: number | undefined; }>'.
+  Type '{ a: string; }' is not assignable to type 'LibraryManagedAttributes<Tag, { a?: string | undefined; b?: number | undefined; }>'.
+a.tsx(13,55): error TS2604: JSX element type 'TagElement' does not have any construct or call signatures.
+a.tsx(18,56): error TS2604: JSX element type 'TagElement' does not have any construct or call signatures.
+a.tsx(19,82): error TS2322: Type '{}' is not assignable to type 'IntrinsicAttributes & LibraryManagedAttributes<Tag, { a?: string | undefined; }>'.
+  Type '{}' is not assignable to type 'LibraryManagedAttributes<Tag, { a?: string | undefined; }>'.

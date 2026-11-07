@@ -3270,6 +3270,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .conditional_constraint(s)
                 .is_some_and(|c| c != s && self.related_to(c, t, rel, report, None));
         }
+        // A concrete source relates to no conditional with `infer` parameters deferred on a
+        // generic check type (`{}` is not a `C extends { d: infer D } ? P & D : P`): its
+        // branches are not tried.
+        if tf.contains(TypeFlags::CONDITIONAL)
+            && !sf.intersects(TypeFlags::INSTANTIABLE)
+            && !self
+                .store()
+                .traits(s)
+                .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+            && self.conditional_has_infer(t)
+            && self.conditional_check_instantiable(t)
+        {
+            return false;
+        }
         // Deferred generic forms we do not model: be permissive.
         if tf.intersects(
             TypeFlags::INDEXED_ACCESS

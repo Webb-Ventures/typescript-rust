@@ -126,6 +126,19 @@ impl<'c, 'a> Ck<'c, 'a> {
         })
     }
 
+    /// Whether the check type of conditional `t` is a type parameter (or other instantiable
+    /// type) after its mapper: a conditional deferred on its check type itself.
+    pub(crate) fn conditional_check_instantiable(&mut self, t: TypeId) -> bool {
+        let Some(d) = self.store().conditional_data(t) else {
+            return false;
+        };
+        let check = self.store().conditional_root_data(d.root).check;
+        let check = self.instantiate(check, d.mapper);
+        self.store()
+            .flags(check)
+            .intersects(TypeFlags::INSTANTIABLE)
+    }
+
     /// The constraint of a deferred conditional type (what its members are): for a
     /// distributive one whose check type is a constrained type parameter, the conditional
     /// over that constraint unless it is `never`; otherwise the union of its branches (the

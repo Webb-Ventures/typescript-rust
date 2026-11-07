@@ -757,8 +757,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.store().flags(m).contains(TypeFlags::STRING_LITERAL)
                 && let Some(text) = self.literal_text(m)
             {
-                let Ok(props) = self.jsx_intrinsic_props(ns, &text) else {
-                    return Some((Vec::new(), false));
+                let props = match self.jsx_intrinsic_props(ns, &text) {
+                    Ok(p) => p,
+                    // No `JSX.IntrinsicElements`: any props, nothing to check.
+                    Err(true) => return None,
+                    Err(false) => return Some((Vec::new(), false)),
                 };
                 let ret = self.jsx_ns_type(ns, "Element").unwrap_or(TypeId::ANY);
                 let name = self.store().intern_str("props");
@@ -1702,6 +1705,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         let tt = if self.store().flags(tt).intersects(TypeFlags::INSTANTIABLE) {
             let c = self.base_constraint(tt);
             if c == TypeId::UNKNOWN || self.jsx_unusable(c) {
+                return;
+            }
+            // A generic tag constrained to one string (`T extends "div"`, `T extends string`)
+            // is no intrinsic name: its apparent type is `String`, without signatures.
+            let cf = self.store().flags(c);
+            if cf.intersects(TypeFlags::STRING_LIKE) && !cf.contains(TypeFlags::UNION) {
+                let text = self.jsx_tag_text(opening.file, name);
+                self.error(
+                    Loc::new(opening.file, name),
+                    dg::JSX_ELEMENT_TYPE_0_DOES_NOT_HAVE_ANY_CONSTRUCT_OR_CALL_SIGNATURES_2604,
+                    &[&text],
+                );
                 return;
             }
             c
