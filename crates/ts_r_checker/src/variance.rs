@@ -1,23 +1,27 @@
-//! Measured variance of a generic class or interface's type parameters.
+//! Variance of the type parameters of generic classes, interfaces and type aliases.
 //!
 //! Two references to the same generic type (`Box<number>` and `Box<unknown>`) relate by
 //! their type arguments, each compared in the direction its type parameter's variance
-//! allows. The variance of a parameter is measured by relating two instantiations that
-//! differ only in that parameter: one with a "sub" marker type parameter and one with a
-//! "super" marker (the sub marker's constraint). Sub-to-super related means covariant,
-//! super-to-sub related contravariant, both bivariant (independent when an unrelated third
-//! marker relates too), neither invariant.
+//! allows. A written `in`, `out` or `in out` sets the variance. Otherwise it is measured
+//! by relating two instantiations that differ only in that parameter: one with a "sub"
+//! marker type parameter and one with a "super" marker (the sub marker's constraint).
+//! Sub-to-super related means covariant, super-to-sub related contravariant, both
+//! bivariant (independent when an unrelated third marker relates too), neither invariant.
 //!
 //! While a type's variances are measured, references to it are "maybe related" (so
 //! recursive types measure). A measurement is a pure function of the declaration: the
 //! variances it needs of other types are measured inside it and kept local, and its
 //! relation results go to a cache of its own rather than the shared one, so the result
-//! does not depend on which file or thread asked first. Measurements that meet constructs
-//! whose relation does not follow from markers (conditional, indexed-access, `keyof`,
-//! template literal or mapped types mentioning type parameters, rest parameters typed by
-//! unions of tuples that mention them) or that run out of budget
-//! are marked unreliable: their references fall back to comparing type arguments
-//! covariantly, then structure.
+//! does not depend on which file or thread asked first.
+//!
+//! Each parameter's measurement also records what it met that markers can't stand for
+//! (tsc 7's reliability flags, `tsc/internal/checker/relater.go`): a source mapped type
+//! that removes `?` with a marker in its keys is *unmeasurable* (arguments relate only
+//! when identical); other mapped type keys, template literal sources, non-array rest
+//! parameters and arguments of unreliable parameters mentioning a marker, and a spent
+//! budget, are *unreliable*. The flags of a comparison are cached with its result, so a
+//! cache hit notes them again. When any parameter has a flag, arguments the variances
+//! reject fall back to structure.
 
 use std::sync::Arc;
 
@@ -52,8 +56,25 @@ pub(crate) enum VarianceKey {
 #[derive(Debug)]
 pub(crate) struct Variances {
     pub list: Box<[Variance]>,
-    /// The measurement met constructs it can't account for (see the module docs).
-    pub unreliable: bool,
+    /// Per type parameter: [`UNMEASURABLE`] and [`UNRELIABLE`], what the measurement met
+    /// that markers can't stand for (see the module docs). Written variances have none.
+    pub flags: Box<[u8]>,
+}
+
+/// A relation whose outcome doesn't follow from the arguments' (a source mapped type
+/// that removes `?`): arguments relate only when identical, else by structure.
+pub(crate) const UNMEASURABLE: u8 = 1;
+/// A relation that may hold where the measured variance says it doesn't (a mapped
+/// type's keys, template literals, generic rest parameters): arguments the variances
+/// reject are compared by structure.
+pub(crate) const UNRELIABLE: u8 = 2;
+
+impl Variances {
+    /// Some parameter's measurement was unmeasurable or unreliable: arguments the
+    /// variances reject fall back to structure.
+    pub(crate) fn allows_structural_fallback(&self) -> bool {
+        self.flags.iter().any(|&f| f != 0)
+    }
 }
 
 /// Structural comparisons one relation of a measurement may make.
@@ -73,12 +94,13 @@ pub(crate) struct VarianceCheck {
 /// The state of the outermost measurement in progress.
 #[derive(Default, Debug)]
 pub(crate) struct Probe {
-    /// Relation results of the measurement.
-    pub cache: FxHashMap<(TypeId, TypeId, RelationKind), bool>,
+    /// Relation results of the measurement, with the [`UNMEASURABLE`] / [`UNRELIABLE`]
+    /// flags their comparison noted (a later hit notes them again).
+    pub cache: FxHashMap<(TypeId, TypeId, RelationKind), (bool, u8)>,
     /// Variances measured inside it (`None`: being measured).
     pub variances: FxHashMap<VarianceKey, Option<Arc<Variances>>>,
-    /// The innermost running measurement met something markers can't stand for.
-    pub unreliable: bool,
+    /// What the running comparison of the innermost measurement noted.
+    pub flags: u8,
     /// The marker instantiations being compared (compared structurally).
     pub markers: rustc_hash::FxHashSet<TypeId>,
 }
@@ -105,25 +127,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         (sub, sup, other)
     }
 
-    /// Notes, while measuring, a relation between `s` and `t` whose outcome markers can't
-    /// stand for: a conditional, indexed-access, `keyof`, substitution, template literal or
-    /// string-mapping type, or a generic mapped type, that mentions a marker.
-    pub(crate) fn note_unmeasurable(&mut self, s: TypeId, t: TypeId) {
-        if self.rel.probe.as_ref().is_none_or(|p| p.unreliable) {
+    /// Notes, while measuring, `flag` ([`UNMEASURABLE`] or [`UNRELIABLE`]) when `x`
+    /// mentions a marker (tsc: instantiating with `reportUnreliableMapper` /
+    /// `reportUnmeasurableMapper`).
+    pub(crate) fn note_markers(&mut self, x: TypeId, flag: u8) {
+        if self.rel.probe.as_ref().is_none_or(|p| p.flags & flag != 0) {
             return;
         }
-        if (self.unmeasurable_type(s) || self.unmeasurable_type(t))
+        if !self
+            .store()
+            .traits(x)
+            .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+        {
+            return;
+        }
+        let (sub, sup, other) = self.variance_markers();
+        if (self.type_mentions(x, sub) || self.type_mentions(x, sup) || self.type_mentions(x, other))
             && let Some(p) = self.rel.probe.as_mut()
         {
-            p.unreliable = true;
+            p.flags |= flag;
         }
     }
 
     /// Notes, while measuring, a signature whose rest parameter is a union of tuples that
-    /// mentions a marker (`next(...[value]: [] | [N])`): tsc's elaboration of such types
-    /// falls back to structure.
+    /// mentions a marker (`next(...[value]: [] | [N])`): such a rest type is not an array,
+    /// so its comparison is unreliable (tsc: `getNonArrayRestType` in
+    /// `compareSignaturesRelated`).
     pub(crate) fn note_unmeasurable_rest(&mut self, sig: ts_r_types::SigId) {
-        if self.rel.probe.as_ref().is_none_or(|p| p.unreliable) {
+        if self.rel.probe.as_ref().is_none_or(|p| p.flags & UNRELIABLE != 0) {
             return;
         }
         let st = self.store();
@@ -135,7 +166,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         if !st.flags(rt).contains(TypeFlags::UNION)
-            || !st.traits(rt).contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
             || !st
                 .members_of_union(rt)
                 .iter()
@@ -143,54 +173,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         {
             return;
         }
-        let (sub, sup, other) = self.variance_markers();
-        if (self.type_mentions(rt, sub)
-            || self.type_mentions(rt, sup)
-            || self.type_mentions(rt, other))
-            && let Some(p) = self.rel.probe.as_mut()
-        {
-            p.unreliable = true;
-        }
+        self.note_markers(rt, UNRELIABLE);
     }
 
     /// Notes, while measuring, a generic rest parameter type (`...args: T`) related as a
     /// whole that mentions a marker: such a comparison is unreliable, references fall back
     /// to structure (tsc: `reportUnreliableMarkers` on `getNonArrayRestType`).
     pub(crate) fn note_unreliable_rest_type(&mut self, rt: TypeId) {
-        if self.rel.probe.as_ref().is_none_or(|p| p.unreliable) {
-            return;
-        }
-        let (sub, sup, other) = self.variance_markers();
-        if (self.type_mentions(rt, sub)
-            || self.type_mentions(rt, sup)
-            || self.type_mentions(rt, other))
-            && let Some(p) = self.rel.probe.as_mut()
-        {
-            p.unreliable = true;
-        }
-    }
-
-    fn unmeasurable_type(&mut self, x: TypeId) -> bool {
-        let st = self.store();
-        if !st.traits(x).contains(TypeTraits::CONTAINS_TYPE_PARAMETER) {
-            return false;
-        }
-        let kind = st.flags(x).intersects(
-            TypeFlags::CONDITIONAL
-                | TypeFlags::INDEX
-                | TypeFlags::INDEXED_ACCESS
-                | TypeFlags::SUBSTITUTION
-                | TypeFlags::TEMPLATE_LITERAL
-                | TypeFlags::STRING_MAPPING,
-        ) || (matches!(
-            st.object_of(x).map(|o| o.kind),
-            Some(ObjectKind::Mapped { .. })
-        ) && self.is_generic_mapped_type(x));
-        if !kind {
-            return false;
-        }
-        let (sub, sup, other) = self.variance_markers();
-        self.type_mentions(x, sub) || self.type_mentions(x, sup) || self.type_mentions(x, other)
+        self.note_markers(rt, UNRELIABLE);
     }
 
     /// Whether `t` is a marker instantiation of a measurement in progress.
@@ -245,7 +235,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let outermost = self.rel.probe.is_none();
         let probe = self.rel.probe.get_or_insert_with(Box::default);
         probe.variances.insert(target, None);
-        let saved_unreliable = std::mem::take(&mut probe.unreliable);
+        let saved_flags = std::mem::take(&mut probe.flags);
         let (sub, sup, other) = self.variance_markers();
         // A clean relation state for the measurement.
         let saved_stack = std::mem::take(&mut self.rel.stack);
@@ -258,7 +248,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let saved_excluded = std::mem::take(&mut self.rel.excluded_props);
         let saved_skip = std::mem::take(&mut self.rel.skip_excess);
         let mut list = Vec::with_capacity(tps.len());
-        let mut spent = false;
+        let mut flags = Vec::with_capacity(tps.len());
         for i in 0..tps.len() {
             // `out`, `in` and `in out` annotations replace the measurement.
             let written = self.variance_modifiers(tps[i]);
@@ -273,6 +263,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         _ => Variance::Covariant,
                     },
                 );
+                flags.push(0);
                 continue;
             }
             let with = |ck: &mut Self, m: TypeId| {
@@ -292,7 +283,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             let t_other = with(self, other);
             if let Some(p) = self.rel.probe.as_mut() {
                 p.markers.extend([t_sub, t_sup, t_other]);
+                p.flags = 0;
             }
+            let mut spent = false;
             let mut related = |ck: &mut Self, a: TypeId, b: TypeId| {
                 ck.rel.budget = Some(MEASURE_WORK);
                 let r = ck.is_type_related(a, b, RelationKind::Assignable);
@@ -317,6 +310,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 (false, false) => Variance::Invariant,
             };
             list.push(v);
+            let noted = self.rel.probe.as_ref().map_or(0, |p| p.flags);
+            flags.push(noted | if spent { UNRELIABLE } else { 0 });
         }
         self.rel.stack = saved_stack;
         self.rel.maybe_used = saved_maybe;
@@ -328,10 +323,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.rel.excluded_props = saved_excluded;
         self.rel.skip_excess = saved_skip;
         let probe = self.rel.probe.as_mut()?;
-        let unreliable = spent || std::mem::replace(&mut probe.unreliable, saved_unreliable);
+        probe.flags = saved_flags;
         let v = Arc::new(Variances {
             list: list.into_boxed_slice(),
-            unreliable,
+            flags: flags.into_boxed_slice(),
         });
         probe.variances.insert(target, Some(v.clone()));
         if outermost {

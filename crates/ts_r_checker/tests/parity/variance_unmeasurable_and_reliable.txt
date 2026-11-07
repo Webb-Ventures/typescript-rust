@@ -1,0 +1,7 @@
+a.ts(6,1): error TS2741: Property 'a' is missing in type 'Required<{ b?: 1 | undefined; x: 1; }>' but required in type 'Required<{ a?: 1 | undefined; x: 1; }>'.
+a.ts(7,1): error TS2741: Property 'b' is missing in type 'Required<{ a?: 1 | undefined; x: 1; }>' but required in type 'Required<{ b?: 1 | undefined; x: 1; }>'.
+a.ts(13,1): error TS2322: Type 'Holder<{ b?: 1 | undefined; x: 1; }>' is not assignable to type 'Holder<{ a?: 1 | undefined; x: 1; }>'.
+  Types of property 'a' are incompatible.
+    Property 'a' is missing in type 'Required<{ b?: 1 | undefined; x: 1; }>' but required in type 'Required<{ a?: 1 | undefined; x: 1; }>'.
+a.ts(19,1): error TS2322: Type 'Picked<A>' is not assignable to type 'Picked<B>'.
+  Property 'z' is missing in type 'A' but required in type 'B'.
