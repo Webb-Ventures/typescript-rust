@@ -589,6 +589,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             && !self.is_ambient_node(Loc::new(file, n))
             && self.emits_commonjs(file);
         for t in toks {
+            // `in` / `out` anywhere but on a type parameter (`class C { in a = 0 }`).
+            if t.flag.intersects(Modifiers::IN.union(Modifiers::OUT))
+                && !matches!(ast.node(n), Node::TypeParam { .. })
+            {
+                return Some(err(
+                    t.span,
+                    dg::_0_MODIFIER_CAN_ONLY_APPEAR_ON_A_TYPE_PARAMETER_OF_A_CLASS_INTERFACE_OR_TYPE_ALIA_1274,
+                    modifier_text(t.flag),
+                    "",
+                ));
+            }
             if t.flag.intersects(skipped) {
                 continue;
             }

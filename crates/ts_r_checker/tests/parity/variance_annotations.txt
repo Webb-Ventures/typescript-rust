@@ -1,0 +1,13 @@
+a.ts(7,12): error TS2636: Type 'Wrong<super-T>' is not assignable to type 'Wrong<sub-T>' as implied by variance annotation.
+  The types returned by 'get()' are incompatible between these types.
+    Type 'super-T' is not assignable to type 'sub-T'.
+a.ts(8,16): error TS2637: Variance annotations are only supported in type aliases for object, function, constructor, and mapped types.
+a.ts(14,1): error TS2322: Type 'Getter<unknown>' is not assignable to type 'Getter<string>'.
+  Type 'unknown' is not assignable to type 'string'.
+a.ts(17,1): error TS2322: Type 'Setter<string>' is not assignable to type 'Setter<unknown>'.
+  Type 'unknown' is not assignable to type 'string'.
+a.ts(19,1): error TS2322: Type 'Both<string>' is not assignable to type 'Both<unknown>'.
+  Type 'unknown' is not assignable to type 'string'.
+a.ts(21,1): error TS2322: Type 'Merged<string>' is not assignable to type 'Merged<unknown>'.
+  Type 'unknown' is not assignable to type 'string'.
+a.ts(24,11): error TS1274: 'in' modifier can only appear on a type parameter of a class, interface or type alias

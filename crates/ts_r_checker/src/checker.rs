@@ -829,6 +829,8 @@ pub struct Ck<'c, 'a> {
     pub(crate) tuple_overflow: bool,
     /// `infer` type parameters printed as `infer X` (while printing an extends clause).
     pub(crate) print_infer: Vec<TypeId>,
+    /// A variance annotation check in progress (its markers print `sub-T` / `super-T`).
+    pub(crate) variance_check: Option<crate::variance::VarianceCheck>,
     pub(crate) sig_inst_cache: FxHashMap<(SigId, ts_r_types::MapperId), SigId>,
     pub(crate) decl_sigs: FxHashMap<Loc, SigId>,
     pub(crate) union_props: FxHashMap<(TypeId, ts_r_types::StrId), Option<SymId>>,
@@ -998,6 +1000,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             error_infer_roots: Vec::new(),
             tuple_overflow: false,
             print_infer: Vec::new(),
+            variance_check: None,
             sig_inst_cache: FxHashMap::default(),
             decl_sigs: FxHashMap::default(),
             union_props: FxHashMap::default(),

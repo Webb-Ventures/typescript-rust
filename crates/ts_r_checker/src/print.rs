@@ -555,6 +555,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::TypeParameter(_) => {
                 let d = s.type_param_data(t);
+                if let Some(n) = self.variance_check_marker_name(t) {
+                    return n;
+                }
                 match d {
                     Some(d) if d.is_this => "this".into(),
                     Some(d) if self.print_infer.contains(&t) => {

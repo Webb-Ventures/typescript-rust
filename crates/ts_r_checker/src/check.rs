@@ -4847,6 +4847,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::TypeParam { .. } => {
                     self.check_type_param_modifiers(file, n);
                     self.check_circular_constraint(Loc::new(file, n));
+                    self.check_variance_annotation(file, n);
                 }
                 Node::TypeParams { .. } => self.check_type_param_defaults(file, n),
                 Node::FunctionDecl { .. }

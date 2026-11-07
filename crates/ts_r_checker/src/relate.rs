@@ -879,7 +879,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 st.flags(obj).contains(TypeFlags::TYPE_PARAMETER)
             }
-            _ => st.flags(t).contains(TypeFlags::TYPE_PARAMETER),
+            // The markers of a variance annotation check say nothing more (tsc 7).
+            _ => {
+                st.flags(t).contains(TypeFlags::TYPE_PARAMETER)
+                    && self.variance_check_marker_name(t).is_none()
+            }
         };
         if rel != RelationKind::Comparable && !type_param {
             self.report_wrapper_hints(s, t);
