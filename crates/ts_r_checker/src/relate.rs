@@ -6311,6 +6311,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                     )
                 });
                 if is_jsx_attr {
+                    // HTML's `class` and `for` are `className` and `htmlFor` in JSX.
+                    let html = match pn.as_str() {
+                        "class" => Some("className"),
+                        "for" => Some("htmlFor"),
+                        _ => None,
+                    };
+                    let html = html.filter(|h| {
+                        self.properties_of(error_target)
+                            .into_iter()
+                            .any(|(n, _)| self.symbol_display_name(n) == *h)
+                    });
+                    let suggestion = html.map(str::to_owned).or(suggestion);
                     match &suggestion {
                         Some(sug) => {
                             // A name that isn't an identifier is quoted (`'"ns:a"'`).
