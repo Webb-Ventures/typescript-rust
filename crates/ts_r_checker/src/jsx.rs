@@ -629,9 +629,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let ct = self.type_of_symbol(p);
         let members = self.union_members(ct);
-        let array_like = |ck: &Self, m: TypeId| {
-            ck.store().flags(m).intersects(TypeFlags::STRING_LIKE) || ck.c.is_array_like_type(m)
-        };
+        // The members children can be spread over: iterables (strings among them) when
+        // `Iterable` is declared, else arrays and tuples (tsc: `elaborateJsxComponents`).
+        let iterable_any = self.jsx_any_iterable();
+        let mut array_like = Vec::new();
+        let mut single = false;
+        for &m in &members {
+            let is = match iterable_any {
+                Some(it) => {
+                    m != TypeId::UNDEFINED && m != TypeId::NULL && self.is_assignable(m, it)
+                }
+                None => self.is_array_or_tuple_like(m),
+            };
+            if is {
+                array_like.push(m);
+            } else {
+                single = true;
+            }
+        }
         let n = self.store().str(cname).to_owned();
         let tag_at = Loc::new(file, tag);
         if real.len() == 1 {
@@ -640,7 +655,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             if ct_t.is_none_or(|t| self.is_assignable(t, ct)) {
                 return false;
             }
-            if members.iter().all(|&m| array_like(self, m)) {
+            if !single {
                 let ts = self.type_to_string(ct);
                 self.error(
                     tag_at,
@@ -651,47 +666,96 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return self.elaborate_jsx_child(file, tag, c, &n, ct, ct);
         }
-        // Several children are checked one by one against the element types of the array
-        // members, or against `string` when every member is a string; otherwise TS2746.
-        // Other iterable object members (`Iterable<ReactNode>`) take their iterated type.
-        let mut elems = Vec::new();
-        for &m in &members {
-            if self.c.is_array_like_type(m) {
-                match self.element_type_of_array_like(m) {
-                    Some(e) => elems.push(e),
-                    None => return false,
+        if array_like.is_empty() {
+            let ts = self.type_to_string(ct);
+            self.error(
+                tag_at,
+                dg::THIS_JSX_TAG_S_0_PROP_EXPECTS_A_SINGLE_CHILD_OF_TYPE_1_BUT_MULTIPLE_CHILDREN_WER_2746,
+                &[&n, &ts],
+            );
+            return true;
+        }
+        // Each child against the type at its index: the iterated type of the iterable
+        // members that are not arrays or tuples, and the indexed access of those that are
+        // (tsc: `elaborateIterableOrArrayLikeTargetElementwise`).
+        let (tuples, others): (Vec<TypeId>, Vec<TypeId>) = array_like
+            .iter()
+            .partition(|&&m| self.is_array_or_tuple_like(m));
+        let iterated = if others.is_empty() {
+            None
+        } else {
+            let mut parts = Vec::new();
+            for m in others {
+                if self.store().flags(m).intersects(TypeFlags::STRING_LIKE) {
+                    parts.push(TypeId::STRING);
+                } else if let Some(e) = self.iterated_type(m, false) {
+                    parts.push(e);
+                } else {
+                    return false;
                 }
-            } else if self.store().flags(m).intersects(TypeFlags::OBJECT)
-                && self
-                    .global_type(crate::checker::GlobalType::Iterable)
-                    .is_some()
-                && let Some(e) = self.iterated_type(m, false)
-            {
-                elems.push(e);
             }
-        }
-        if elems.is_empty() {
-            let strings = members
-                .iter()
-                .filter(|&&m| m != TypeId::NULL && m != TypeId::UNDEFINED)
-                .all(|&m| self.store().flags(m).intersects(TypeFlags::STRING_LIKE));
-            if !strings {
-                let ts = self.type_to_string(ct);
-                self.error(
-                    tag_at,
-                    dg::THIS_JSX_TAG_S_0_PROP_EXPECTS_A_SINGLE_CHILD_OF_TYPE_1_BUT_MULTIPLE_CHILDREN_WER_2746,
-                    &[&n, &ts],
-                );
-                return true;
-            }
-            elems.push(TypeId::STRING);
-        }
-        let elem = self.union(&elems);
+            Some(self.union(&parts))
+        };
+        let tuples = (!tuples.is_empty()).then(|| self.union(&tuples));
         let mut reported = false;
-        for c in real {
-            reported |= self.elaborate_jsx_child(file, tag, c, &n, elem, ct);
+        for (i, c) in real.into_iter().enumerate() {
+            // A tuple without an element at the index gives no type (the access is an
+            // error in tsc), and the `undefined` an optional element adds is dropped under
+            // `exactOptionalPropertyTypes`.
+            let in_bounds = tuples.is_some_and(|t| {
+                self.union_members(t).into_iter().all(|m| {
+                    self.store()
+                        .tuple_shape_of(m)
+                        .is_none_or(|sh| sh.has_rest() || i < sh.elements.len())
+                })
+            });
+            let indexed = tuples.filter(|_| in_bounds).and_then(|t| {
+                let k = self.store().number_literal(i as f64, false);
+                self.quietly(|ck| ck.indexed_access_type(t, k, None))
+                    .filter(|&x| !self.store().flags(x).contains(TypeFlags::INDEXED_ACCESS))
+            });
+            let indexed = match indexed {
+                Some(x) if self.c.opts.exact_optional_property_types => {
+                    Some(self.remove_missing(x))
+                }
+                x => x,
+            };
+            let target = match (iterated, indexed) {
+                (Some(a), Some(b)) => self.union(&[a, b]),
+                (a, b) => match a.or(b) {
+                    Some(t) => t,
+                    None => continue,
+                },
+            };
+            reported |= self.elaborate_jsx_child(file, tag, c, &n, target, ct);
         }
         reported
+    }
+
+    /// `Iterable<any>` when the global `Iterable` is declared.
+    fn jsx_any_iterable(&mut self) -> Option<TypeId> {
+        let d = self.global_type(crate::checker::GlobalType::Iterable)?;
+        let s = self.store();
+        let Some(ts_r_types::ObjectKind::Declared { type_params, .. }) =
+            s.object_of(d).map(|o| o.kind)
+        else {
+            return None;
+        };
+        let n = s.list_items(type_params).len();
+        Some(self.make_reference(d, &vec![TypeId::ANY; n]))
+    }
+
+    /// Arrays, tuples, types assignable to `readonly any[]` and types with a `"0"` property
+    /// (tsc: `isArrayOrTupleLikeType`).
+    fn is_array_or_tuple_like(&mut self, t: TypeId) -> bool {
+        if self.c.is_array_like_type(t) {
+            return true;
+        }
+        if t == TypeId::UNDEFINED || t == TypeId::NULL {
+            return false;
+        }
+        let ra = self.create_array(TypeId::ANY, true);
+        self.is_assignable(t, ra) || self.property_of_type(t, "0").is_some()
     }
 
     /// The type of a JSX child (`string` for text); `None` when unknown.

@@ -801,9 +801,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let mut ctx = self.inference_context_for(sig);
                 let children = self.jsx_children_prop(opening.file, ns);
+                // The attributes are typed in the context of the generic props (a literal
+                // for a type parameter with a primitive constraint stays literal).
+                self.jsx.assumed.push((opening, pt));
                 self.enter_speculation();
                 let attrs = self.jsx_attributes_type_inner(opening, children, false, true);
                 self.leave_speculation();
+                self.jsx.assumed.pop();
                 let attrs = attrs?;
                 self.infer_types(&mut ctx, attrs, pt, 0);
                 // A type parameter that only context-sensitive values infer, or one inferred
@@ -1417,13 +1421,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             let mark = self.diags.len();
-            let (source, target) = self.jsx_report_target(ns, attrs_t, props);
-            self.check_assignable_with_elaboration(
-                source,
-                target,
-                Loc::new(file, name),
-                Some(opening),
-            );
+            // Elaborated against the whole props first; the relation error that follows a
+            // failed elaboration names the member the attributes fail (tsc:
+            // `checkTypeAssignableToAndOptionallyElaborate`, then `reportErrorResults`).
+            if !self.is_assignable(attrs_t, props) && !self.elaborate_error(opening, attrs_t, props)
+            {
+                let (source, target) = self.jsx_report_target(ns, attrs_t, props);
+                self.check_assignable_with_elaboration(
+                    source,
+                    target,
+                    Loc::new(file, name),
+                    Some(opening),
+                );
+            }
             if r.no_overload {
                 for d in &mut self.diags[mark..] {
                     d.message = crate::call::wrap_last_overload(&d.message);
