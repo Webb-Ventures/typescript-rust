@@ -4359,9 +4359,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                     out.push(m);
                 } else if self.is_subtype(candidate, m) {
                     out.push(candidate);
-                } else if self.is_assignable(m, candidate) {
+                } else if self.is_assignable(m, candidate)
+                    && !self.generic_mapped_lacks_candidate_property(m, candidate)
+                {
                     // A member only assignable to the candidate still stays
-                    // (`(s: string) => number` narrowed by `x is (...a: any[]) => any`).
+                    // (`(s: string) => number` narrowed by `x is (...a: any[]) => any`),
+                    // unless it is a generic mapped type with known members, whose subtype
+                    // relation is exact (`Partial<E>` narrowed by `x is { skip?: number }`
+                    // goes, as in tsc, which relates by subtype only).
                     out.push(m);
                 }
             } else if self.is_assignable(m, candidate) {
@@ -4403,6 +4408,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             return TypeId::NEVER;
         }
         self.intersection(&[t, candidate])
+    }
+
+    /// Whether `m` is a generic mapped type with known members lacking a property of the
+    /// object `candidate` (so it is no subtype of it).
+    fn generic_mapped_lacks_candidate_property(&mut self, m: TypeId, candidate: TypeId) -> bool {
+        self.store().flags(m).contains(TypeFlags::OBJECT)
+            && self.store().flags(candidate).contains(TypeFlags::OBJECT)
+            && self.is_generic_mapped_type(m)
+            && !self.is_generic_mapped_type(candidate)
+            && self.generic_mapped_lacks_target_property(m, candidate)
     }
 
     /// The object `{ name: unknown }` (printed by tsc as `Record<"name", unknown>`).

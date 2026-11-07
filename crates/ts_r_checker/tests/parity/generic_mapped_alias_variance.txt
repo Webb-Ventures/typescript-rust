@@ -1,0 +1,5 @@
+a.ts(14,3): error TS2322: Type 'D<{ a: number; }>' is not assignable to type 'D<T>'.
+a.ts(27,3): error TS2322: Type 'P<T>' is not assignable to type 'P<U>'.
+  Type 'keyof U' is not assignable to type 'keyof T'.
+    Type 'string | number | symbol' is not assignable to type 'keyof T'.
+      Type 'string' is not assignable to type 'keyof T'.

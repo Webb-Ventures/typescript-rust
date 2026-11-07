@@ -3341,6 +3341,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return self.related_to(tpl, ia, rel, report, None);
         }
+        // Two instantiations of one alias whose arguments relate by its variances are
+        // related before the mapped type's keys are asked for (tsc probes alias variance
+        // first: `DecorateRouterRecord<any>` is a `DecorateRouterRecord<TRecord>`).
+        if t_generic_mapped
+            && !s_generic_mapped
+            && rel != RelationKind::Identity
+            && self.alias_args_related_by_variance(s, t, rel)
+        {
+            return true;
+        }
         if t_generic_mapped
             && !s_generic_mapped
             && rel != RelationKind::Identity
@@ -3355,6 +3365,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             && let Some(r) = self.generic_mapped_to_index_signature(s, t, rel, report)
         {
             return r;
+        }
+        // Under subtype relations a target's optional properties are required too (tsc:
+        // `propertiesRelatedTo` in relater.go, `requireOptionalProperties`), so a generic
+        // mapped source whose members are known lacks every other property (`Partial<E>`
+        // of an unconstrained `E` is no subtype of `{ skip?: number }`).
+        if s_generic_mapped
+            && !t_generic_mapped
+            && matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
+            && tf.contains(TypeFlags::OBJECT)
+            && self.generic_mapped_lacks_target_property(s, t)
+        {
+            return false;
         }
         if s_generic_mapped || t_generic_mapped {
             return true;
@@ -3784,6 +3806,47 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             _ => {}
         }
+    }
+
+    /// Whether generic mapped `s`, whose property names are known, lacks a property of
+    /// object `t` (optional ones included). `false` when the names are not modelled.
+    pub(crate) fn generic_mapped_lacks_target_property(&mut self, s: TypeId, t: TypeId) -> bool {
+        let Some(Ok(names)) = self.generic_mapped_known_names(s) else {
+            return false;
+        };
+        let props = self.properties_of(t);
+        props.iter().any(|&(n, _)| {
+            let text = self.store().str(n);
+            !names.iter().any(|x| x == text)
+        })
+    }
+
+    /// Whether `s` and `t` are instantiations of one type alias whose arguments relate by the
+    /// alias's measured variances (no verdict, `false`, for marker instantiations, a
+    /// measurement in progress or none).
+    fn alias_args_related_by_variance(&mut self, s: TypeId, t: TypeId, rel: RelationKind) -> bool {
+        let st = self.store();
+        let (Some(a1), Some(a2)) = (st.alias_of(s), st.alias_of(t)) else {
+            return false;
+        };
+        if a1.sym != a2.sym || a1.args == ListId::EMPTY {
+            return false;
+        }
+        let sa = st.list_items(a1.args).to_vec();
+        let ta = st.list_items(a2.args).to_vec();
+        if self.is_marker_reference(s) || self.is_marker_reference(t) {
+            return false;
+        }
+        let key = crate::variance::VarianceKey::Alias(a1.sym);
+        if self.variance_in_progress(key) {
+            return false;
+        }
+        let Some(vs) = self.variances_of(key) else {
+            return false;
+        };
+        vs.list.len() == sa.len()
+            && sa.len() == ta.len()
+            && self.type_args_related_by_variance(&sa, &ta, &vs, rel, false)
     }
 
     /// Two instantiations of one generic type related by its measured variances (`None`
