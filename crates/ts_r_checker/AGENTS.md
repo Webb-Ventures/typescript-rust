@@ -1079,21 +1079,49 @@ Files, by layer:
   comparisons the same way: relating instantiations of big generic interfaces structurally
   (rxjs's `Observable`, whose measured variance is unreliable) expands exponentially. Results
   computed after the budget ran out are not cached.
-- **Measured variance** (`variance.rs`). Two instantiations of one generic class, interface
-  or alias relate by their type arguments in the direction each parameter's measured
-  variance allows (independent, covariant, contravariant, bivariant, invariant). A
-  measurement relates instantiations with marker type parameters (sub, super, unrelated);
-  marker instantiations compare structurally and other instantiations of a type being
-  measured are "maybe related". It is a pure function of the declaration: nested
-  measurements and relation results stay in the measurement's `Probe` (never the shared
-  cache) and only outermost results are published, so it doesn't depend on the order files
-  or threads ask. A measurement that meets a conditional, indexed-access, `keyof`,
-  substitution, template literal, string-mapping or generic mapped type mentioning a marker,
-  or a signature whose rest parameter is a union of tuples mentioning one
-  (`next(...[value]: [] | [N])`), or runs out of its budget, is unreliable: then (and for a
-  covariant `void` target argument) arguments the variances reject fall back to structure.
-  A failure of an unreliable measurement or with an invariant parameter is explained
-  structurally, others (a covariant `void` one included) by the arguments.
+- **Measured variance** (`variance.rs`; tsc: `tsc/internal/checker/relater.go`,
+  getVariancesWorker, structuredTypeRelatedTo and typeArgumentsRelatedTo, and
+  `checker.go` checkTypeParameterDeferred, read as a reference). Two instantiations of one
+  generic class, interface or alias relate by their type arguments in the direction each
+  parameter's variance allows (independent, covariant, contravariant, bivariant,
+  invariant). Data model: `Variances { list, flags }` per `VarianceKey` (a type's target or
+  an alias symbol) in the shared `c.cached.variances`, one entry and one flag byte
+  (`UNMEASURABLE`, `UNRELIABLE`) per type parameter.
+  - *Annotations decide first.* `in`, `out` or both (unioned over every declaration of the
+    parameter, merged interfaces included) give contravariant, covariant or invariant with
+    no flags; only unannotated parameters are measured.
+  - *Measurement* relates the instantiations with marker type parameters (sub, super,
+    unrelated) for one parameter at a time: sub-to-super covariant, super-to-sub
+    contravariant, both bivariant, unrelated too independent. Marker instantiations compare
+    structurally, other instantiations of a type being measured are "maybe related". It is
+    a pure function of the declaration: nested measurements and relation results stay in
+    the measurement's `Probe` (never the shared cache) and only outermost results are
+    published, so the order files or threads ask doesn't matter.
+  - *Flags* are noted only where a marker reaches a relation whose answer variance can't
+    predict: a generic mapped source's constraint (unmeasurable when the source removes
+    `?` with `-?`, otherwise unreliable), a template literal against a template literal, a
+    rest parameter typed by a non-array (a union of tuples), an unreliable argument of a
+    nested variance check, and a spent budget. The probe cache stores each pair's flags
+    with its result and replays them on a hit, so a cached pair marks the measurement as
+    the first walk did.
+  - *Use.* An unmeasurable parameter relates only identical arguments; any flagged
+    parameter (or a covariant `void` argument) lets a variance rejection fall back to
+    structure. A rejection is explained structurally when the measurement is flagged or a
+    parameter is invariant (keeping the variance chain if structure would pass),
+    otherwise by the arguments. Conditional sources and targets that share an alias with
+    arguments go through the alias's variances too (`conditional_alias_related`).
+  - *Annotation checks.* A variance annotation on an alias whose body is not an object,
+    function, constructor or mapped type is TS2637; `in`/`out` outside a class, interface
+    or alias type parameter is TS1274. A lone `in` or `out` is verified (TS2636) by
+    relating the declaration instantiated with fresh sub and super markers (sub's
+    constraint is super), printed `sub-T` and `super-T`; the "could be instantiated with
+    an arbitrary type" elaboration skips them.
+  - Recursion during relation counts the current pair as tsc's isDeeplyNestedType does
+    (three alike frames including the one being entered).
+  Conformance tests this fixed (parity/checker-gap-4): varianceAnnotations,
+  varianceAnnotationValidation, varianceReferences, requiredMappedTypeModifierTrumpsVariance,
+  genericIndexedAccessVarianceComparisonResultCorrect, invariantGenericErrorElaboration,
+  complexRecursiveCollections (7). Still different: listed under Known gaps.
 - **Signature lists.** Two instantiations of one type literal (or one generic type) relate
   their signatures pairwise with type parameters erased; other lists need each target
   signature matched by some source signature (erased), and a target no source matches is
@@ -1754,7 +1782,9 @@ Files, by layer:
   and has an element/type argument that may name an alias (or omits a defaulted type
   argument). So `type A = A[]`, `type B = [number, B]`, `type C = Array<C>` are fine and
   `type D = Box<D>` (an alias), `type E = [...E]`, `type F = typeof v; var v: F[]` are
-  not. `circular_annotations.rs` walks the syntax for this; not yet followed: a
+  not. A circular alias is not generic for its references (tsc never records its type
+  parameters): arguments give TS2315, a bare reference nothing.
+  `circular_annotations.rs` walks the syntax for this; not yet followed: a
   conditional's branches when its check type is not generic, mapped type constraints,
   unannotated variables, functions' return types and interface members.
 - **Rest parameter and rest element types** (tsc: `checker.go`, checkParameter and
@@ -3504,12 +3534,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, e2b245b, parity/checker-gap-3: alias names of indexed access,
-  `keyof` and union origins, written alias arguments; 12750 compared variants):
-  12473 exact (97.8%; all diagnostics and chains), 12494 (98.0%) exact on first lines;
-  132 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, a24c22a, parity/checker-gap-4: variance annotations, per-parameter
+  unmeasurable/unreliable variance, circular aliases not generic; 12750 compared variants):
+  12480 exact (97.9%; all diagnostics and chains), 12500 (98.0%) exact on first lines;
+  129 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3551,6 +3581,15 @@ and integration tests allow: they link the one library build).
   truncation of long types (`... N more ...`, `{ ...; }`, 160 characters) without
   noErrorTruncation (`print.rs` `truncate` keeps the whole text). TS2589 for a recursive
   alias is reported at the use, not at the recursive reference.
+- Variance (parity/checker-gap-4 left): the conditional relation applies its
+  target-branch rule without tsc's distribution-dependence and same-root checks, so
+  measurements through conditionals are too lenient
+  (conditionalTypeVarianceBigArrayConstraintsPerformance, conditionalTypes2,
+  recursiveConditionalTypes); mutuallyRecursiveCallbacks elaborates callbacks one level
+  short; varianceAnnotationsWithCircularlyReferencesError needs tsc's parser recovery of
+  `<in in>` (a second, name-less parameter: TS2637 at it) and the binder's `(Missing)`
+  name in TS2300. Public projects match base: tRPC 1 and TypeORM 40 extra diagnostics
+  (not variance), RxJS's long expect-type messages print nondeterministically.
 - Variance is measured only for classes, interfaces and aliases compared in
   `structured_related` (an alias of a union is decomposed first); method parameters that
   are callbacks are compared strictly
