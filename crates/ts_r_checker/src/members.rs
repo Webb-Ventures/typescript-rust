@@ -1484,14 +1484,25 @@ impl<'c, 'a> Ck<'c, 'a> {
         let base_ctor = self.base_constructor_type(sym);
         if let Some(bc) = base_ctor {
             // (Each member of an intersection base: `extends Mixin(Base)`.)
-            let parts = if self.store().flags(bc).contains(TypeFlags::INTERSECTION) {
+            let is_intersection = self.store().flags(bc).contains(TypeFlags::INTERSECTION);
+            let parts = if is_intersection {
                 self.store().members_of_union(bc).to_vec()
             } else {
                 vec![bc]
             };
             for part in parts {
                 let bm = self.resolved_members(part);
-                for (&n, &p) in bm.names.iter().zip(bm.props.iter()) {
+                let entries: Vec<(StrId, SymId)> =
+                    bm.names.iter().copied().zip(bm.props.iter().copied()).collect();
+                for (n, p) in entries {
+                    // A name several parts declare is the intersection's property (its
+                    // parts decide accessibility: `extends Mix(Protected, Protected2)`).
+                    let p = if is_intersection && !have.contains(&n) {
+                        let text = self.store().str(n).to_owned();
+                        self.property_of_type(bc, &text).unwrap_or(p)
+                    } else {
+                        p
+                    };
                     if have.insert(n) {
                         props.push((n, p));
                     } else if let Some(i) = aliases.iter().position(|&a| a == n) {

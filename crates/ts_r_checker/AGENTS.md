@@ -553,6 +553,18 @@ Files, by layer:
   `T2`. An intersection of class references is rebuilt without its alias and prints as
   `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
   getTypeWithThisArgument).
+- Properties of an intersection (a class extending `Mix(A, B)`, `x: A & B`), tsc's
+  synthetic properties: in relations (`property_related`) the source property is private
+  if any part is, else public if any part is, and a protected target is matched by any
+  part declared in (a class derived from) the target's class (`intersection_constituents`;
+  tsc: relater.go, isValidOverrideOf). In accesses (`check_property_accessibility`) parts
+  with one declaration (instantiations of one class) are checked as it; otherwise
+  (`intersection_property_access`) a public part makes it public, and all-protected parts
+  are accessible only in a class deriving from every part's class, else TS2445 naming
+  the accessed type; private parts, `this` parameters and TS2446 stay silent (tsc:
+  checker.go, checkPropertyAccessibilityAtLocation, isClassDerivedFromDeclaringClasses).
+  A class's statics from an intersection base constructor take the intersection's
+  property for names several parts declare (`class_static_members`).
 - TS2510 (`check_base_constructor_returns` in `heritage.rs`): a class whose `extends`
   expression is not a class (no class name, no class static side) but a plain object
   type with construct signatures: the signatures taking the written type arguments,

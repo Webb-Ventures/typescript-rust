@@ -4723,7 +4723,22 @@ impl<'c, 'a> Ck<'c, 'a> {
         let s_priv = if hash {
             Some(true)
         } else {
-            self.is_private_like(sp)
+            // A property of an intersection is private if any part is, else public if any
+            // part is (tsc: getDeclarationModifierFlagsFromSymbol of a synthetic property).
+            let parts = self.intersection_constituents(sp);
+            if parts.len() > 1 {
+                let kinds: Vec<Option<bool>> =
+                    parts.iter().map(|&c| self.is_private_like(c)).collect();
+                if kinds.contains(&Some(true)) {
+                    Some(true)
+                } else if kinds.contains(&None) {
+                    None
+                } else {
+                    Some(false)
+                }
+            } else {
+                self.is_private_like(sp)
+            }
         };
         let t_priv = if hash {
             Some(true)
@@ -4732,7 +4747,18 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         if s_priv.is_some() || t_priv.is_some() {
             let same = self.same_declaration(sp, tp);
-            let derived = !same && self.declared_in_derived_class(sp, tp);
+            let mut derived = !same && self.declared_in_derived_class(sp, tp);
+            // A protected target is matched by any constituent of a source property
+            // inherited from an intersection base (`class C extends Mix(A, B)`): tsc's
+            // isValidOverrideOf walks the synthetic property's parts.
+            if !same && !derived && t_priv == Some(false) && s_priv != Some(true) && !hash {
+                let parts = self.intersection_constituents(sp);
+                if parts.len() > 1 {
+                    derived = parts.into_iter().any(|c| {
+                        self.same_declaration(c, tp) || self.declared_in_derived_class(c, tp)
+                    });
+                }
+            }
             if derived && hash {
                 // A subclass's own `#x` doesn't replace the base's (each class has its own).
                 return true;
@@ -4978,6 +5004,22 @@ impl<'c, 'a> Ck<'c, 'a> {
             (Some(a), Some(b)) => a != b && self.class_derives_from(a, b),
             _ => false,
         }
+    }
+
+    /// The declared properties a property of an intersection stands for (through
+    /// instantiations of one property); just `p` otherwise.
+    fn intersection_constituents(&self, p: SymId) -> Vec<SymId> {
+        let mut cur = p;
+        for _ in 0..8 {
+            match self.c.synth_sym(cur) {
+                Some(x) if x.check & check_flags::SYNTHETIC_INTERSECTION != 0 && x.origins.len() > 1 => {
+                    return x.origins.to_vec();
+                }
+                Some(x) if x.origins.len() == 1 => cur = x.origins[0],
+                _ => break,
+            }
+        }
+        vec![p]
     }
 
     pub(crate) fn same_declaration(&self, a: SymId, b: SymId) -> bool {

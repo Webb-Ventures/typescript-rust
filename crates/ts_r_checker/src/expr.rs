@@ -4377,6 +4377,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.reporting(pl.file) {
             return;
         }
+        // A property of an intersection: one declaration behind every part (instantiations
+        // of one class) is checked as that declaration; parts from different declarations
+        // follow tsc's rules for synthetic properties (`intersection_property_access`).
+        let mut p = p;
+        if !name.starts_with('#')
+            && let Some(origins) = self.intersection_parts(p)
+        {
+            let decls: Vec<Option<Loc>> = origins
+                .iter()
+                .map(|&o| self.c.value_decl(o).or_else(|| self.c.first_decl(o)))
+                .collect();
+            if decls[0].is_some() && decls.iter().all(|d| *d == decls[0]) {
+                p = origins[0];
+            } else {
+                self.intersection_property_access(pl, &origins, obj_type, name, is_super);
+                return;
+            }
+        }
         // (`super.m` of an instantiated member of a merged one: the merged symbol.)
         let p = match self.c.synth_sym(p) {
             Some(x)
@@ -4598,6 +4616,85 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             self.error(pl, dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_AND_ITS_SUBCLASSES_2445, &[name, &class_name]);
         }
+    }
+
+    /// The parts of property `p` when it is a property of an intersection with several
+    /// (through instantiations of it).
+    fn intersection_parts(&self, p: SymId) -> Option<Box<[SymId]>> {
+        let mut cur = p;
+        for _ in 0..8 {
+            let x = self.c.synth_sym(cur)?;
+            if x.check & crate::symbols::check_flags::SYNTHETIC_INTERSECTION != 0
+                && x.origins.len() > 1
+            {
+                return Some(x.origins.clone());
+            }
+            if x.origins.len() != 1 {
+                return None;
+            }
+            cur = x.origins[0];
+        }
+        None
+    }
+
+    /// Accessibility of a property of an intersection whose parts have different
+    /// declarations (tsc: checker.go, checkPropertyAccessibilityAtLocation on a synthetic
+    /// property): public when any part is public; protected when all are, accessible in a
+    /// class deriving from every part's declaring class, else TS2445 naming the accessed
+    /// type (`C4`, `typeof C4`, `Protected & Protected2`). A private part, a `this`
+    /// parameter and the instance check (TS2446) are left silent.
+    fn intersection_property_access(
+        &mut self,
+        pl: Loc,
+        parts: &[SymId],
+        obj_type: TypeId,
+        name: &str,
+        is_super: bool,
+    ) {
+        let kinds: Vec<Option<bool>> = parts.iter().map(|&q| self.is_private_like(q)).collect();
+        if is_super || kinds.iter().any(|k| *k != Some(false)) {
+            return;
+        }
+        let mut classes = Vec::new();
+        for &q in parts {
+            let Some(c) = self
+                .c
+                .value_decl(q)
+                .or_else(|| self.c.first_decl(q))
+                .and_then(|d| self.enclosing_class(d))
+            else {
+                return;
+            };
+            classes.push(c);
+        }
+        let mut cur = self.enclosing_class(pl);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                return;
+            }
+            let mut all = true;
+            for &dc in &classes {
+                if c != dc && !self.class_derives_from(c, dc) {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                return;
+            }
+            cur = self.enclosing_class(c);
+        }
+        if self.this_parameter_class(pl).is_some() {
+            return;
+        }
+        let shown = self.type_to_string(obj_type);
+        self.error(
+            pl,
+            dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_AND_ITS_SUBCLASSES_2445,
+            &[name, &shown],
+        );
     }
 
     /// The class or interface named by the explicit `this` parameter of the function
