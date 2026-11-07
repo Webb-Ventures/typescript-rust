@@ -571,7 +571,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             return s.union_with_origin(&set, &items);
         }
         // Enum unions: when every member of an enum is present, the printer collapses them.
-        s.union_sorted(&set, Some(alias))
+        let u = s.union_sorted(&set, Some(alias));
+        // An aliased union written with other named unions remembers them (tsc keeps an
+        // origin next to the alias): narrowing can come back to one of them.
+        if alias != AliasId::NONE
+            && s.alias_of(u).is_some()
+            && let Some(items) = self.union_origin_items(types, &set)
+            && items.len() > 1
+        {
+            s.set_aliased_union_origin(u, &items);
+        }
+        u
     }
 
     /// How a union of `types` (whose members are `set`) was written, when that is shorter:
@@ -1581,8 +1591,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // A union with an origin keeps the aliased unions that map to themselves (not an
         // origin that names no member, such as `keyof A`).
-        if let Some(origin) = self.store().union_origin(t)
-            && origin_items_are_members(self.store(), origin, &members)
+        let st = self.store();
+        if let Some(origin) = st.union_origin(t).or_else(|| st.aliased_union_origin(t))
+            && origin_items_are_members(st, origin, &members)
         {
             let origin = origin.to_vec();
             let mut items = Vec::with_capacity(origin.len());
@@ -1633,7 +1644,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // A union with an origin keeps the aliased unions that survive whole
         // (`A | undefined` without `undefined` is `A`).
-        if let Some(origin) = s.union_origin(t)
+        if let Some(origin) = s.union_origin(t).or_else(|| s.aliased_union_origin(t))
             && origin_items_are_members(s, origin, &members)
         {
             let mut items = Vec::with_capacity(origin.len());

@@ -1273,7 +1273,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A linked forward reference to an alias is its target (`object`, not a copy).
         let s = fresh_literal_regular(self, st.unforward(s));
         let t = fresh_literal_regular(self, st.unforward(t));
-        // `{ [K in C]: X }[I]` relates (and is reported) as `X` with `K` replaced by `I`.
+        // `{ [K in C]: X }[I]` relates (and is reported) as `X` with `K` replaced by `I`,
+        // except that a type named by an alias is reported by its alias (tsc: relater.go,
+        // reportErrorResults and the common-properties check use the original type then).
+        let (pre_s, pre_t) = (s, t);
         let (s, t) = if rel == RelationKind::Identity {
             (s, t)
         } else {
@@ -1327,6 +1330,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             None
         };
+        let named = |ck: &Self, pre: TypeId, o: TypeId| {
+            if pre != o
+                && ck.store().flags(pre).contains(TypeFlags::INDEXED_ACCESS)
+                && ck.store().alias_of(pre).is_some()
+            {
+                pre
+            } else {
+                o
+            }
+        };
+        let (rs, rt) = (named(self, pre_s, os), named(self, pre_t, ot));
         self.note_unmeasurable(s, t);
         let st = self.store();
         let sf = st.flags(s);
@@ -1372,7 +1386,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return true;
             }
             if report {
-                self.report_error_results(os, ot, head, rel);
+                self.report_error_results(rs, rt, head, rel);
             }
             return false;
         }
@@ -1433,7 +1447,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         && let Some(r) = self.rel.report.as_mut()
                         && std::mem::take(&mut r.excess_keeps_head)
                     {
-                        self.report_error_results(os, ot, head, rel);
+                        self.report_error_results(rs, rt, head, rel);
                     }
                     return false;
                 }
@@ -1443,7 +1457,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.rel.deferred_skipped = true;
             } else if weak {
                 if report {
-                    let (ss, ts) = self.type_names_for_error(os, ot);
+                    let (ss, ts) = self.type_names_for_error(rs, rt);
                     // Calling (or `new`-ing) the value would give a related type:
                     // suggest the call.
                     let mut callable = false;
@@ -1487,7 +1501,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             if let Some((v, n)) = keep_head {
                 self.renamed_readonly_or_keep_head(os, ot, v, n);
             }
-            self.report_error_results(os, ot, head, rel);
+            self.report_error_results(rs, rt, head, rel);
         }
         false
     }

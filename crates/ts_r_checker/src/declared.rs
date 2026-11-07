@@ -1821,9 +1821,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // A union of property types read through a union of keys is a fresh union
                 // that takes the alias being declared (`type ArrayBufferLike =
                 // ArrayBufferTypes[keyof ArrayBufferTypes]` prints as `ArrayBufferLike`).
+                // So does a deferred access (`type F<T> = { a: T }[K]` prints `F<T>`, and its
+                // instantiations keep the alias: tsc: checker.go, getIndexedAccessTypeOrUndefined).
                 if alias != AliasId::NONE
-                    && self.store().flags(i).contains(TypeFlags::UNION)
-                    && self.store().flags(t).contains(TypeFlags::UNION)
+                    && (self.store().flags(i).contains(TypeFlags::UNION)
+                        && !self.store().flags(i).contains(TypeFlags::BOOLEAN)
+                        && self.store().flags(t).contains(TypeFlags::UNION)
+                        || self.store().flags(t).contains(TypeFlags::INDEXED_ACCESS))
                 {
                     self.with_alias(t, alias)
                 } else {
@@ -2094,6 +2098,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         if f.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION | TypeFlags::OBJECT) {
             return true;
         }
+        // An indexed access keeps an alias where its instantiation does (a deferred access, or
+        // the union read through a union of keys), and the enclosing alias replaces it.
+        if f.contains(TypeFlags::INDEXED_ACCESS) {
+            return s.alias_of(t).is_some()
+                && s.flags(t).intersects(TypeFlags::UNION | TypeFlags::INDEXED_ACCESS);
+        }
         if let Some(cd) = s.conditional_data(d) {
             // A branch type the conditional resolves to keeps its own name (`type V =
             // Infer<Ob<{ a: 1 }>>` is `{ a: 1 }`); a union distributed over takes the alias.
@@ -2167,6 +2177,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Some(d) if d.alias != alias => s.conditional(d.root, d.mapper, alias),
                 _ => t,
             },
+            TypeKind::IndexedAccess { obj, index } => s.indexed_access_aliased(obj, index, alias),
             TypeKind::Object(o) => {
                 let od = s.object(o);
                 if od.alias == alias {

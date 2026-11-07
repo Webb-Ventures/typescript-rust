@@ -146,7 +146,25 @@ impl<'c, 'a> Ck<'c, 'a> {
             TypeKind::IndexedAccess { obj, index } => {
                 let o = self.instantiate(obj, m);
                 let i = self.instantiate(index, m);
+                let alias = s.alias_of(t).map(|a| s.alias(a.sym, a.args));
                 match self.indexed_access_type(o, i, None) {
+                    // An aliased access keeps its alias, instantiated, when it stays deferred
+                    // or reads a union of keys (tsc: checker.go, instantiateTypeWorker).
+                    Some(r) if alias.is_some() => {
+                        let a = self.instantiate_alias(alias.unwrap_or_default(), m);
+                        let st = self.store();
+                        let fi = st.flags(i);
+                        let fr = st.flags(r);
+                        if fr.contains(TypeFlags::INDEXED_ACCESS)
+                            || fi.contains(TypeFlags::UNION)
+                                && !fi.contains(TypeFlags::BOOLEAN)
+                                && fr.contains(TypeFlags::UNION)
+                        {
+                            self.with_alias(r, a)
+                        } else {
+                            r
+                        }
+                    }
                     Some(t) => t,
                     // An instantiation that indexes an object type by a key it lacks is
                     // `unknown` in tsc (`ParamMap[R]` with `R` given an argument that breaks
