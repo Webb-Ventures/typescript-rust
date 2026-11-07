@@ -1,0 +1,12 @@
+a.ts(8,7): error TS2345: Argument of type '(x: boolean) => boolean' is not assignable to parameter of type '(x: boolean) => x is true'.
+  Signature '(x: boolean): boolean' must be a type predicate.
+a.ts(15,14): error TS2322: Type '(x: boolean) => boolean' is not assignable to type '(x: boolean) => x is true'.
+  Signature '(x: boolean): boolean' must be a type predicate.
+a.ts(16,14): error TS2322: Type '(x: boolean) => boolean' is not assignable to type '(x: boolean) => x is true'.
+  Signature '(x: boolean): boolean' must be a type predicate.
+a.ts(17,14): error TS2322: Type '(x: boolean) => boolean' is not assignable to type 'number'.
+a.ts(18,14): error TS2322: Type '(x: unknown) => x is string' is not assignable to type 'number'.
+a.ts(19,14): error TS2322: Type '(x: string | undefined) => x is string' is not assignable to type 'number'.
+a.ts(20,14): error TS2322: Type '(x: boolean | undefined) => boolean | undefined' is not assignable to type 'number'.
+a.ts(21,14): error TS2322: Type '(x: true | false) => boolean' is not assignable to type 'number'.
+a.ts(22,14): error TS2322: Type '(x: boolean) => boolean' is not assignable to type 'number'.

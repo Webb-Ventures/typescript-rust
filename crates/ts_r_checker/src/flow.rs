@@ -3040,11 +3040,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             if !self.condition_mentions(cond, &name) {
                 continue;
             }
+            // A `boolean` parameter is never refined (`(x: boolean) => x` stays
+            // `boolean`, not `x is true`; tsc: checkIfExpressionRefinesAnyParameter).
             if self.store().is_error(declared)
                 || self
                     .store()
                     .flags(declared)
-                    .intersects(TypeFlags::ANY | TypeFlags::NEVER)
+                    .intersects(TypeFlags::ANY | TypeFlags::NEVER | TypeFlags::BOOLEAN)
                 || declared == TypeId::UNRESOLVED
             {
                 continue;

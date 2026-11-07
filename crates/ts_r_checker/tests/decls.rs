@@ -174,6 +174,91 @@ fn unused_type_parameter_merged_with_parameter() {
 }
 
 #[test]
+fn unused_overloads_and_merged_declarations() {
+    // tsc 7.0.2: an unread merged symbol is reported at every declaration, each with its
+    // own message (types TS6196, values and namespaces TS6133); overloads and private
+    // method overloads at every signature. Reads inside the implementation don't count.
+    let src = "export {};
+function ov(): void;
+function ov(x?: number) { ov(); return x; }
+class K {
+    private m(): void;
+    private m(x?: number) { return x; }
+}
+new K();
+interface M1 { a: number }
+namespace M1 { export const b = 1; }
+function M2() {}
+namespace M2 { export const c = 1; }
+class M3 {}
+interface M3 { z: number }
+enum M4 { A }
+namespace M4 { export const d = 1; }
+type T1 = number;
+const T1 = 1;
+interface M7 { a: number }
+namespace M7 { export const b = 1; }
+M7.b;
+const enum CE { A }
+namespace CE { export const z = 1; }
+";
+    let Some(out) = check(UNUSED, src) else {
+        return;
+    };
+    let mut out: Vec<String> = out
+        .into_iter()
+        .filter(|d| d.contains("TS61") || d.contains("TS62"))
+        .collect();
+    out.sort();
+    let mut want = vec![
+        "a.ts:2:10 TS6133: 'ov' is declared but its value is never read.",
+        "a.ts:3:10 TS6133: 'ov' is declared but its value is never read.",
+        "a.ts:5:13 TS6133: 'm' is declared but its value is never read.",
+        "a.ts:6:13 TS6133: 'm' is declared but its value is never read.",
+        "a.ts:9:11 TS6196: 'M1' is declared but never used.",
+        "a.ts:10:11 TS6133: 'M1' is declared but its value is never read.",
+        "a.ts:11:10 TS6133: 'M2' is declared but its value is never read.",
+        "a.ts:12:11 TS6133: 'M2' is declared but its value is never read.",
+        "a.ts:13:7 TS6196: 'M3' is declared but never used.",
+        "a.ts:14:11 TS6196: 'M3' is declared but never used.",
+        "a.ts:15:6 TS6196: 'M4' is declared but never used.",
+        "a.ts:16:11 TS6133: 'M4' is declared but its value is never read.",
+        "a.ts:17:6 TS6196: 'T1' is declared but never used.",
+        "a.ts:18:7 TS6133: 'T1' is declared but its value is never read.",
+        // `const enum` + `namespace` conflicts (TS2567): the enum alone is reported.
+        "a.ts:22:12 TS6196: 'CE' is declared but never used.",
+    ];
+    want.sort();
+    assert_eq!(out, want);
+}
+
+#[test]
+fn unused_declaration_holding_a_parse_error() {
+    // tsc drops an unused report whose declaration holds a parse error: `{ z` is a pattern
+    // missing its `}` (unusedLocalsAndParameters.ts).
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/a.ts", "export {};\nfor (let x: y) {\n    z(x);\n}\n");
+    fs.add_file(
+        "/p/tsconfig.json",
+        &format!("{{\"compilerOptions\": {{{UNUSED}}}, \"files\": [\"a.ts\"]}}"),
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let result = check_program_through_syntax_errors(&program, CheckRun { threads: 1 });
+    let unused: Vec<String> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == 6133 || d.code == 6199)
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(unused, Vec::<String>::new());
+}
+
+#[test]
 fn unused_import_of_unresolved_module() {
     // An unused import is reported even when its module does not resolve.
     let Some(out) = check(
