@@ -54,6 +54,7 @@ pub mod object_dups;
 pub mod overloads;
 pub mod overrides;
 pub mod param_refs;
+pub(crate) mod partial_infer;
 pub mod print;
 pub mod program;
 pub mod query_sound;

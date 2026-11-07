@@ -1618,7 +1618,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// What a source reverse-maps to through a homomorphic mapped type whose template does
     /// not read the type parameter: its keys with `unknown` values (`unknown[]` for an
     /// array). `None` for other sources.
-    fn reverse_mapped_unknown(&mut self, source: TypeId) -> Option<TypeId> {
+    pub(crate) fn reverse_mapped_unknown(&mut self, source: TypeId) -> Option<TypeId> {
         if self.c.is_array_type(source) {
             return Some(self.create_array(TypeId::UNKNOWN, false));
         }

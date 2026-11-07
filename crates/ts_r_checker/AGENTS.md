@@ -2514,6 +2514,39 @@ Files, by layer:
   `any`. A generic mapped type over a `const` type parameter is a const context, and a
   literal returned into a `const` type parameter's indexed access stays literal
   (`reverse_mapped_inference`).
+- **Partial reverse mapped inference** (`partial_infer.rs`; design note for the parity
+  round's gap 1). How tsc does it (read for reference only: `createReverseMappedType`,
+  `isPartiallyInferableType`, `inferReverseMappedType` in tsc/internal/checker/inference.go
+  at v7.0.2): a source reverse-maps only when it has a string index signature, or has
+  properties and is partially inferable (not marked non-inferrable, or an object literal or
+  tuple with some member that is). In the first pass over a call, a context-sensitive
+  function inside an argument is a non-inferrable placeholder, so the object literal holding
+  it is non-inferrable but still partially inferable through its other members; inferring
+  from the placeholder gives nothing, so its key reverse-maps to `unknown`, and a
+  non-inferrable object met at a naked `T[K]` infers nothing either. When the functions are
+  typed, the type parameters their contextual parameter types read are fixed (`unknown`
+  when nothing was inferred, and `T["k"]` of a fixed `unknown` reads `unknown`); the
+  others keep their partial candidates only as context, and the whole literal infers again.
+  Our data model: the first pass builds the literal's partial type from the AST
+  (`partial_literal_type`: object literals with plain properties and methods, array literals
+  as tuples in a generic mapped or tuple-like context), with each context-sensitive function
+  typed by one marker object (`Ck::non_inferrable_fn`) that `infer_from` skips, and infers it
+  against the parameter's generic mapped type (`infer_partial_literal`). Candidates that
+  still hold the marker are dropped, except for `T` itself, where the members holding it
+  become `unknown`. The deferred pass fixes what the context-sensitive functions'
+  contextual signatures read (`sensitive_fn_sigs`, every function, not only literals made of
+  functions), types the literal once in that context (`fixed_arg_contexts`; with `T` fixed
+  to `unknown`, the context maps `T` to the literal's keys typed `unknown`, so `Box<T["k"]>`
+  reads `Box<unknown>` where `Mapped<unknown>` has no members), then drops the partial
+  candidates of parameters that were not fixed before inferring from the whole literal.
+  Literals with spreads, accessors or keys that are not literal are not modelled: they infer
+  nothing in the first pass, as before. Two context rules came with it: an element of an
+  array literal in a generic mapped context is typed by its index as a property name
+  (`T["0"]`, so a literal stays under `T extends readonly string[]`), and an intersection of
+  key types (`keyof E & `on${any}``) takes string literals, as tsc's reduced literal union
+  does. Affected conformance tests: `reverseMappedPartiallyInferableTypes` (TS18046 on a
+  fixed `unknown`) and `reverseMappedTypeContextualTypesPerElementOfTupleConstraint` (a
+  false TS2322), both exact now; probes against tsc 7.0.2 in `reverse_mapped_partial`.
 - **Enum relation by members** (`enum_types_related`, cached per enum pair in
   `Ck::enum_relation`; tsc: `isEnumTypeRelatedTo` and `computeEnumMemberValue` in
   `tsc/internal/checker/relater.go` and `checker.go`). Two different enums are related only

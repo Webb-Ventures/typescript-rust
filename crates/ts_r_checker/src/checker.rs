@@ -878,6 +878,9 @@ pub struct Ck<'c, 'a> {
     /// The sources and mapped types being reverse-mapped (`mapped.rs`): a recursive
     /// mapped type meeting the same source again reverse-maps it to `any`.
     pub(crate) reverse_mapping: Vec<(TypeId, Loc)>,
+    /// The type of a context-sensitive function in the partial type of a literal argument
+    /// (`partial_infer.rs`): it infers nothing, as tsc's non-inferrable function type.
+    pub(crate) non_inferrable_fn: Option<TypeId>,
     /// Fresh object literal types with spreads, by their literal (`expr.rs`): only the
     /// properties written in that literal are checked for excess (`relate.rs`).
     pub(crate) spread_literals: FxHashMap<TypeId, Loc>,
@@ -1003,6 +1006,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             print_nodes: 0,
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),
+            non_inferrable_fn: None,
             spread_literals: FxHashMap::default(),
             union_cache: Default::default(),
             enum_relation: FxHashMap::default(),

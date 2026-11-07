@@ -917,6 +917,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                     continue;
                 }
             }
+            // An element of a generic mapped type is typed by its index as a property name
+            // (`T["0"]` for `{ [K in keyof T]: T[K] }`, whose constraint may take literals;
+            // tsc: `getTypeOfPropertyOfContextualType`).
+            if !after_spread
+                && self.is_generic_mapped_type(m)
+                && let Some(t) = self.contextual_property_type(m, &idx.to_string())
+            {
+                out.push(t);
+                continue;
+            }
             let am = if mf.intersects(TypeFlags::INSTANTIABLE) {
                 let c = self.base_constraint(m);
                 if c == TypeId::UNKNOWN || c == TypeId::UNRESOLVED {

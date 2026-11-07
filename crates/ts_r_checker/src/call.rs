@@ -2894,6 +2894,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut generic_args: Vec<(TypeId, TypeId)> = Vec::new();
         let mut inferred_tps: Vec<TypeId> = Vec::new();
         let mut late: Vec<(usize, TypeId, TypeId, TypeId)> = Vec::new();
+        let mut partials: Vec<(usize, crate::partial_infer::PartialInference)> = Vec::new();
         for (i, &a) in eff.iter().enumerate() {
             if i >= rest_from {
                 break;
@@ -2923,6 +2924,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.context_free_object_properties(l, pt, 0, &mut pairs);
                         for (at, tt) in pairs {
                             self.infer_types(&mut ctx, at, tt, 0);
+                        }
+                        // A literal whose parameter type reverse-maps to `T` infers `T` from
+                        // its members that are not context sensitive.
+                        if let Some(p) = self.infer_partial_literal(&mut ctx, l, pt) {
+                            partials.push((i, p));
                         }
                         deferred.push(i);
                         continue;
@@ -3080,6 +3086,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             // inference so far, `unknown` without candidates); the others map to what is
             // known so far without fixing.
             let tps = ctx.params.clone();
+            let partial = partials
+                .iter()
+                .find(|(k, _)| *k == i)
+                .map(|(_, p)| p.clone());
             let mut mentioned = vec![false; tps.len()];
             let ptn = self.non_nullable(pt);
             let mut pt_calls = self.signatures_of(ptn, SigKind::Call);
@@ -3099,7 +3109,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // (A homomorphic mapped type infers by reversing it: nothing to fix.)
                 // (Only when every element or property is such a function: the others would
                 // infer first.)
-                if self.is_generic_mapped_type(ptn)
+                // After a partial inference (a reverse mapped type), every context-sensitive
+                // function inside fixes what its contextual parameters read.
+                if partial.is_some() {
+                    self.sensitive_fn_sigs(Loc::new(e.file, n), ptn, 0, &mut pt_calls);
+                } else if self.is_generic_mapped_type(ptn)
                     || !self.nested_context_sigs(Loc::new(e.file, n), pt, 0, &mut pt_calls)
                 {
                     pt_calls.clear();
@@ -3319,9 +3333,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                 })
                 .collect();
+            // A reverse-mapped `T` fixed to `unknown` gives each member of the literal an
+            // `unknown` context (`T["foo"]` reads `unknown`, where `Mapped<unknown>` has no
+            // members), also for the final check of the argument.
+            let mut cur = cur;
+            let mut keep_context = false;
+            if let Some(p) = &partial
+                && let Some(jt) = tps.iter().position(|&t| t == p.tv)
+                && ctx.fixed[jt] == Some(TypeId::UNKNOWN)
+                && let Some(keys) = self.unknown_keys_of_partial(p)
+            {
+                cur[jt] = keys;
+                keep_context = true;
+            }
             let m = self.store().mapper(&tps, &cur);
             let ct = self.instantiate(pt, m);
+            // (tsc types the literal's functions once, in this context.)
+            if (keep_context || partial.is_some()) && self.speculative == 0 {
+                self.fixed_arg_contexts
+                    .entry(Loc::new(e.file, n))
+                    .or_insert(Some(ct));
+            }
             let at = self.speculative_arg_type(Loc::new(e.file, n), ct);
+            if let Some(p) = &partial {
+                self.undo_partial_inference(&mut ctx, p);
+            }
             self.infer_types(&mut ctx, at, pt, 0);
         }
         // With a generic context, only inferences that don't mention type parameters count
@@ -3774,7 +3810,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.first_arg_context.get(&(l, target)).copied()
     }
 
-    fn speculative_arg_type(&mut self, l: Loc, ctx: TypeId) -> TypeId {
+    pub(crate) fn speculative_arg_type(&mut self, l: Loc, ctx: TypeId) -> TypeId {
         // A function argument fixed by an earlier overload keeps that context (`None`: no
         // context, so no memo either).
         let (ctx, memo) = match self.fixed_arg_contexts.get(&l) {

@@ -6038,6 +6038,23 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .into_iter()
                 .any(|m| self.is_literal_of_contextual_type(cand, m));
         }
+        // An intersection of key types (`keyof E & `on${any}``, `"a" & `on${any}``) takes
+        // string literals: tsc reduces it to the union of the literals it allows.
+        if cf.contains(TypeFlags::INTERSECTION) {
+            let keys = TypeFlags::STRING_LITERAL
+                | TypeFlags::INDEX
+                | TypeFlags::TEMPLATE_LITERAL
+                | TypeFlags::STRING_MAPPING;
+            if s.members_of_union(ct)
+                .iter()
+                .any(|&m| s.flags(m).intersects(keys))
+                && self.some_member(cand, |m| {
+                    self.store().flags(m).intersects(TypeFlags::STRING_LITERAL)
+                })
+            {
+                return true;
+            }
+        }
         if cf.intersects(TypeFlags::INSTANTIABLE_NON_PRIMITIVE) {
             let c = self.base_constraint(ct);
             let c = if c == TypeId::UNRESOLVED {
