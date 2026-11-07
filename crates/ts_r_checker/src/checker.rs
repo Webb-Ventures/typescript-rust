@@ -786,6 +786,8 @@ pub struct Ck<'c, 'a> {
     /// Context-sensitive functions nested in an overloaded call's argument while a
     /// candidate first checks the arguments without them: each reads as `any`.
     pub(crate) placeholder_fns: FxHashSet<Loc>,
+    /// The type a placeholder function reads as (`any`; JSX overloads use their own).
+    pub(crate) placeholder_fn_type: TypeId,
     /// Set while instantiating the result of a failed overloaded call: inference skips
     /// context-sensitive arguments.
     pub(crate) skip_sensitive_inference: bool,
@@ -972,6 +974,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             context_overrides: Vec::new(),
             fixed_arg_contexts: FxHashMap::default(),
             placeholder_fns: FxHashSet::default(),
+            placeholder_fn_type: TypeId::ANY,
             skip_sensitive_inference: false,
             local_returns: FxHashMap::default(),
             reported: FxHashSet::default(),

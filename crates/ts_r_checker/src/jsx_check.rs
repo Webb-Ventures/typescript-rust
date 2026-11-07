@@ -86,6 +86,9 @@ pub(crate) struct JsxResolved {
     /// The tag is a union resolved through its members' combined signatures: its return
     /// is checked against `JSX.Element | null | JSX.ElementClass`.
     pub mixed: bool,
+    /// The contexts overload resolution fixed for context-sensitive functions in the
+    /// attributes (restored with a cached resolution: the fixed contexts are per file).
+    pub fixed: Vec<(Loc, Option<TypeId>)>,
 }
 
 /// Per-file facts about JSX.
@@ -111,6 +114,10 @@ pub(crate) struct JsxState {
     pub resolved: FxHashMap<Loc, JsxResolved>,
     /// Props types assumed for openings while their candidates are tried (innermost last).
     pub assumed: Vec<(Loc, TypeId)>,
+    /// `(...args: any[]) => any`: what a context-sensitive function in the attributes
+    /// reads as while candidates are tried without them (tsc's `anyFunctionType`, a
+    /// subtype of every function type).
+    pub any_fn: Option<TypeId>,
 }
 
 impl<'c, 'a> Ck<'c, 'a> {
@@ -395,12 +402,23 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The resolution of `opening` (computed quietly; cached outside speculation).
     pub(crate) fn jsx_resolved(&mut self, opening: Loc) -> JsxResolved {
         if let Some(r) = self.jsx.resolved.get(&opening) {
-            return r.clone();
+            let r = r.clone();
+            for &(f, c) in &r.fixed {
+                self.fixed_arg_contexts.entry(f).or_insert(c);
+            }
+            return r;
         }
         if !self.push_resolution(Resolving::Node(opening)) {
             return JsxResolved::default();
         }
-        let r = self.quietly(|ck| ck.resolve_jsx(opening));
+        let mut r = self.quietly(|ck| ck.resolve_jsx(opening));
+        if r.sig.is_some() {
+            r.fixed = self
+                .jsx_sensitive_fns(opening, r.target.children)
+                .into_iter()
+                .filter_map(|f| self.fixed_arg_contexts.get(&f).map(|&c| (f, c)))
+                .collect();
+        }
         let circular = !self.pop_resolution();
         if self.speculative == 0 && !circular {
             self.jsx.resolved.insert(opening, r.clone());
@@ -512,6 +530,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let relations = [RelationKind::Subtype, RelationKind::Assignable];
         let mut last = None;
+        // Context-sensitive functions in the attributes (and children) are left out until a
+        // candidate fits the rest: that candidate fixes their parameter types for every
+        // later one, as for calls (`resolve_call_inner`).
+        let sensitive = self.jsx_sensitive_fns(opening, r.target.children);
+        for f in &sensitive {
+            self.fixed_arg_contexts.remove(f);
+        }
         for rel in relations {
             for &cand in &candidates {
                 let Some(inst) =
@@ -524,6 +549,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return r;
                 };
                 last = Some((inst, props));
+                let unfixed: Vec<Loc> = sensitive
+                    .iter()
+                    .copied()
+                    .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                    .collect();
+                if !unfixed.is_empty() {
+                    let saved = std::mem::replace(
+                        &mut self.placeholder_fns,
+                        unfixed.iter().copied().collect(),
+                    );
+                    let any_fn = self.jsx_any_fn();
+                    let saved_ty = std::mem::replace(&mut self.placeholder_fn_type, any_fn);
+                    let attrs = self.jsx_attributes_under(opening, props, r.target.children);
+                    self.placeholder_fns = saved;
+                    self.placeholder_fn_type = saved_ty;
+                    let Some(attrs) = attrs else {
+                        return r;
+                    };
+                    // Without its excess property check (tsc: `isSignatureApplicable`).
+                    let attrs = self.regular_object_literal(attrs);
+                    if !self.is_type_related(attrs, props, rel) {
+                        continue;
+                    }
+                    self.jsx_fix_contexts(opening, props, &unfixed);
+                }
                 let attrs = self.jsx_attributes_under(opening, props, r.target.children);
                 let Some(attrs) = attrs else {
                     return r;
@@ -536,11 +586,107 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if let Some((inst, props)) = last {
+            // The last candidate's error check fixes the functions still open.
+            let unfixed: Vec<Loc> = sensitive
+                .iter()
+                .copied()
+                .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                .collect();
+            self.jsx_fix_contexts(opening, props, &unfixed);
             r.sig = Some((inst, construct));
             r.target.props = Some(props);
             r.no_overload = true;
         }
         r
+    }
+
+    /// The context-sensitive functions among `opening`'s attribute values, in the object
+    /// and array literals of its values and spreads, and among its children when they are
+    /// an attribute.
+    fn jsx_sensitive_fns(&self, opening: Loc, children: Option<StrId>) -> Vec<Loc> {
+        let file = opening.file;
+        let ast = self.ast(file);
+        let Node::JsxOpening { attrs, .. } = *ast.node(opening.node) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let visit = |ck: &Self, x: NodeId, out: &mut Vec<Loc>| {
+            let l = Loc::new(file, x);
+            if ck.is_context_sensitive_fn_arg(l) {
+                out.push(Loc::new(file, crate::nodes::skip_parens(ast, x)));
+            } else {
+                ck.nested_sensitive_fns(l, 0, out);
+            }
+        };
+        for &a in ast.list(attrs) {
+            match *ast.node(a) {
+                Node::JsxAttr { value: Some(v), .. } => {
+                    if let Node::JsxExprContainer { expr: Some(x) } = *ast.node(v) {
+                        visit(self, x, &mut out);
+                    }
+                }
+                Node::JsxSpreadAttr { arg } => visit(self, arg, &mut out),
+                _ => {}
+            }
+        }
+        if children.is_some()
+            && let Some(el) = self.c.parent(opening)
+            && let Node::JsxElement { children: list, .. } = *ast.node(el.node)
+        {
+            for &c in ast.list(list) {
+                if let Node::JsxExprContainer { expr: Some(x) } = *ast.node(c) {
+                    visit(self, x, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// `JsxState::any_fn`.
+    fn jsx_any_fn(&mut self) -> TypeId {
+        if let Some(t) = self.jsx.any_fn {
+            return t;
+        }
+        let rest = self.create_array(TypeId::ANY, false);
+        let name = self.store().intern_str("args");
+        let sig = ts_r_types::Signature::new(
+            ts_r_types::SigFlags::HAS_REST,
+            None,
+            ListId::EMPTY,
+            vec![ts_r_types::Param {
+                name,
+                ty: rest,
+                optional: false,
+                sym: SymId::NONE,
+            }],
+            None,
+            0,
+            Some(TypeId::ANY),
+        );
+        let sig = self.store().add_signature(sig);
+        let t = self.store().literal_object(
+            SymId::NONE,
+            ts_r_types::ObjectFlags::ANONYMOUS,
+            ts_r_types::ResolvedMembers::new(Vec::new(), vec![sig], Vec::new(), Vec::new()),
+            ts_r_types::TypeTraits::NONE,
+        );
+        self.jsx.any_fn = Some(t);
+        t
+    }
+
+    /// Fixes the contexts of the functions `fns` to the ones they have with `props` assumed
+    /// for `opening`.
+    fn jsx_fix_contexts(&mut self, opening: Loc, props: TypeId, fns: &[Loc]) {
+        if fns.is_empty() {
+            return;
+        }
+        self.jsx.assumed.push((opening, props));
+        let fixed: Vec<(Loc, Option<TypeId>)> =
+            fns.iter().map(|&f| (f, self.contextual_type(f))).collect();
+        self.jsx.assumed.pop();
+        for (f, c) in fixed {
+            self.fixed_arg_contexts.insert(f, c);
+        }
     }
 
     /// The signatures a value tag of type `tt` is resolved against, and whether they are

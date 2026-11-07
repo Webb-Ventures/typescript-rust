@@ -1618,7 +1618,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         let saved_assumed = std::mem::take(&mut self.rel.assumed);
         let saved_skipped = std::mem::take(&mut self.rel.deferred_skipped);
         let pending_start = self.rel.pending.len();
-        let saved_flags = self.rel.probe.as_mut().map(|p| std::mem::take(&mut p.flags));
+        let saved_flags = self
+            .rel
+            .probe
+            .as_mut()
+            .map(|p| std::mem::take(&mut p.flags));
         let r = self.structured_related(s, t, rel, report);
         // What a measurement noted while comparing this pair is kept with its result.
         let noted = match (self.rel.probe.as_mut(), saved_flags) {
@@ -5023,7 +5027,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut cur = p;
         for _ in 0..8 {
             match self.c.synth_sym(cur) {
-                Some(x) if x.check & check_flags::SYNTHETIC_INTERSECTION != 0 && x.origins.len() > 1 => {
+                Some(x)
+                    if x.check & check_flags::SYNTHETIC_INTERSECTION != 0
+                        && x.origins.len() > 1 =>
+                {
                     return x.origins.to_vec();
                 }
                 Some(x) if x.origins.len() == 1 => cur = x.origins[0],

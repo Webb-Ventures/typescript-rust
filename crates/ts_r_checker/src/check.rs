@@ -6117,9 +6117,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         // Abstract base fields and members of a merged interface may be redeclared.
         let base_field = match *self.ast(d.file).node(d.node) {
-            Node::PropertyDef { modifiers, .. } => !modifiers.intersects(
-                Modifiers::DECLARE | Modifiers::ACCESSOR | Modifiers::ABSTRACT,
-            ),
+            Node::PropertyDef { modifiers, .. } => !modifiers
+                .intersects(Modifiers::DECLARE | Modifiers::ACCESSOR | Modifiers::ABSTRACT),
             Node::Param { .. } => self.is_parameter_property(d),
             _ => false,
         };

@@ -1632,7 +1632,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The context-sensitive functions in the property values and elements of an object or
     /// array literal argument (not the argument itself).
-    fn nested_sensitive_fns(&self, l: Loc, depth: u32, out: &mut Vec<Loc>) {
+    pub(crate) fn nested_sensitive_fns(&self, l: Loc, depth: u32, out: &mut Vec<Loc>) {
         if depth > 8 || out.len() > 64 {
             return;
         }
@@ -1697,7 +1697,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `l` is a function expression or arrow (in parentheses or not) with
     /// unannotated parameters.
-    fn is_context_sensitive_fn_arg(&self, l: Loc) -> bool {
+    pub(crate) fn is_context_sensitive_fn_arg(&self, l: Loc) -> bool {
         let ast = self.ast(l.file);
         let n = crate::nodes::skip_parens(ast, l.node);
         matches!(ast.node(n), Node::Arrow { .. } | Node::FunctionExpr { .. })
@@ -4120,6 +4120,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // (it starts past the required ones): its elements meet this parameter.
                 (Arg::Elem(_, t) | Arg::Rest(_, t), _) => t,
             };
+            // While context-sensitive arguments are left out, an object literal is related
+            // without its excess property check: its types are not all known yet (tsc:
+            // `isSignatureApplicable` in `checker.go` takes the regular object literal type).
+            let at = if matches!(pass, ArgPass::Skip(_)) {
+                self.regular_object_literal(at)
+            } else {
+                at
+            };
             if tuple_ctx.is_some() {
                 let et = self.rest_arg_element_type(at, pt);
                 tuple_els.push(et);
@@ -4163,6 +4171,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         None
+    }
+
+    /// The non-fresh twin of a fresh object literal type (no excess property check); any
+    /// other type as it is.
+    pub(crate) fn regular_object_literal(&self, t: TypeId) -> TypeId {
+        let s = self.store();
+        if s.object_of(t)
+            .is_some_and(|o| o.flags.contains(ts_r_types::ObjectFlags::FRESH_LITERAL))
+        {
+            s.regular(t)
+        } else {
+            t
+        }
     }
 
     /// The type of `sig`'s rest parameter when it is not an array or tuple (nor `any`, an

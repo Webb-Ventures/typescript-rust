@@ -87,7 +87,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         }
         let ast = self.ast(l.file);
-        let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) = *ast.node(l.node)
+        let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) =
+            *ast.node(l.node)
         else {
             return;
         };
@@ -108,7 +109,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         };
         let st = self.store();
         if !st.flags(bc).contains(TypeFlags::OBJECT)
-            || st.flags(bc).intersects(TypeFlags::UNION | TypeFlags::INTERSECTION)
+            || st
+                .flags(bc)
+                .intersects(TypeFlags::UNION | TypeFlags::INTERSECTION)
         {
             return;
         }
