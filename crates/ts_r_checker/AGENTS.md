@@ -3421,14 +3421,13 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-06, 3042fe0, parity/checker-3: dependent destructuring, template
-  literal comparability, for-of assertion targets, nested call return context, concrete
-  intersections indexed by a generic key, identity of references and deferred types;
-  12750 compared variants):
-  12463 exact (97.7%; all diagnostics and chains), 12483 (97.9%) exact on first lines;
-  136 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
+  Current (2026-11-07, 6639285, parity/checker-gap-1: partial reverse mapped inference
+  from context-sensitive literals, contexts through generic mapped intersections, no
+  inference to mapped types with an `as` clause; 12750 compared variants):
+  12466 exact (97.8%; all diagnostics and chains), 12486 (97.9%) exact on first lines;
+  134 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3439,8 +3438,15 @@ and integration tests allow: they link the one library build).
 
 ## Known gaps (next layers)
 
-- Type operators: reverse mapped types (inferring `T` from `{ [K in keyof T]: Box<T[K]> }`)
-  infer a silent `UNRESOLVED`; generic mapped types stay opaque in relations; `keyof X` and
+- Reverse mapped inference: a primitive met inside a recursive mapped type (`Deep<T>`
+  from `{ a: { b: 1 } }`) infers a silent `UNRESOLVED` where tsc reverse-maps the
+  primitive's apparent type; a homomorphic mapped type over an intersection
+  (`Readonly<{ a: number } & T>`) widens the literals tsc keeps; a type parameter read only
+  by a function parameter inside the template (`{ f: (a: A) => void; v: T[K] }`) is
+  inferred here and stays `unknown` in tsc; `mappedTypeRecursiveInference` still differs;
+  partial literals with spreads, accessors or computed keys and JSX attributes are not
+  modelled (silent).
+- Type operators: generic mapped types stay opaque in relations; `keyof X` and
   indexed-access aliases print expanded (`"a" | "b"` where tsc prints `keyof Foo`); TS2589
   for a recursive alias is reported at the use, not at the recursive reference.
 - Variance is measured only for classes, interfaces and aliases compared in
@@ -3459,8 +3465,7 @@ and integration tests allow: they link the one library build).
   object literal spreads. JSX attributes have synthetic symbols without a declared prop
   behind them, so the language server finds no symbol for `<form onSubmit>`. Evolving arrays
   in JavaScript files, TS7005 for closures created after conditional assignments of an auto
-  variable, reverse mapped type
-  inference (contextual types through it are treated as unknown), `this` parameter checks, modifier order outside classes
+  variable, reverse mapped contexts in JSX attributes (treated as unknown), `this` parameter checks, modifier order outside classes
   (`declare export`, `out in`), TS2512/TS2513
   across a class merged with an interface, TS2564 on computed names (`["c"]: number`),
   TS2729 through the computed names of object-literal accessors.
