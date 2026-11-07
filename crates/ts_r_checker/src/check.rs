@@ -51,6 +51,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.check_esm_import_assignment(file);
         self.check_commonjs_generated_names(file);
         self.check_downlevel_reserved_names(file);
+        self.check_type_arg_trailing_commas(file);
         self.check_top_level_await_names(file);
         self.check_decls(file);
         // Function and class bodies met by the declaration checks (decorator expressions).

@@ -89,6 +89,11 @@ pub(crate) struct JsxResolved {
     /// The contexts overload resolution fixed for context-sensitive functions in the
     /// attributes (restored with a cached resolution: the fixed contexts are per file).
     pub fixed: Vec<(Loc, Option<TypeId>)>,
+    /// Explicit type arguments no signature takes (TS2558; the attributes are not checked).
+    pub type_arg_arity: Option<Vec<SigId>>,
+    /// The candidate whose constraints the explicit type arguments fail (TS2344; the
+    /// attributes are not checked).
+    pub type_arg_constraint: Option<(SigId, Vec<TypeId>)>,
 }
 
 /// Per-file facts about JSX.
@@ -517,7 +522,29 @@ impl<'c, 'a> Ck<'c, 'a> {
             })
             .collect();
         if candidates.is_empty() {
+            if explicit.as_ref().is_some_and(|x| !x.is_empty()) {
+                r.type_arg_arity = Some(sigs);
+            }
             return r;
+        }
+        // Explicit type arguments must satisfy the candidate's constraints; a candidate
+        // that fails is not tried against the attributes (as for calls).
+        let mut candidates = candidates;
+        if let Some(ex) = explicit.as_ref().filter(|x| !x.is_empty()) {
+            let mut failed = None;
+            candidates.retain(|&c| {
+                let ok = self
+                    .type_args_satisfy_constraints(c, ex, None)
+                    .is_none_or(|ok| ok);
+                if !ok {
+                    failed = Some(c);
+                }
+                ok
+            });
+            if candidates.is_empty() {
+                r.type_arg_constraint = failed.map(|c| (c, ex.clone()));
+                return r;
+            }
         }
         if let [s] = candidates[..] {
             let Some(inst) = self.jsx_instantiate(opening, s, construct, explicit.as_deref())
@@ -1312,12 +1339,21 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn check_jsx_opening(&mut self, opening: Loc, children: NodeList) {
         let file = opening.file;
         let ast = self.ast(file);
-        let Node::JsxOpening { name, attrs, .. } = *ast.node(opening.node) else {
+        let Node::JsxOpening {
+            name,
+            attrs,
+            type_args,
+            ..
+        } = *ast.node(opening.node)
+        else {
             return;
         };
         let reporting = self.reporting(file);
         let ns = self.jsx_ns(opening);
         let r = self.jsx_resolved(opening);
+        if reporting && let Some(ta) = type_args {
+            self.check_jsx_type_args(opening, name, ta, &r);
+        }
         if reporting {
             if self.jsx_file_info(file).automatic.is_none() {
                 self.check_jsx_container_props(ns, "ElementChildrenAttribute");
@@ -1401,6 +1437,32 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if reporting {
             self.check_jsx_validity(opening, name, &r, ns);
+        }
+    }
+
+    /// Explicit type arguments of a JSX tag (tsc: `resolveJsxOpeningLikeElement` in
+    /// `jsx.go` and `reportCallResolutionErrors` in `checker.go`): an intrinsic tag takes
+    /// none (TS2558 over the list, its arguments still checked), a value tag's must fit
+    /// some signature's type parameter count (TS2558) and then the constraints (TS2344 at
+    /// the first failing argument). An empty list is only the parser's TS1099.
+    fn check_jsx_type_args(&mut self, opening: Loc, name: NodeId, ta: NodeId, r: &JsxResolved) {
+        let file = opening.file;
+        let ast = self.ast(file);
+        let Node::TypeArgs { args } = *ast.node(ta) else {
+            return;
+        };
+        let n = ast.list(args).len();
+        if n == 0 {
+            return;
+        }
+        if crate::check::is_intrinsic_tag(ast, name) {
+            self.report_type_arg_arity_error(file, ta, &[], n);
+            return;
+        }
+        if let Some(sigs) = &r.type_arg_arity {
+            self.report_type_arg_arity_error(file, ta, sigs, n);
+        } else if let Some((c, ex)) = &r.type_arg_constraint {
+            self.type_args_satisfy_constraints(*c, ex, Some(Loc::new(file, ta)));
         }
     }
 

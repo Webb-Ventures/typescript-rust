@@ -1164,6 +1164,52 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// TS1009 at the trailing comma of every type argument list of a TypeScript file
+    /// without syntax errors (`f<number,>()`, `Array<number,>`, `<C<number,> />`; tsc:
+    /// `checkGrammarTypeArguments` in `grammarchecks.go`).
+    pub(crate) fn check_type_arg_trailing_commas(&mut self, file: ts_r_diagnostics::FileId) {
+        if self.c.file(file).is_js() || self.has_syntax_errors(file) {
+            return;
+        }
+        let ast = self.ast(file);
+        let lists: Vec<NodeId> = (1..=ast.node_count() as u32)
+            .filter_map(NodeId::from_raw)
+            .filter(|&n| matches!(ast.node(n), Node::TypeArgs { .. }))
+            .collect();
+        for n in lists {
+            self.check_type_args_trailing_comma(Loc::new(file, n));
+        }
+    }
+
+    fn check_type_args_trailing_comma(&mut self, l: Loc) {
+        use ts_r_lexer::{Lexer, TokenKind};
+        let ast = self.ast(l.file);
+        let Node::TypeArgs { args } = *ast.node(l.node) else {
+            return;
+        };
+        let Some(&last) = ast.list(args).last() else {
+            return;
+        };
+        let end = self.c.span(Loc::new(l.file, last)).end;
+        let text = &self.c.file(l.file).text;
+        let mut lexer = Lexer::new(text);
+        lexer.seek(end);
+        if lexer.next_token() != TokenKind::Comma {
+            return;
+        }
+        let comma = lexer.token().span().start;
+        lexer.next_token();
+        let next = lexer.token().span().start as usize;
+        if text.as_bytes().get(next) == Some(&b'>') {
+            self.error_span(
+                l.file,
+                Span::new(comma, comma + 1),
+                dg::TRAILING_COMMA_NOT_ALLOWED_1009,
+                &[],
+            );
+        }
+    }
+
     /// The effective arguments (spreads of tuples expanded).
     fn effective_args(&mut self, e: Loc, args: Args) -> Vec<Arg> {
         let ast = self.ast(e.file);
@@ -1869,7 +1915,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2558 / TS2743 for a call whose `n` type arguments no signature takes. One signature:
     /// its range. Overloads: the nearest counts below and above `n`; both present gives
     /// TS2743, otherwise TS2558 names whichever exists.
-    fn report_type_arg_arity_error(
+    pub(crate) fn report_type_arg_arity_error(
         &mut self,
         file: ts_r_diagnostics::FileId,
         ta: NodeId,
