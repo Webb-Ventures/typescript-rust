@@ -3251,6 +3251,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 return true;
             }
+            // Then through the source's branches before its distributive constraint, which
+            // maps the check type to its constraint and loses it (`K extends X ? K : K & Y`
+            // over a conditional `K` is a `K`; tsc: relater.go, structuredTypeRelatedToWorker).
+            if let Some(dc) = self.conditional_default_constraint(s)
+                && dc != s
+                && dc != TypeId::UNRESOLVED
+                && !self.store().is_error(dc)
+                && self.related_to(dc, t, rel, false, None)
+            {
+                return true;
+            }
             return self
                 .conditional_constraint(s)
                 .is_some_and(|c| c != s && self.related_to(c, t, rel, report, None));

@@ -1894,6 +1894,15 @@ Files, by layer:
 - **Conditional sources.** A deferred conditional source relates through its constraint,
   then through its branches; generic branches relate through their base constraint
   (`Awaited<E>` with `E extends { a: 1 }` is not assignable to `never`).
+  Against another deferred conditional, after the pairwise and target-branch rules, the
+  source's default constraint (its two branches, the true one narrowed by `extends`, an
+  `any` branch dropped) comes before its distributive constraint. The distributive one
+  replaces the check type by its constraint, so `Tag<Key<P>, V>` (`T extends X ? T : T &
+  Y` over a conditional `Key<P>`) would become `[string] & Y | [string[], string] & Y`
+  and stop being a `Key<P>`; this order is what tRPC's tanstack-react-query option
+  interfaces depend on to avoid TS2430 (tsc: relater.go, structuredTypeRelatedToWorker,
+  the conditional-source case; checker.go, getDefaultConstraintOfConditionalType).
+  Elaborations still print the distributive constraint where tsc prints the default one.
 - **Callback return contexts.** While a call infers, a defaulted type parameter that only
   a callback's return type mentions stays open in that callback's contextual type
   (`then(v => Promise.reject())` gives `Promise<never>`, not `Promise<T>`); optional
@@ -3627,12 +3636,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, e8416dd, parity/checker-gap-5: tagged templates take tsc's tag
-  rules; 12750 compared variants):
-  12481 exact (97.9%; all diagnostics and chains), 12501 (98.0%) exact on first lines;
-  128 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, babed30, parity/checker-gap-6: heritage checks and relations;
+  12750 compared variants):
+  12489 exact (98.0%; all diagnostics and chains), 12509 (98.1%) exact on first lines;
+  126 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3700,13 +3709,22 @@ and integration tests allow: they link the one library build).
   behind them, so the language server finds no symbol for `<form onSubmit>`. Evolving arrays
   in JavaScript files, TS7005 for closures created after conditional assignments of an auto
   variable, reverse mapped contexts in JSX attributes (treated as unknown), `this` parameter checks, modifier order outside classes
-  (`declare export`, `out in`), TS2512/TS2513
-  across a class merged with an interface, TS2564 on computed names (`["c"]: number`),
-  TS2729 through the computed names of object-literal accessors.
-- Heritage: TS2612 (redeclared base property under `useDefineForClassFields`), TS2310
-  (circular bases: the heritage checks are skipped), discriminated-union decomposition in
-  relations (`{ done: boolean }` to `IteratorResult`), generic method parameters inferred
-  against a `keyof` constraint.
+  (`declare export`, `out in`), TS2729 through the computed names of object-literal
+  accessors.
+- Heritage (parity/checker-gap-6 left): TS2310 is not reported for a class whose `extends`
+  is an expression (a mixin call) in a base cycle (tsc does; ours is order-dependent in
+  project mode, so silent); a circular type parameter default (`C['someProp']` while `C`
+  resolves) reads as `unknown` (extra TS18046 in circularConstraintYieldsAppropriateError,
+  and TS2456/TS2313 are missed in circularBaseTypes); protected access through an
+  intersection of classes stays silent with a private part, a `this` parameter, or for
+  TS2446; destructuringParameterDeclaration2's TS2416 chain differs (an optional binding
+  pattern adds `| undefined` without strictNullChecks); a conditional source whose check
+  type is itself a conditional misses tsc's error against an unrelated conditional when
+  the extends types differ (`X<P> extends any ? K<P> : K<P>` to `K2<P>`, silent).
+- tRPC packages other than server, each checked with its own tsconfig (client, next,
+  openapi, react-query, tanstack-react-query, tests, upgrade): no TS2430 left; the extras
+  are TS2339 on `TRPCClient<TRouter>` / `CreateQueryUtils<TRouter>` proxies, TS7006,
+  TS2344, TS2322 in openapi's `params.gen.ts`, and TS2688 for `jest` types.
 - Unused checks: write-only private properties through element access in another file,
   overloaded functions and merged declarations are not reported (silent).
 - Sibling type parameters in the constraints of a cloned generic method signature keep
