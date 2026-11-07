@@ -553,6 +553,12 @@ Files, by layer:
   `T2`. An intersection of class references is rebuilt without its alias and prints as
   `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
   getTypeWithThisArgument).
+- TS2510 (`check_base_constructor_returns` in `heritage.rs`): a class whose `extends`
+  expression is not a class (no class name, no class static side) but a plain object
+  type with construct signatures: the signatures taking the written type arguments,
+  instantiated with them, must all return identical types, else TS2510 at the
+  expression. Intersections, unions and type variables (mixins) are not checked (tsc:
+  checker.go, checkClassLikeDeclaration, getInstantiatedConstructorsForTypeArguments).
 - A method declared by a class and a merged interface (`class_interface_method` in
   `overloads.rs`: one merged member whose origins span both) checks `abstract` across all
   its declarations in source order (one file only): TS2512 at each declaration whose
