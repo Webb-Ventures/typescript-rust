@@ -4508,6 +4508,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             } => fn_parts(ast, value).and_then(|p| p.body),
             _ => None,
         });
+        let ctor_fn = ast.list(members).iter().find_map(|&m| match *ast.node(m) {
+            Node::MethodDef {
+                kind: MethodKind::Constructor,
+                value,
+                ..
+            } if fn_parts(ast, value).is_some_and(|p| p.body.is_some()) => Some(value),
+            _ => None,
+        });
         for &m in ast.list(members) {
             let ml = Loc::new(file, m);
             self.check_derived_constructor_super(ml);
@@ -4615,7 +4623,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                             _ => None,
                         }
                         && !type_ann.is_some_and(|t| self.is_type_ref_with_bad_arity(Loc::new(file, t)))
-                        && !ctor_body.is_some_and(|b| self.assigns_this_property(file, b, key))
+                        && !ctor_body.is_some_and(|b| {
+                            // Identifier and `#private` names: assigned on every path to
+                            // the constructor's returns (flow); computed names: assigned
+                            // anywhere in it.
+                            self.assigns_this_property(file, b, key)
+                                && !(matches!(
+                                    ast.node(key),
+                                    Node::Ident { .. } | Node::PrivateName { .. }
+                                ) && ctor_fn.zip(key_text(ast, key)).is_some_and(|(f, n)| {
+                                    self.property_initialized_in_constructor(file, f, &n, d)
+                                        == Some(false)
+                                }))
+                        })
                     {
                         self.error(Loc::new(file, key), dg::PROPERTY_0_HAS_NO_INITIALIZER_AND_IS_NOT_DEFINITELY_ASSIGNED_IN_THE_CONSTRUCTOR_2564, &[&name]);
                     }

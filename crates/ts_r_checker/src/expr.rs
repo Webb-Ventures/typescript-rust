@@ -4128,7 +4128,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(e.file);
         if matches!(ast.node(skip_parens(ast, obj)), Node::This {}) {
-            return false;
+            return self.this_property_used_before_assigned(e, p, t);
         }
         let Some(vd) = self.c.value_decl(p) else {
             return false;
@@ -4150,6 +4150,74 @@ impl<'c, 'a> Ck<'c, 'a> {
             || self.flow_container(vd) != self.flow_container(e)
             || self.contains_undefined(t)
         {
+            return false;
+        }
+        let optional = self.union(&[t, TypeId::UNDEFINED]);
+        let ft = self.flow_type_of_reference(e, t, optional);
+        self.contains_undefined(ft)
+    }
+
+    /// TS2565 (strictPropertyInitialization): `this.p` read in the constructor of the class
+    /// declaring `p` without an initializer (not static, abstract, `!` or ambient) before
+    /// every path to it assigns `p`: its flow type, starting from `t | undefined`, still holds
+    /// `undefined` (tsc: checker.go, getFlowTypeOfAccessExpression, assumeUninitialized).
+    fn this_property_used_before_assigned(&mut self, e: Loc, p: SymId, t: TypeId) -> bool {
+        if !self.c.opts.strict_property_initialization {
+            return false;
+        }
+        let Some(vd) = self.c.value_decl(p) else {
+            return false;
+        };
+        if vd.file != e.file || self.c.file(e.file).is_js() {
+            return false;
+        }
+        let ast = self.ast(e.file);
+        let Node::PropertyDef {
+            value: None,
+            modifiers,
+            definite: false,
+            ..
+        } = *ast.node(vd.node)
+        else {
+            return false;
+        };
+        if modifiers.intersects(
+            ts_r_ast::Modifiers::STATIC | ts_r_ast::Modifiers::ABSTRACT | ts_r_ast::Modifiers::DECLARE,
+        )
+            || self.is_ambient_node(vd)
+            || self.contains_undefined(t)
+        {
+            return false;
+        }
+        // The read's flow container is the constructor of the declaring class.
+        let Some(container) = self.flow_container(e) else {
+            return false;
+        };
+        let cl = Loc::new(e.file, container);
+        let in_ctor = self.c.parent(cl).is_some_and(|m| {
+            matches!(
+                *ast.node(m.node),
+                Node::MethodDef {
+                    kind: ts_r_ast::MethodKind::Constructor,
+                    value,
+                    ..
+                } if value == container
+            ) && self.c.parent(m) == self.c.parent(vd)
+        });
+        if !in_ctor || !self.is_narrowable_reference(e) {
+            return false;
+        }
+        // The target of a logical assignment (`this.p ??= v`) is not reported (observed).
+        if self.c.parent(e).is_some_and(|a| {
+            matches!(
+                *ast.node(a.node),
+                Node::Assign {
+                    left,
+                    op: AssignOp::AndAssign | AssignOp::OrAssign | AssignOp::CoalesceAssign,
+                    ..
+                } if left == e.node
+            )
+        }) {
             return false;
         }
         let optional = self.union(&[t, TypeId::UNDEFINED]);

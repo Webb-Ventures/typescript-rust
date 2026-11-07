@@ -1351,6 +1351,18 @@ Files, by layer:
   `T | undefined`) still includes `undefined`, is TS2565 (`super.p`, or `f.p` before
   `f.p = v`; tsc 7). CommonJS `module.exports.p` is not covered (`module` is `any`), nor a
   `const` arrow's expando in TypeScript (`expando_used_before_assigned`).
+- **Property initialization through flow** (strictPropertyInitialization): TS2564 for an
+  identifier or `#private` field asks the flow walk of `this.<name>` at the constructor's
+  end and its returns (`property_initialized_in_constructor`, initial type `T |
+  undefined`): `undefined` left on any path is the error, so an early `return` or an
+  assignment in a loop body is not enough. Computed names keep the syntactic test
+  (assigned anywhere in the constructor). TS2565 (`this_property_used_before_assigned`):
+  `this.p` read where the flow container is the constructor of the class declaring `p`
+  without an initializer (not static, abstract, `!`, `declare` or ambient), and its flow
+  type from `T | undefined` still holds `undefined`; compound assignments and `++` read,
+  the target of `&&=`, `||=`, `??=` is not reported (observed). Arrows in the
+  constructor are their own flow containers (tsc: checker.go,
+  isPropertyInitializedInConstructor, getFlowTypeOfAccessExpression).
 - **Arrow `this` parameters.** An arrow function whose first parameter is `this` is TS2730
   at the parameter (`check_function_like`; JSDoc `@this` on an arrow is the parser's,
   `arrow_this_param`). Elsewhere (`check_this_param_placement`, from the type-annotation

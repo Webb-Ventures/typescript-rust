@@ -1,0 +1,12 @@
+a.ts(6,49): error TS2564: Property 'e' has no initializer and is not definitely assigned in the constructor.
+a.ts(25,30): error TS2565: Property 'o' is used before being assigned.
+a.ts(32,5): error TS2564: Property 'a' has no initializer and is not definitely assigned in the constructor.
+a.ts(34,5): error TS2564: Property 'c' has no initializer and is not definitely assigned in the constructor.
+a.ts(35,5): error TS2564: Property 'd' has no initializer and is not definitely assigned in the constructor.
+a.ts(38,14): error TS2565: Property 'a' is used before being assigned.
+a.ts(41,14): error TS2565: Property 'd' is used before being assigned.
+a.ts(42,24): error TS2565: Property 'e' is used before being assigned.
+a.ts(46,5): error TS2564: Property 'a' has no initializer and is not definitely assigned in the constructor.
+a.ts(47,5): error TS2564: Property '#b' has no initializer and is not definitely assigned in the constructor.
+a.ts(67,5): error TS2564: Property '["c"]' has no initializer and is not definitely assigned in the constructor.
+a.ts(69,5): error TS2564: Property '[Symbol.iterator]' has no initializer and is not definitely assigned in the constructor.
