@@ -1459,6 +1459,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         // number of arguments: the first such instance that does not fit is the arity error
         // reported if no candidate fits otherwise.
         let mut arity_failure: Option<SigId> = None;
+        let overloaded = candidates.len() > 1;
+        if overloaded {
+            self.overloaded_calls.push(e);
+        }
         for &rel in relations {
             last_failures.clear();
             for &cand in &candidates {
@@ -1487,10 +1491,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_candidate_args(e, inst, &eff, rel)
                 };
                 match failure {
-                    None => return Some(inst),
+                    None => {
+                        if overloaded {
+                            self.overloaded_calls.pop();
+                            // The chosen candidate's literal arguments keep the contexts its
+                            // inference typed their functions in.
+                            for a in eff.iter() {
+                                let Arg::Expr(n) = *a else { continue };
+                                let l = Loc::new(e.file, n);
+                                if let Some(&fct) = self.deferred_fn_contexts.get(&(l, cand)) {
+                                    self.fix_sensitive_fn_contexts(l, fct);
+                                }
+                            }
+                        }
+                        return Some(inst);
+                    }
                     Some(f) => last_failures.push((inst, f)),
                 }
             }
+        }
+        if overloaded {
+            self.overloaded_calls.pop();
         }
         // Report.
         self.overload_failed = true;
@@ -3337,22 +3358,51 @@ impl<'c, 'a> Ck<'c, 'a> {
             // `unknown` context (`T["foo"]` reads `unknown`, where `Mapped<unknown>` has no
             // members), also for the final check of the argument.
             let mut cur = cur;
-            let mut keep_context = false;
             if let Some(p) = &partial
                 && let Some(jt) = tps.iter().position(|&t| t == p.tv)
                 && ctx.fixed[jt] == Some(TypeId::UNKNOWN)
                 && let Some(keys) = self.unknown_keys_of_partial(p)
             {
                 cur[jt] = keys;
-                keep_context = true;
             }
             let m = self.store().mapper(&tps, &cur);
             let ct = self.instantiate(pt, m);
-            // (tsc types the literal's functions once, in this context.)
-            if (keep_context || partial.is_some()) && self.speculative == 0 {
-                self.fixed_arg_contexts
-                    .entry(Loc::new(e.file, n))
-                    .or_insert(Some(ct));
+            // (tsc types the literal's functions once, in this context, where a parameter
+            // with nothing inferred reads as its constraint once anything is inferred.)
+            // (While overloads are tried, only for the candidate whose other arguments fit:
+            // the context waits for it, `deferred_fn_contexts`.)
+            if (partial.is_some() || self.has_generic_mapped_part(ptn))
+                && nested
+                && self.speculative == 0
+            {
+                let any_inferred = (0..tps.len()).any(|j| {
+                    ctx.fixed[j].is_some()
+                        || !ctx.candidates[j].is_empty()
+                        || !ctx.contra[j].is_empty()
+                        || !ctx.weak[j].is_empty()
+                });
+                let mut cur2 = cur.clone();
+                if any_inferred {
+                    for j in 0..tps.len() {
+                        if cur[j] == tps[j]
+                            && let Some(c) = self.type_param_constraint(tps[j])
+                        {
+                            cur2[j] = self.instantiate(c, m);
+                        }
+                    }
+                }
+                let fct = if cur2 == cur {
+                    ct
+                } else {
+                    let m2 = self.store().mapper(&tps, &cur2);
+                    self.instantiate(pt, m2)
+                };
+                let al = Loc::new(e.file, n);
+                if self.overloaded_calls.last() == Some(&e) {
+                    self.deferred_fn_contexts.entry((al, sig)).or_insert(fct);
+                } else {
+                    self.fix_sensitive_fn_contexts(al, fct);
+                }
             }
             let at = self.speculative_arg_type(Loc::new(e.file, n), ct);
             if let Some(p) = &partial {
@@ -4020,6 +4070,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.fixed_arg_contexts.insert(l, Some(ctx));
                     }
                     if !sensitive && matches!(pass, ArgPass::Fix(_)) {
+                        // The context the candidate's inference typed the functions in.
+                        if let Some((target, _)) = self.store().sig(sig).target
+                            && let Some(&fct) = self.deferred_fn_contexts.get(&(l, target))
+                        {
+                            self.fix_sensitive_fn_contexts(l, fct);
+                        }
                         self.fix_nested_contexts(l, ctx);
                     }
                     self.speculative_arg_type(l, ctx)

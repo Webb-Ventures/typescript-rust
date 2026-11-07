@@ -2544,9 +2544,22 @@ Files, by layer:
   array literal in a generic mapped context is typed by its index as a property name
   (`T["0"]`, so a literal stays under `T extends readonly string[]`), and an intersection of
   key types (`keyof E & `on${any}``) takes string literals, as tsc's reduced literal union
-  does. Affected conformance tests: `reverseMappedPartiallyInferableTypes` (TS18046 on a
-  fixed `unknown`) and `reverseMappedTypeContextualTypesPerElementOfTupleConstraint` (a
-  false TS2322), both exact now; probes against tsc 7.0.2 in `reverse_mapped_partial`.
+  does. The parameter may also be an intersection with the generic mapped type (`{ [k:
+  string]: F } & { [K in keyof T]: object }`).
+  Contexts through such intersections follow tsc's `getTypeOfPropertyOfContextualType`
+  (tsc/internal/checker/checker.go): the generic mapped part gives its template for a key
+  its constraint can hold, the other parts' index signatures still apply, and an
+  unconstrained type parameter beside it (`T & { [P in keyof T]: F }`) says nothing. The
+  functions inside a literal argument whose parameter has a generic mapped part are typed
+  once, in the context the deferred pass had (`fix_sensitive_fn_contexts`, methods
+  included), where a parameter with nothing inferred reads as its instantiated constraint
+  once something is inferred (tsc's non-fixing mapper); while overloads are tried
+  (`Ck::overloaded_calls`) that context waits in `deferred_fn_contexts` and is fixed for the
+  candidate that is chosen (or whose other arguments fit). Affected conformance tests:
+  `reverseMappedPartiallyInferableTypes` (TS18046 on a fixed `unknown`),
+  `reverseMappedTypeContextualTypesPerElementOfTupleConstraint` (a false TS2322) and
+  `contextualTypeFunctionObjectPropertyIntersection` (a false TS7006), all exact now; probes
+  against tsc 7.0.2 in `reverse_mapped_partial` and `reverse_mapped_intersection_context`.
 - **Enum relation by members** (`enum_types_related`, cached per enum pair in
   `Ck::enum_relation`; tsc: `isEnumTypeRelatedTo` and `computeEnumMemberValue` in
   `tsc/internal/checker/relater.go` and `checker.go`). Two different enums are related only

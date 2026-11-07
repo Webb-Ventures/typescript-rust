@@ -33,10 +33,19 @@ pub(crate) struct PartialInference {
 
 impl<'c, 'a> Ck<'c, 'a> {
     /// The type parameter `T` (one of `params`) of a parameter type `pt` that is, without
-    /// `null` and `undefined`, a generic `{ [K in keyof T]: X }` (no `as` clause).
+    /// `null` and `undefined`, a generic `{ [K in keyof T]: X }` (no `as` clause), or an
+    /// intersection with one.
     pub(crate) fn reverse_mapped_param(&mut self, pt: TypeId, params: &[TypeId]) -> Option<TypeId> {
         let ptn = self.non_nullable(pt);
-        let info = self.mapped_info(ptn)?;
+        if self.store().flags(ptn).contains(TypeFlags::INTERSECTION) {
+            let ms = self.store().members_of_union(ptn).to_vec();
+            return ms.into_iter().find_map(|m| self.mapped_param_of(m, params));
+        }
+        self.mapped_param_of(ptn, params)
+    }
+
+    fn mapped_param_of(&mut self, t: TypeId, params: &[TypeId]) -> Option<TypeId> {
+        let info = self.mapped_info(t)?;
         if info.name_node.is_some() {
             return None;
         }
@@ -209,6 +218,72 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// contextual type reads `unknown` (tsc indexes the fixed `unknown`).
     pub(crate) fn unknown_keys_of_partial(&mut self, p: &PartialInference) -> Option<TypeId> {
         self.reverse_mapped_unknown(p.partial)
+    }
+
+    /// Fixes the contextual type of each context-sensitive function (or method) nested in
+    /// the literal argument `l` to the one it has when `l`'s context is `ctx`: tsc types
+    /// their parameters once, while the call infers, and the final check of the argument
+    /// sees them as typed then.
+    pub(crate) fn fix_sensitive_fn_contexts(&mut self, l: Loc, ctx: TypeId) {
+        let mut fns = Vec::new();
+        self.collect_sensitive_fns(l, 0, &mut fns);
+        fns.retain(|f| !self.fixed_arg_contexts.contains_key(f));
+        if fns.is_empty() {
+            return;
+        }
+        self.context_overrides.push((l, ctx));
+        let fixed: Vec<(Loc, Option<TypeId>)> = fns
+            .into_iter()
+            .map(|f| (f, self.contextual_type(f)))
+            .collect();
+        self.context_overrides.pop();
+        for (f, c) in fixed {
+            self.fixed_arg_contexts.insert(f, c);
+        }
+    }
+
+    fn collect_sensitive_fns(&self, l: Loc, depth: u32, out: &mut Vec<Loc>) {
+        if depth > 8 || out.len() > 64 {
+            return;
+        }
+        let ast = self.ast(l.file);
+        let n = crate::nodes::skip_parens(ast, l.node);
+        let kids: Vec<ts_r_ast::NodeId> = match *ast.node(n) {
+            Node::ObjectLit { props } => ast
+                .list(props)
+                .iter()
+                .filter_map(|&p| match *ast.node(p) {
+                    Node::Property { value, .. } => Some(value),
+                    Node::MethodDef {
+                        kind: MethodKind::Method,
+                        value,
+                        ..
+                    } => Some(value),
+                    _ => None,
+                })
+                .collect(),
+            Node::ArrayLit { elements } => ast.list(elements).to_vec(),
+            _ => return,
+        };
+        for k in kids {
+            let f = crate::nodes::skip_parens(ast, k);
+            if matches!(ast.node(f), Node::Arrow { .. } | Node::FunctionExpr { .. }) {
+                if self.is_context_sensitive_function(Loc::new(l.file, f)) {
+                    out.push(Loc::new(l.file, f));
+                }
+            } else {
+                self.collect_sensitive_fns(Loc::new(l.file, k), depth + 1, out);
+            }
+        }
+    }
+
+    /// Whether `t` is, or is an intersection with, a generic mapped type.
+    pub(crate) fn has_generic_mapped_part(&mut self, t: TypeId) -> bool {
+        if self.store().flags(t).contains(TypeFlags::INTERSECTION) {
+            let ms = self.store().members_of_union(t).to_vec();
+            return ms.into_iter().any(|m| self.is_generic_mapped_type(m));
+        }
+        self.is_generic_mapped_type(t)
     }
 
     /// The contextual call signatures of the context-sensitive functions in the literal

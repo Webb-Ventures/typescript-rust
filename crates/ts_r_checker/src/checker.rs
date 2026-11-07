@@ -881,6 +881,13 @@ pub struct Ck<'c, 'a> {
     /// The type of a context-sensitive function in the partial type of a literal argument
     /// (`partial_infer.rs`): it infers nothing, as tsc's non-inferrable function type.
     pub(crate) non_inferrable_fn: Option<TypeId>,
+    /// Calls whose overloads are being tried (innermost last): their context-sensitive
+    /// functions are not fixed while a candidate infers (`partial_infer.rs`).
+    pub(crate) overloaded_calls: Vec<Loc>,
+    /// The contexts an overload candidate's inference typed the functions of a literal
+    /// argument in, by argument and generic signature: fixed when the candidate's other
+    /// arguments fit.
+    pub(crate) deferred_fn_contexts: FxHashMap<(Loc, SigId), TypeId>,
     /// Fresh object literal types with spreads, by their literal (`expr.rs`): only the
     /// properties written in that literal are checked for excess (`relate.rs`).
     pub(crate) spread_literals: FxHashMap<TypeId, Loc>,
@@ -1007,6 +1014,8 @@ impl<'c, 'a> Ck<'c, 'a> {
             compound_assigned: FxHashMap::default(),
             reverse_mapping: Vec::new(),
             non_inferrable_fn: None,
+            overloaded_calls: Vec::new(),
+            deferred_fn_contexts: FxHashMap::default(),
             spread_literals: FxHashMap::default(),
             union_cache: Default::default(),
             enum_relation: FxHashMap::default(),
@@ -1041,6 +1050,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.resolved_calls.clear();
         self.fixed_arg_contexts.clear();
         self.first_arg_context.clear();
+        self.deferred_fn_contexts.clear();
         self.file_spec_work = 0;
         self.spec_reported = false;
         self.spec_overflow = false;
