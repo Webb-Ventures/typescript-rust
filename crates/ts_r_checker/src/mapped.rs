@@ -1097,6 +1097,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let ts_r_types::TypeKind::Index(tv) = s.kind(constraint)
             && ctx.index_of(tv).is_some()
         {
+            // With an `as` clause nothing is inferred (tsc infers only to mapped types
+            // without one): `T` stays `unknown`.
+            if info.name_node.is_some() {
+                return;
+            }
             // A primitive has no properties to reverse-map (`2` to `{ [K in keyof T]?: T[K] }`
             // infers nothing).
             if s.flags(source).intersects(TypeFlags::PRIMITIVE)
