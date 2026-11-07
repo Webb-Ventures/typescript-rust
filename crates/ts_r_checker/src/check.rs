@@ -6368,7 +6368,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        let tps = self.local_type_params(sym);
+        // A circular alias (TS2456) is not generic for its references: arguments get
+        // TS2315 and a bare reference nothing.
+        let circular = !flags.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE)
+            && !self.c.file(file).is_js()
+            && self.alias_is_circular(sym);
+        let tps = if circular {
+            Vec::new()
+        } else {
+            self.local_type_params(sym)
+        };
         let min = {
             let mut m = tps.len();
             while m > 0 && self.has_type_param_default(tps[m - 1]) {

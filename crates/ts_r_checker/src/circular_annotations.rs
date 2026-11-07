@@ -542,6 +542,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         );
     }
 
+    /// [`Self::alias_needs_itself`], memoised: a circular alias has no type parameters
+    /// for its references (tsc never records them when the declared type fails).
+    pub(crate) fn alias_is_circular(&mut self, sym: SymId) -> bool {
+        if let Some(&c) = self.circular_alias.get(&sym) {
+            return c;
+        }
+        let c = self.alias_needs_itself(sym);
+        self.circular_alias.insert(sym, c);
+        c
+    }
+
     /// Whether resolving alias `sym`'s body reaches `sym` again through steps that are
     /// all resolved right away.
     fn alias_needs_itself(&mut self, sym: SymId) -> bool {
