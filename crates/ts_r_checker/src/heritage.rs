@@ -39,33 +39,41 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(start) = self.c.sym_of_decl(c) else {
             return;
         };
+        if !self.class_name_cycle(start) {
+            return;
+        }
+        let ast = self.ast(c.file);
+        let (Node::ClassDecl { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. }) =
+            *ast.node(c.node)
+        else {
+            return;
+        };
+        let name = self.c.sym_name(start).to_owned();
+        self.error(
+            Loc::new(c.file, n),
+            dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_BASE_EXPRESSION_2506,
+            &[&name],
+        );
+    }
+
+    /// Whether the `extends` chain of class names from class `start` leads back to it.
+    fn class_name_cycle(&mut self, start: SymId) -> bool {
         let mut cur = start;
         let mut seen: Vec<SymId> = Vec::new();
         for _ in 0..64 {
             let Some(next) = self.base_class_symbol(cur) else {
-                return;
+                return false;
             };
             if next == start {
-                let ast = self.ast(c.file);
-                let (Node::ClassDecl { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. }) =
-                    *ast.node(c.node)
-                else {
-                    return;
-                };
-                let name = self.c.sym_name(start).to_owned();
-                self.error(
-                    Loc::new(c.file, n),
-                    dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_BASE_EXPRESSION_2506,
-                    &[&name],
-                );
-                return;
+                return true;
             }
             if seen.contains(&next) {
-                return;
+                return false;
             }
             seen.push(next);
             cur = next;
         }
+        false
     }
 
     /// The class an `extends` clause of class `s` names (an entity name resolving to a
@@ -184,6 +192,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(false)
     }
 
+    /// Whether resolving the base types of `sym` ran into itself: an `extends` whose type
+    /// arguments, defaults or indexed accesses need the members of `sym` (`interface M2
+    /// extends M<M2[keyof M2]>`, `class Foo extends Next<Foo>` with a default reading
+    /// `Foo["p"]`). tsc reports TS2310 at each class and interface declaration then
+    /// (tsc: checker.go, getBaseTypes).
+    pub(crate) fn base_resolution_circular(&mut self, sym: SymId) -> bool {
+        let _ = self.base_types(sym);
+        self.circular
+            .contains(&crate::checker::Resolving::BaseTypes(sym))
+    }
+
     /// TS2310 for interface declaration `l` with an `extends` clause whose symbol's base
     /// types lead back to it (every such declaration of the symbol is reported).
     pub(crate) fn check_circular_interface_bases(&mut self, l: Loc) {
@@ -199,7 +218,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(sym) = self.c.sym_of_decl(l) else {
             return;
         };
-        if self.has_circular_bases(sym) != Some(true) {
+        if self.has_circular_bases(sym) != Some(true) && !self.base_resolution_circular(sym) {
             return;
         }
         let t = self.declared_type_of_symbol(sym);
@@ -307,6 +326,24 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         let at = name.map_or(l, |n| Loc::new(l.file, n));
+        if self.base_resolution_circular(sym) {
+            // A cycle of class names is TS2506 instead (`check_base_cycle`). A base that is
+            // an expression (a mixin call) reaches its cycle through the base constructor in
+            // tsc, in an order ours doesn't follow: left silent.
+            if matches!(self.node(l), Node::ClassDecl { .. })
+                && self.base_class_symbol(sym).is_some()
+                && !self.class_name_cycle(sym)
+            {
+                let t = self.declared_type_of_symbol(sym);
+                let shown = self.type_to_string(t);
+                self.error(
+                    at,
+                    dg::TYPE_0_RECURSIVELY_REFERENCES_ITSELF_AS_A_BASE_TYPE_2310,
+                    &[&shown],
+                );
+            }
+            return;
+        }
         if self.has_circular_bases(sym) != Some(false) {
             return;
         }

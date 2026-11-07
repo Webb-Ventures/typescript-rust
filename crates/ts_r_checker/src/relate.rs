@@ -5298,9 +5298,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let s_min = self.effective_min_args(ssig);
         let target_decl_kind_strict = self.c.opts.strict_function_types
             && rel != RelationKind::Comparable
-            && kind == SigKind::Call
             && !td.flags.contains(SigFlags::METHOD)
-            && !td.flags.contains(SigFlags::CONSTRUCT);
+            // Construct signatures are strict too, except a class `constructor`'s
+            // (tsc: relater.go, compareSignaturesRelated, strictVariance).
+            && !(kind == SigKind::Construct && self.is_class_constructor_sig(tsig));
         // A callback's parameters relate contravariantly whatever declared it (tsc's
         // callback modes); its `this` type still relates either way.
         let params_contravariant = target_decl_kind_strict

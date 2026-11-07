@@ -1,0 +1,21 @@
+a.ts(5,11): error TS2430: Interface 'I6' incorrectly extends interface 'Base'.
+  Types of property 'a2' are incompatible.
+    Type 'new (x: number) => number' is not assignable to type 'new (x?: number | undefined) => number'.
+      Types of parameters 'x' and 'x' are incompatible.
+        Type 'number | undefined' is not assignable to type 'number'.
+          Type 'undefined' is not assignable to type 'number'.
+a.ts(6,11): error TS2430: Interface 'I7' incorrectly extends interface 'Base'.
+  Types of property 'c2' are incompatible.
+    Type '(x: number) => number' is not assignable to type '(x?: number | undefined) => number'.
+      Types of parameters 'x' and 'x' are incompatible.
+        Type 'number | undefined' is not assignable to type 'number'.
+          Type 'undefined' is not assignable to type 'number'.
+a.ts(12,5): error TS2322: Type 'typeof A' is not assignable to type 'new (x: Animal) => A'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Property 'd' is missing in type 'Animal' but required in type 'Dog'.
+a.ts(15,5): error TS2322: Type 'typeof Q' is not assignable to type 'abstract new (x: Animal) => Q'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Property 'd' is missing in type 'Animal' but required in type 'Dog'.
+a.ts(18,5): error TS2322: Type 'CI' is not assignable to type 'new (x: Animal) => A'.
+  Types of parameters 'x' and 'x' are incompatible.
+    Property 'd' is missing in type 'Animal' but required in type 'Dog'.

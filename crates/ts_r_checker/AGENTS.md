@@ -549,9 +549,25 @@ Files, by layer:
   `T2`. An intersection of class references is rebuilt without its alias and prints as
   `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
   getTypeWithThisArgument).
+- Signature parameters under strictFunctionTypes (`relate.rs`, `signature_related_mode`)
+  relate contravariantly unless the target signature was declared by a method or a class
+  `constructor` (`is_class_constructor_sig`): construct signatures of `new (x: T) => U`
+  types and interfaces are strict like call signatures, so `new (x: number) => R` does not
+  fit `new (x?: number) => R` (tsc: relater.go, compareSignaturesRelated, strictVariance).
+  A class without a constructor has no declaration kind to exempt it either.
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
-  get TS2506 instead. A class `extends` naming an interface with no value
+  whose chain of class names loops get TS2506 instead. Besides that, TS2310 is reported
+  when resolving the base types ran into itself (`base_resolution_circular`: the
+  `Resolving::BaseTypes` entry was marked circular), for interfaces and for class
+  declarations whose `extends` names a class: `interface K extends J<K["x"]>`,
+  `class Foo extends Next<Foo>` where `Next`'s default reads `C["p"]` (tsc: checker.go,
+  getBaseTypes). The outer resolution keeps the bases it found (they are cached, as tsc
+  keeps `resolvedBaseTypes`); only the inner request sees none. The type of a class's
+  `extends` expression is resolved under its own key, `Resolving::BaseConstructor` (tsc's
+  base constructor type), so a cycle through a mixin call's argument alone
+  (`mixinWithBaseDependingOnSelfNoCrash1`) is not TS2310; classes extending an expression
+  never get it here, since our order of resolution there differs from tsc's. A class `extends` naming an interface with no value
   (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
   type of the first `extends` clause is checked; the rest of `extends A, B` and a second
   `extends` clause are grammar errors only (tsc: checker.go, checkClassLikeDeclaration

@@ -209,6 +209,30 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `sig` is the signature of a plain class method (not an accessor), declared
     /// with a body and without a return type annotation.
+    /// Whether `sig` was declared by a class `constructor` (the one declaration kind,
+    /// besides methods, whose parameters relate bivariantly under strictFunctionTypes;
+    /// `new (x: T) => U` types and interface construct signatures are strict).
+    pub(crate) fn is_class_constructor_sig(&self, sig: ts_r_types::SigId) -> bool {
+        let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
+            return false;
+        };
+        let ast = self.ast(d.file);
+        let is_ctor = |n: NodeId| {
+            matches!(
+                *ast.node(n),
+                Node::MethodDef {
+                    kind: MethodKind::Constructor,
+                    ..
+                }
+            )
+        };
+        is_ctor(d.node)
+            || self.c.parent(d).is_some_and(|p| {
+                is_ctor(p.node)
+                    && matches!(*ast.node(p.node), Node::MethodDef { value, .. } if value == d.node)
+            })
+    }
+
     pub(crate) fn is_class_method_sig(&self, sig: ts_r_types::SigId) -> bool {
         let Some(d) = self.store().sig(sig).decl.and_then(Loc::unpack) else {
             return false;

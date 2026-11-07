@@ -394,7 +394,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && let Some(&first) = ast.list(types).first()
                 && let Node::ExprWithTypeArgs { expr, .. } = *ast.node(first)
             {
-                if !self.push_resolution(Resolving::BaseTypes(sym)) {
+                if !self.push_resolution(Resolving::BaseConstructor(sym)) {
                     return false;
                 }
                 let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));
@@ -709,7 +709,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         } = *ast.node(h)
                             && let Some(&first) = ast.list(types).first()
                             && let Some(b) =
-                                self.class_base_type(Loc::new(d.file, first), this_type)
+                                self.class_base_type(sym, Loc::new(d.file, first), this_type)
                         {
                             out.push(b);
                         }
@@ -735,19 +735,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 _ => {}
             }
         }
-        let ok = self.pop_resolution();
-        if !ok {
-            out.clear();
-        }
+        // A cycle through this resolution (TS2310, `base_resolution_circular`) still keeps
+        // the bases the outer resolution found; only the inner request saw none
+        // (tsc: checker.go, getBaseTypes).
+        self.pop_resolution();
         let b: Box<[TypeId]> = out.into_boxed_slice();
-        if ok && let Some(l) = self.c.sym_links(sym) {
+        if let Some(l) = self.c.sym_links(sym) {
             let _ = l.bases.set(b.clone());
         }
         b
     }
 
     /// `extends Expr<Args>` of a class: the instance type of the base constructor.
-    fn class_base_type(&mut self, h: Loc, this_type: TypeId) -> Option<TypeId> {
+    fn class_base_type(&mut self, sym: SymId, h: Loc, this_type: TypeId) -> Option<TypeId> {
         let ast = self.ast(h.file);
         let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(h.node) else {
             return None;
@@ -779,8 +779,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             let t = self.type_from_symbol_reference(s, &args);
             return Some(self.with_this_arg(t, this_type));
         }
-        // Any expression with construct signatures (mixins, `class extends f()`).
+        // Any expression with construct signatures (mixins, `class extends f()`), checked as
+        // the class's base constructor: a cycle back to it is not one of the base types.
+        if !self.push_resolution(Resolving::BaseConstructor(sym)) {
+            return None;
+        }
         let ct = self.quietly(|ck| ck.check_expr(Loc::new(h.file, expr)));
+        self.pop_resolution();
         if self.store().flags(ct).intersects(TypeFlags::ANY) {
             return None;
         }
@@ -1672,7 +1677,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 && let Some(&first) = ast.list(types).first()
                 && let Node::ExprWithTypeArgs { expr, .. } = *ast.node(first)
             {
-                if !self.push_resolution(Resolving::BaseTypes(sym)) {
+                if !self.push_resolution(Resolving::BaseConstructor(sym)) {
                     return None;
                 }
                 let t = self.quietly(|ck| ck.check_expr(Loc::new(d.file, expr)));

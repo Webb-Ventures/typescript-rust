@@ -584,6 +584,9 @@ pub enum Resolving {
     DeclaredType(SymId),
     EnumMembers(SymId),
     BaseTypes(SymId),
+    /// The type of a class's `extends` expression (tsc's base constructor type): a cycle
+    /// through it alone is not TS2310.
+    BaseConstructor(SymId),
     Return(SigId),
     Constraint(TypeId),
     /// The base constraint of a type parameter (`T extends T | string` is circular).
