@@ -1,0 +1,40 @@
+a.ts(6,11): error TS2322: Type 'number' is not assignable to type 'Partial<U>'.
+a.ts(7,11): error TS2322: Type 'string' is not assignable to type 'Partial<U>'.
+a.ts(8,11): error TS2322: Type '{ a: 1; }' is not assignable to type 'Partial<U>'.
+a.ts(9,11): error TS2322: Type 'number[]' is not assignable to type 'Partial<U>'.
+a.ts(10,11): error TS2322: Type 'boolean' is not assignable to type 'Partial<U>'.
+a.ts(11,11): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'Partial<U>'.
+a.ts(12,11): error TS2322: Type '() => void' is not assignable to type 'Partial<U>'.
+a.ts(13,11): error TS2322: Type 'number' is not assignable to type 'Readonly<U>'.
+a.ts(14,11): error TS2322: Type '{ a: 1; }' is not assignable to type 'Readonly<U>'.
+a.ts(15,11): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'Readonly<U>'.
+a.ts(16,11): error TS2322: Type 'number[]' is not assignable to type 'Readonly<U>'.
+a.ts(17,11): error TS2322: Type 'number' is not assignable to type 'Box<U>'.
+a.ts(18,11): error TS2322: Type '{ a: 1; }' is not assignable to type 'Box<U>'.
+a.ts(19,11): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'Box<U>'.
+a.ts(20,11): error TS2322: Type '{}' is not assignable to type 'Box<U>'.
+a.ts(21,11): error TS2322: Type 'number' is not assignable to type 'Record<T, number>'.
+a.ts(22,11): error TS2322: Type '{ a: 1; }' is not assignable to type 'Record<T, number>'.
+a.ts(23,11): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'Record<T, number>'.
+a.ts(24,11): error TS2322: Type '{}' is not assignable to type 'Record<T, number>'.
+a.ts(25,11): error TS2322: Type '{ [k: string]: number; }' is not assignable to type 'MM<T>'.
+a.ts(26,11): error TS2322: Type '{ a: 1; }' is not assignable to type 'MM<T>'.
+a.ts(27,11): error TS2322: Type '{}' is not assignable to type 'MM<T>'.
+a.ts(32,11): error TS2322: Type '{ [k: string]: V; }' is not assignable to type 'Partial<T>'.
+a.ts(33,11): error TS2322: Type '{ a: V; }' is not assignable to type 'Partial<T>'.
+a.ts(34,11): error TS2322: Type '{ [k: string]: V; }' is not assignable to type 'Record<K, V>'.
+a.ts(35,11): error TS2322: Type '{ a: V; }' is not assignable to type 'Record<K, V>'.
+a.ts(36,11): error TS2322: Type '{ a: V; }' is not assignable to type 'Pick<T, K>'.
+a.ts(37,11): error TS2322: Type '{ [k: string]: V; }' is not assignable to type 'Pick<T, K>'.
+a.ts(38,11): error TS2322: Type 'V' is not assignable to type 'Readonly<T>'.
+a.ts(39,11): error TS2322: Type 'V' is not assignable to type 'Partial<T>'.
+a.ts(40,11): error TS2322: Type 'V' is not assignable to type 'Required<T>'.
+a.ts(41,11): error TS2322: Type 'V' is not assignable to type 'Box<T>'.
+a.ts(43,11): error TS2322: Type 'T' is not assignable to type '{ [P in keyof T & string as `p_${P}`]: T[P]; }'.
+a.ts(48,11): error TS2322: Type '{ a: string; b: number; }' is not assignable to type 'Partial<T>'.
+a.ts(49,11): error TS2322: Type '{ a: string; b: number; }' is not assignable to type 'Readonly<T>'.
+a.ts(50,11): error TS2322: Type '{ a: string; b: number; }' is not assignable to type 'Record<K, string>'.
+a.ts(51,11): error TS2322: Type 'T' is not assignable to type 'Record<K, string>'.
+  Type '{ a: string; }' is not assignable to type 'Record<K, string>'.
+a.ts(52,11): error TS2322: Type '{ a: string; b: number; }' is not assignable to type 'Partial<Record<K, string>>'.
+a.ts(53,11): error TS2322: Type '{ a: string; b: number; }' is not assignable to type 'Partial<Record<K, number>>'.

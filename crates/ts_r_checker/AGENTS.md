@@ -1553,6 +1553,7 @@ Files, by layer:
   constrained to arrays and tuples only, relates to a target without type parameters as the
   mapped type applied to that constraint (its apparent type), so `Hom<T>` with `T extends
   [number] | readonly [string]` is not an `any[]`; other generic mapped sources stay opaque
+  except against index signatures ("Generic mapped types in relations")
   (`mapped_over_tuple_constraint_relation`; tsc: `getResolvedApparentTypeOfMappedType` in
   `tsc/internal/checker/checker.go`, used through `getApparentType` in `relater.go`).
 - **Element access in expressions.** `obj[key]` defers to `Obj[Key]` only for a generic key
@@ -2560,6 +2561,52 @@ Files, by layer:
   `reverseMappedTypeContextualTypesPerElementOfTupleConstraint` (a false TS2322) and
   `contextualTypeFunctionObjectPropertyIntersection` (a false TS7006), all exact now; probes
   against tsc 7.0.2 in `reverse_mapped_partial` and `reverse_mapped_intersection_context`.
+- **Generic mapped types in relations** (design note for the parity round's gap 2; tsc's
+  rules read for reference only in `structuredTypeRelatedToWorker`, `mappedTypeRelatedTo`,
+  `indexSignaturesRelatedTo` in tsc/internal/checker/relater.go and `isKnownProperty`,
+  `resolveMappedTypeMembers`, `getLowerBoundOfKeyType` in checker.go, at v7.0.2). The rules:
+  1. *Target generic, source not a generic mapped type* (`source_to_generic_mapped`). Unless
+     the target removes `?`, the keys decide first: the target's keys (its `as` type, else
+     its constraint) must relate to the known keys of the source (`keyof S` without index
+     signatures; with `?` they only need to overlap). With keys that fit, a template `X[P]`
+     (no `as`) asks the source to relate to `X`. When that fails, a type parameter relates
+     through its constraint (an unconstrained one fails: `unknown` is no mapped type),
+     an empty object matches a `?` target, and every other source (primitives, arrays,
+     objects with or without type parameters) is unrelated. So `number`, `{ a: 1 }` and
+     `{ [k: string]: V }` are not `Partial<U>`, `Record<K, V>` or `MappedModel<T>`.
+  2. *Source generic, target only index signatures with a `string` one*
+     (`generic_mapped_to_index_signature`): the template relates to each signature's type
+     (`Record<K, U>` is no `{ [k: string]: T }`: `U` is no `T`); an `any` signature takes it.
+  3. *Both generic* (existing `generic_mapped_pair_related`): optionality, contravariant
+     constraints, equal `as` types, templates with the key parameters matched. Under
+     identity (`identity_structured`) the modifiers must be equal (`+` reads as written) and
+     the constraints, `as` types and templates identical, so redeclaring
+     `x: { [P in keyof T]: T[P] }` as `{ readonly [P in keyof T]: T[P] }` is TS2403.
+  4. *Excess properties* (`generic_mapped_known_names`): a generic mapped type has the
+     members its key type's lower bound gives: `keyof X` reads the properties and index keys
+     of `X`'s constraint (none for an unconstrained `X`, the known names of a generic
+     mapped `X`), a bare `K` gives none, literal keys give themselves, and an `as` type still
+     generic in an outer parameter (`` `${K}${S}` ``) gives none. So a fresh literal
+     against `Partial<T>`, `Record<K, V>`, `Pick<T, K>` or `MappedModel<T>` is TS2353 for
+     properties outside that set, before the relation is tried.
+  A `?` generic mapped type prints its template with `| undefined` (`print_mapped`), as tsc
+  prints the template type it relates.
+  What stays silent (related, never a new error): templates other than `X[P]` when the keys
+  fit (`T` to `Box<T>` with `Box<T> = { [P in keyof T]: { v: T[P] } }`, which tsc rejects by
+  relating `T[P]` to the template), keys that are conditional or indexed-access types
+  (`as` clauses like `T[P] extends F ? P : never`, `Exclude<keyof T, K>` against a generic
+  source), intersection, indexed-access and conditional sources, a generic mapped source
+  against targets with properties or signatures (tsc compares the resolved members), and
+  `Partial<V>` with a constrained `V`, which still relates as its apparent type
+  `Partial<C>` (tsc reads `V[P]`). Our data model adds nothing: the rules read the mapped
+  type's parts (`mapped_info`, `mapped_constraint`, `mapped_template_and_name_for_key`).
+  Affected conformance tests: `genericMappedTypeAsClause` (6 missing errors) and
+  `indexSignatureAndMappedType` (3), now exact; `keyofAndIndexedAccess2` (2 of 10),
+  `templateLiteralTypes1` (1 of 4) and `mappedTypeErrors` (4 TS2403 of 6) closer.
+  `complicatedIndexedAccessKeyofReliesOnKeyofNeverUpperBound` now reports its line through
+  the `Partial<Omit<..>>` member, which tsc also rejects; tsc names the `Pick<.., "type">`
+  member first (a separate gap). Probes against tsc 7.0.2 in the `generic_mapped_*` parity
+  fixtures.
 - **Enum relation by members** (`enum_types_related`, cached per enum pair in
   `Ck::enum_relation`; tsc: `isEnumTypeRelatedTo` and `computeEnumMemberValue` in
   `tsc/internal/checker/relater.go` and `checker.go`). Two different enums are related only

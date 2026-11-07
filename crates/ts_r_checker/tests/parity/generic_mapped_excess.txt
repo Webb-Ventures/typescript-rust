@@ -1,0 +1,14 @@
+a.ts(6,30): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Partial<T>'.
+a.ts(7,11): error TS2322: Type '{ a: "x"; }' is not assignable to type 'Partial<U>'.
+a.ts(8,38): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type 'Partial<U>'.
+a.ts(9,37): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Record<K, number>'.
+a.ts(10,25): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'MM<S>'.
+a.ts(11,39): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type 'Readonly<U>'.
+a.ts(12,30): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Pick<U, J>'.
+a.ts(13,46): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Partial<Record<K, number>>'.
+a.ts(14,41): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type 'Box<U>'.
+a.ts(15,52): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type 'Partial<T> & { x: number; }'.
+a.ts(16,52): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type 'Partial<T> | { x: number; }'.
+a.ts(17,52): error TS2353: Object literal may only specify known properties, and 'd' does not exist in type '{ [P in "c" | K]: number; }'.
+a.ts(18,32): error TS2353: Object literal may only specify known properties, and 'a' does not exist in type 'Omit<U, "a">'.
+a.ts(19,39): error TS2353: Object literal may only specify known properties, and 'z' does not exist in type 'Required<U>'.

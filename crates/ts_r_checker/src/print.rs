@@ -1323,10 +1323,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             None => String::new(),
         };
+        // A `?` mapped type prints its template with `undefined` added, as tsc's template
+        // type has it (`{ [P in keyof T]?: T[P] | undefined; }`).
         let tmpl = match info.template_node {
             Some(n) => {
                 let raw = self.type_from_node(Loc::new(info.decl.file, n));
-                let it = self.instantiate(raw, info.mapper);
+                let mut it = self.instantiate(raw, info.mapper);
+                if !self.c.opts.exact_optional_property_types
+                    && matches!(
+                        info.optional,
+                        ts_r_ast::MappedModifier::Present | ts_r_ast::MappedModifier::Add
+                    )
+                {
+                    it = self.add_optionality(it);
+                }
                 self.print_type(it, depth + 1, stack)
             }
             None => "any".into(),

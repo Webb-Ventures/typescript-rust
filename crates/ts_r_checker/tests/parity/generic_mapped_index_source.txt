@@ -1,0 +1,12 @@
+a.ts(4,11): error TS2322: Type 'Record<K, U>' is not assignable to type '{ [key: string]: T; }'.
+  Type 'U' is not assignable to type 'T'.
+    'T' could be instantiated with an arbitrary type which could be unrelated to 'U'.
+a.ts(8,11): error TS2322: Type 'Partial<T>' is not assignable to type '{ [key: string]: string; }'.
+  Type 'T[P] | undefined' is not assignable to type 'string'.
+    Type 'undefined' is not assignable to type 'string'.
+a.ts(10,11): error TS2322: Type '{ [P in K]: P; }' is not assignable to type '{ [key: string]: number; }'.
+  Type 'P' is not assignable to type 'number'.
+    Type 'K' is not assignable to type 'number'.
+      Type 'string' is not assignable to type 'number'.
+a.ts(13,11): error TS2322: Type 'Record<K, number>' is not assignable to type 'Record<string, string>'.
+  Type 'number' is not assignable to type 'string'.

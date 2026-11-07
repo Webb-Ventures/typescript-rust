@@ -1,0 +1,5 @@
+a.ts(10,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '{ [P in keyof T]: T[P]; }', but here has type '{ [P in keyof T]?: T[P] | undefined; }'.
+a.ts(11,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '{ [P in keyof T]: T[P]; }', but here has type '{ readonly [P in keyof T]: T[P]; }'.
+a.ts(12,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '{ [P in keyof T]: T[P]; }', but here has type '{ readonly [P in keyof T]?: T[P] | undefined; }'.
+a.ts(17,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type '{ [P in keyof T]: T[P]; }', but here has type '{ [P in keyof T]: T[P][]; }'.
+a.ts(30,9): error TS2403: Subsequent variable declarations must have the same type.  Variable 'v' must be of type '{ [P in keyof T as `a${P & string}`]: T[P]; }', but here has type '{ [Q in keyof T as `b${Q & string}`]: T[Q]; }'.

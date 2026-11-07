@@ -2555,62 +2555,195 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.related_to(stpl, ttpl, rel, report, None)
     }
 
-    /// A concrete object `S` against a generic `{ [P in Q]: X[P] }` (never one with `-?`): `Q` must relate
-    /// to the known keys of `S` (with `?`, only overlap with them) and `S` to `X`; failing
-    /// that, only an empty object matches a `?` mapped type. `None` for templates of other
-    /// shapes (treated as related by the caller). The failure is not elaborated.
-    fn concrete_to_generic_mapped(
+    /// A generic mapped source against an object target made only of index signatures, one
+    /// of them a `string` index (`Record<K, U>` against `{ [key: string]: T }`): the template
+    /// relates to each index signature's type (tsc: `indexSignaturesRelatedTo` in
+    /// `tsc/internal/checker/relater.go`), and an `any` string index takes everything.
+    /// `None` for other targets.
+    fn generic_mapped_to_index_signature(
         &mut self,
         s: TypeId,
         t: TypeId,
         rel: RelationKind,
+        report: bool,
     ) -> Option<bool> {
+        if self.could_contain_type_params(t) && self.is_generic_object_type(t) {
+            return None;
+        }
+        if !self.properties_of(t).is_empty()
+            || !self.signatures_of(t, SigKind::Call).is_empty()
+            || !self.signatures_of(t, SigKind::Construct).is_empty()
+        {
+            return None;
+        }
+        let infos = self.resolved_members(t).index.to_vec();
+        if !infos.iter().any(|i| i.key == TypeId::STRING) {
+            return None;
+        }
+        let si = self.mapped_info(s)?;
+        let (tpl, _) = self.mapped_template_and_name_for_key(&si, si.k);
+        if tpl == TypeId::UNRESOLVED {
+            return None;
+        }
+        for i in infos {
+            if rel != RelationKind::StrictSubtype && i.value.is_any_like() {
+                continue;
+            }
+            if !self.related_to(tpl, i.value, rel, report, None) {
+                return Some(false);
+            }
+        }
+        Some(true)
+    }
+
+    /// Generic template literal keys (an `as` clause such as `` `p_${P}` ``) are related here
+    /// permissively; they can only relate to concrete keys (or `keyof T`) through their
+    /// constraint (`` `p_${string}` ``), so a constraint that does not relate rules them out.
+    fn template_keys_constraint_related(
+        &mut self,
+        keys: TypeId,
+        target: TypeId,
+        rel: RelationKind,
+    ) -> bool {
+        if !self
+            .store()
+            .flags(keys)
+            .contains(TypeFlags::TEMPLATE_LITERAL)
+        {
+            return true;
+        }
+        let c = self.base_constraint(keys);
+        if c == keys
+            || c == TypeId::UNRESOLVED
+            || self.store().is_error(c)
+            || self.could_contain_type_params(c)
+        {
+            return true;
+        }
+        self.related_to(c, target, rel, false, None)
+    }
+
+    /// A source that is not a generic mapped type against a generic `{ [P in Q as N]: X }`
+    /// (tsc: `structuredTypeRelatedToWorker` in `tsc/internal/checker/relater.go`, the
+    /// generic mapped target case; design note "Generic mapped types in relations").
+    /// Unless the target has `-?`, the keys come first: `N` (else `Q`) must relate to the
+    /// known keys of `S` (with `?`, only overlap with them). With keys that fit, a template
+    /// `X[P]` (no `as`) asks `S` to relate to `X`; other templates are not modelled
+    /// (`None`, related). Failing that, a type parameter relates through its constraint
+    /// (`unknown` relates to no mapped type), an empty object matches a `?` mapped type,
+    /// and anything else is unrelated. Sources of other kinds (intersections, indexed
+    /// accesses, conditionals) give `None`. The failure is elaborated only through a
+    /// constraint.
+    fn source_to_generic_mapped(
+        &mut self,
+        s: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+        report: bool,
+    ) -> Option<bool> {
+        let sf = self.store().flags(s);
+        let is_param = sf.contains(TypeFlags::TYPE_PARAMETER);
+        let is_object = sf.contains(TypeFlags::OBJECT);
+        let is_primitive = sf.intersects(
+            TypeFlags::STRING_LIKE
+                | TypeFlags::NUMBER_LIKE
+                | TypeFlags::BIGINT_LIKE
+                | TypeFlags::BOOLEAN_LIKE
+                | TypeFlags::ES_SYMBOL_LIKE
+                | TypeFlags::VOID_LIKE
+                | TypeFlags::NULL,
+        ) && !sf
+            .intersects(TypeFlags::INSTANTIABLE | TypeFlags::UNION_OR_INTERSECTION);
+        if !(is_param || is_object || is_primitive) {
+            return None;
+        }
         let ti = self.mapped_info(t)?;
-        // A `-?` mapped type only accepts another generic mapped type.
-        if ti.optional == ts_r_ast::MappedModifier::Remove {
-            return Some(false);
-        }
-        let (tpl, name) = self.mapped_template_and_name_for_key(&ti, ti.k);
-        if name.is_some() {
-            return None;
-        }
-        let core = self.filter_type(tpl, |ck, m| {
-            !ck.store().flags(m).intersects(TypeFlags::NULLABLE)
-        });
-        let TypeKind::IndexedAccess { obj, index } = self.store().kind(core) else {
-            return None;
-        };
-        if index != ti.k {
-            return None;
-        }
-        let tc = self.mapped_constraint(&ti);
-        if tc == TypeId::UNRESOLVED {
-            return None;
-        }
-        let all_keys = self.keyof_type(s);
-        if all_keys == TypeId::UNRESOLVED {
-            return None;
-        }
-        let sk = self.filter_type(all_keys, |ck, m| {
-            !matches!(m, TypeId::STRING | TypeId::NUMBER | TypeId::SYMBOL)
-                && !ck.store().flags(m).contains(TypeFlags::TEMPLATE_LITERAL)
-        });
         let include_optional = matches!(
             ti.optional,
             ts_r_ast::MappedModifier::Present | ts_r_ast::MappedModifier::Add
         );
-        let keys_ok = if include_optional {
-            let both = self.intersection(&[tc, sk]);
-            !self.store().flags(both).contains(TypeFlags::NEVER)
-        } else {
-            self.related_to(tc, sk, rel, false, None)
-        };
-        if keys_ok && self.related_to(s, obj, rel, false, None) {
-            return Some(true);
+        if ti.optional != ts_r_ast::MappedModifier::Remove {
+            let (tpl, name) = self.mapped_template_and_name_for_key(&ti, ti.k);
+            let tc = self.mapped_constraint(&ti);
+            if tc == TypeId::UNRESOLVED {
+                return None;
+            }
+            let target_keys = name.unwrap_or(tc);
+            let all_keys = self.keyof_type(s);
+            if all_keys == TypeId::UNRESOLVED || self.store().is_error(all_keys) {
+                return None;
+            }
+            // Only a type parameter's keys may stay generic (`keyof S`).
+            if !is_param && self.is_generic_index_type(all_keys) {
+                return None;
+            }
+            let sk = self.filter_type(all_keys, |ck, m| {
+                !matches!(m, TypeId::STRING | TypeId::NUMBER | TypeId::SYMBOL)
+                    && !ck.store().flags(m).contains(TypeFlags::TEMPLATE_LITERAL)
+            });
+            let keys_ok = if include_optional {
+                let both = self.intersection(&[target_keys, sk]);
+                !self.store().flags(both).contains(TypeFlags::NEVER)
+            } else {
+                // `keyof T` of an unconstrained `T` takes no template literal.
+                let unconstrained_keys = is_param && self.base_constraint(s) == TypeId::UNKNOWN;
+                if unconstrained_keys
+                    && self
+                        .store()
+                        .flags(target_keys)
+                        .contains(TypeFlags::TEMPLATE_LITERAL)
+                {
+                    false
+                } else {
+                    self.related_to(target_keys, sk, rel, false, None)
+                        && self.template_keys_constraint_related(target_keys, sk, rel)
+                }
+            };
+            // Keys of other generic forms (a conditional `as` clause, `Exclude<keyof T, K>`)
+            // are not related reliably enough here to rule out a generic source or an `as`
+            // clause (a concrete source against `Omit<T, K>` is ruled out).
+            if !keys_ok
+                && (name.is_some() || is_param || self.could_contain_type_params(s))
+                && self.union_members(target_keys).into_iter().any(|m| {
+                    let f = self.store().flags(m);
+                    f.intersects(TypeFlags::INSTANTIABLE | TypeFlags::INTERSECTION)
+                        && !f.intersects(
+                            TypeFlags::TYPE_PARAMETER
+                                | TypeFlags::INDEX
+                                | TypeFlags::TEMPLATE_LITERAL,
+                        )
+                })
+            {
+                return None;
+            }
+            if keys_ok {
+                let core = self.filter_type(tpl, |ck, m| {
+                    !ck.store().flags(m).intersects(TypeFlags::NULLABLE)
+                });
+                match self.store().kind(core) {
+                    TypeKind::IndexedAccess { obj, index } if name.is_none() && index == ti.k => {
+                        if self.related_to(s, obj, rel, false, None) {
+                            return Some(true);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        if is_param {
+            let c = self.base_constraint(s);
+            if c == TypeId::UNKNOWN {
+                return Some(false);
+            }
+            if c == s || c == TypeId::UNRESOLVED || self.store().is_error(c) {
+                return None;
+            }
+            return Some(self.related_to(c, t, rel, report, None));
         }
         Some(
             !matches!(rel, RelationKind::Subtype | RelationKind::StrictSubtype)
                 && include_optional
+                && is_object
                 && self.is_empty_object_type(s),
         )
     }
@@ -3151,24 +3284,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return self.related_to(tpl, ia, rel, report, None);
         }
-        // An unconstrained `T` reads as `{}` against a generic mapped type, and `{}` is no
-        // `-?` mapped type.
-        if t_generic_mapped
-            && sf.contains(TypeFlags::TYPE_PARAMETER)
-            && rel != RelationKind::Identity
-            && self
-                .mapped_info(t)
-                .is_some_and(|i| i.optional == ts_r_ast::MappedModifier::Remove)
-            && self.base_constraint(s) == TypeId::UNKNOWN
-        {
-            return false;
-        }
         if t_generic_mapped
             && !s_generic_mapped
             && rel != RelationKind::Identity
-            && sf.contains(TypeFlags::OBJECT)
-            && !self.could_contain_type_params(s)
-            && let Some(r) = self.concrete_to_generic_mapped(s, t, rel)
+            && let Some(r) = self.source_to_generic_mapped(s, t, rel, report)
+        {
+            return r;
+        }
+        if s_generic_mapped
+            && !t_generic_mapped
+            && rel != RelationKind::Identity
+            && tf.contains(TypeFlags::OBJECT)
+            && let Some(r) = self.generic_mapped_to_index_signature(s, t, rel, report)
         {
             return r;
         }
@@ -3839,8 +3966,41 @@ impl<'c, 'a> Ck<'c, 'a> {
         if sf.contains(TypeFlags::OBJECT) && tf.contains(TypeFlags::OBJECT) {
             // A generic mapped type is identical only to another generic mapped type
             // (tsc: relater.go, structuredTypeRelatedToWorker).
-            if self.is_generic_mapped_type(s) != self.is_generic_mapped_type(t) {
+            let s_generic_mapped = self.is_generic_mapped_type(s);
+            if s_generic_mapped != self.is_generic_mapped_type(t) {
                 return false;
+            }
+            // Two generic mapped types are identical by their parts: the same modifiers,
+            // identical constraints, and identical `as` types and templates once the key
+            // parameters are matched (tsc: relater.go, mappedTypeRelatedTo).
+            if s_generic_mapped
+                && let (Some(si), Some(ti)) = (self.mapped_info(s), self.mapped_info(t))
+            {
+                let norm = |m: ts_r_ast::MappedModifier| match m {
+                    ts_r_ast::MappedModifier::Add => ts_r_ast::MappedModifier::Present,
+                    m => m,
+                };
+                if norm(si.readonly) != norm(ti.readonly) || norm(si.optional) != norm(ti.optional)
+                {
+                    return false;
+                }
+                let sc = self.mapped_constraint(&si);
+                let tc = self.mapped_constraint(&ti);
+                if sc == TypeId::UNRESOLVED || tc == TypeId::UNRESOLVED {
+                    return true;
+                }
+                if !self.related_to(tc, sc, RelationKind::Identity, false, None) {
+                    return false;
+                }
+                let (stpl, sname) = self.mapped_template_and_name_for_key(&si, ti.k);
+                let (ttpl, tname) = self.mapped_template_and_name_for_key(&ti, ti.k);
+                match (sname, tname) {
+                    (None, None) => {}
+                    (Some(a), Some(b))
+                        if self.related_to(a, b, RelationKind::Identity, false, None) => {}
+                    _ => return false,
+                }
+                return self.related_to(stpl, ttpl, RelationKind::Identity, false, None);
             }
             // Two references to one generic type are identical when their arguments are
             // (tsc relates them by variances first, also under identity); otherwise
@@ -5718,6 +5878,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             // `{}` accepts any property (`const x: {} | undefined = { a: 1 }`).
             return true;
         }
+        if st
+            .object_of(t)
+            .is_some_and(|o| matches!(o.kind, ObjectKind::Mapped { .. }))
+            && self.is_generic_mapped_type(t)
+        {
+            let text = self.store().str(name).to_owned();
+            return match self.generic_mapped_known_names(t) {
+                Some(Ok(names)) => names.contains(&text),
+                Some(Err(())) | None => true,
+            };
+        }
         let m = self.resolved_members(t);
         if m.find(name).is_some() {
             return true;
@@ -5748,7 +5919,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .object_of(t)
                 .is_some_and(|o| matches!(o.kind, ObjectKind::Mapped { .. }))
             {
-                return !self.is_generic_mapped_type(t);
+                // A generic mapped type checks against the members it is known to have.
+                return !self.is_generic_mapped_type(t)
+                    || self.generic_mapped_known_names(t).is_some();
             }
             return true;
         }
