@@ -547,7 +547,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if let [s] = candidates[..] {
-            let Some(inst) = self.jsx_instantiate(opening, s, construct, explicit.as_deref())
+            let Some(inst) = self.jsx_instantiate(opening, s, construct, explicit.as_deref(), true)
             else {
                 return r;
             };
@@ -567,7 +567,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         for rel in relations {
             for &cand in &candidates {
                 let Some(inst) =
-                    self.jsx_instantiate(opening, cand, construct, explicit.as_deref())
+                    self.jsx_instantiate(opening, cand, construct, explicit.as_deref(), false)
                 else {
                     return r;
                 };
@@ -776,15 +776,20 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Instantiates a generic candidate with explicit type arguments or ones inferred from
-    /// the attributes that are not context sensitive. `None` when the inference is not
-    /// modelled: props that are not plain object types (indexed access, conditional types)
-    /// or a type parameter only context-sensitive values could infer.
+    /// the attributes that are not context sensitive. When a type parameter is left to the
+    /// context-sensitive ones (or the props are a naked type parameter, inferred from the
+    /// whole attributes object), `second_pass` (a lone candidate) fixes their functions'
+    /// contexts to the props instantiated with the inferences so far and infers again from
+    /// all attributes (tsc's second pass in `chooseOverload`); without it that is not
+    /// modelled. `None` when not modelled, also for props that are not plain object types
+    /// (indexed access, conditional types).
     fn jsx_instantiate(
         &mut self,
         opening: Loc,
         sig: SigId,
         construct: bool,
         explicit: Option<&[TypeId]>,
+        second_pass: bool,
     ) -> Option<SigId> {
         let d = self.store().sig(sig);
         if d.type_params == ListId::EMPTY {
@@ -817,7 +822,53 @@ impl<'c, 'a> Ck<'c, 'a> {
                         || (0..tps.len())
                             .any(|i| ctx.candidates[i].is_empty() && ctx.contra[i].is_empty()))
                 {
-                    return None;
+                    // Only the type parameters the props are made of may wait for the
+                    // second pass: one left to the functions' own inferences (intra-
+                    // expression inference) is not modelled.
+                    let mut naked = Vec::new();
+                    self.jsx_collect_naked_type_params(pt, 0, &mut naked);
+                    if !second_pass
+                        || (0..tps.len()).any(|i| {
+                            ctx.candidates[i].is_empty()
+                                && ctx.contra[i].is_empty()
+                                && !naked.contains(&tps[i])
+                        })
+                    {
+                        return None;
+                    }
+                    // The functions are typed by the props instantiated with what the
+                    // other attributes inferred (defaults and constraints for the rest, as
+                    // tsc's non-fixing mapper), then every attribute infers afresh.
+                    // The first pass's attributes hold placeholders for the functions:
+                    // nothing is inferred from them to a naked type parameter (tsc: they
+                    // are non-inferrable).
+                    for (i, tp) in tps.iter().enumerate() {
+                        if naked.contains(tp) {
+                            ctx.candidates[i].clear();
+                            ctx.contra[i].clear();
+                            ctx.weak[i].clear();
+                            ctx.preferred[i].clear();
+                        }
+                    }
+                    let mut probe = ctx.clone();
+                    let so_far: Vec<TypeId> = (0..tps.len())
+                        .map(|i| self.inferred_type_at(&mut probe, i))
+                        .collect();
+                    let m = self.store().mapper(&tps, &so_far);
+                    let so_far = self.instantiate(pt, m);
+                    let fns: Vec<Loc> = self
+                        .jsx_sensitive_fns(opening, children)
+                        .into_iter()
+                        .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                        .collect();
+                    self.jsx_fix_contexts(opening, so_far, &fns);
+                    ctx = self.inference_context_for(sig);
+                    self.jsx.assumed.push((opening, so_far));
+                    self.enter_speculation();
+                    let attrs = self.jsx_attributes_type_inner(opening, children, false, false);
+                    self.leave_speculation();
+                    self.jsx.assumed.pop();
+                    self.infer_types(&mut ctx, attrs?, pt, 0);
                 }
                 (0..tps.len())
                     .map(|i| self.inferred_type_at(&mut ctx, i))
@@ -892,6 +943,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .members_of_union(t)
                 .iter()
                 .any(|&m| self.jsx_naked_type_param(m, depth + 1))
+    }
+
+    /// The type parameters `t` is, or has as union or intersection members.
+    fn jsx_collect_naked_type_params(&self, t: TypeId, depth: u32, out: &mut Vec<TypeId>) {
+        let flags = self.store().flags(t);
+        if flags.contains(TypeFlags::TYPE_PARAMETER) {
+            out.push(t);
+        } else if depth < 8 && flags.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION) {
+            for &m in self.store().members_of_union(t) {
+                self.jsx_collect_naked_type_params(m, depth + 1, out);
+            }
+        }
     }
 
     /// Whether some attribute value or child of `opening`'s element is context sensitive.
