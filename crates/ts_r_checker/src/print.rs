@@ -584,9 +584,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::Intersection { list, .. } => {
                 let members = s.list_items(list).to_vec();
+                // Members print at type-operator precedence: `keyof T & keyof U` needs no
+                // parentheses (tsc: printer.go, emitIntersectionTypeConstituent).
                 let parts: Vec<String> = members
                     .iter()
-                    .map(|&m| self.print_wrapped(m, depth + 1, stack, true))
+                    .map(|&m| {
+                        if self.store().flags(m).contains(TypeFlags::INDEX) {
+                            self.print_type(m, depth + 1, stack)
+                        } else {
+                            self.print_wrapped(m, depth + 1, stack, true)
+                        }
+                    })
                     .collect();
                 parts.join(" & ")
             }

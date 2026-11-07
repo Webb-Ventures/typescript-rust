@@ -1115,8 +1115,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             let u = self.union_with(&parts, Reduction::Literal, alias);
             // A distribution that leaves intersections and more pieces than were written
-            // prints as written: `T & (0 | 1 | 2)`, not `(T & 0) | (T & 1) | (T & 2)`.
-            if unions == 1 && alias == AliasId::NONE && s.flags(u).contains(TypeFlags::UNION) {
+            // prints as written: `T & (0 | 1 | 2)`, not `(T & 0) | (T & 1) | (T & 2)`, and
+            // `(A | B) & (C | D)` (tsc: checker.go, getIntersectionTypeEx, which crosses two
+            // members at once and splits three or more in halves first).
+            // Two unions that both carry `undefined` (or `null`) are intersected without it
+            // and then get it back, with no origin.
+            let nullable_unions = unions > 1
+                && set.iter().all(|&t| {
+                    s.members_of_union(t)
+                        .iter()
+                        .any(|&m| s.flags(m).intersects(TypeFlags::NULLABLE))
+                });
+            if (unions == 1 || set.len() == 2 && !nullable_unions)
+                && alias == AliasId::NONE
+                && s.flags(u).contains(TypeFlags::UNION)
+            {
                 let ms = s.members_of_union(u);
                 if ms
                     .iter()
