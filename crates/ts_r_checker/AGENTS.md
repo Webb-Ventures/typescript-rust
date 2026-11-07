@@ -508,7 +508,11 @@ Files, by layer:
   JSX closing tag replay drops it. TS2715 (`abstract_access.rs`): `this.p` and
   destructurings of `this` reaching an abstract property during construction. TS2612
   (`check_base_property_overwrite`): an uninitialized field redeclaring a base field under
-  `useDefineForClassFields`, unless the constructor assigns it. TS2816 (`check_this`):
+  `useDefineForClassFields`, unless the constructor assigns it on every path (the flow
+  walk of TS2564, with the class type as the declared type, as tsc passes it); a field
+  with `!` or a program without strictNullChecks is reported even when assigned, and
+  abstract base fields never are (tsc: checker.go, checkKindsOfPropertyMemberOverrides).
+  TS2816 (`check_this`):
   `this` in a static field value (arrows included) of a class with legacy
   (`experimentalDecorators`) class decorators.
 - **Widening implicit-any errors** (`widening_errors.rs`; only under noImplicitAny without

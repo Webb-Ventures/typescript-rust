@@ -1,0 +1,11 @@
+a.ts(6,5): error TS2564: Property 'p' has no initializer and is not definitely assigned in the constructor.
+a.ts(6,5): error TS2612: Property 'p' will overwrite the base property in 'A'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(7,5): error TS2612: Property 'q' will overwrite the base property in 'A'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(8,5): error TS2612: Property 'r' will overwrite the base property in 'A'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(10,5): error TS2564: Property 't' has no initializer and is not definitely assigned in the constructor.
+a.ts(10,5): error TS2612: Property 't' will overwrite the base property in 'A'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(11,5): error TS2564: Property 'u' has no initializer and is not definitely assigned in the constructor.
+a.ts(11,5): error TS2612: Property 'u' will overwrite the base property in 'A'. If this is intentional, add an initializer. Otherwise, add a 'declare' modifier or remove the redundant declaration.
+a.ts(23,21): error TS2564: Property 'g' has no initializer and is not definitely assigned in the constructor.
+a.ts(23,21): error TS2610: 'g' is defined as an accessor in class 'E', but is overridden here in 'F' as an instance property.
+a.ts(25,21): error TS2564: Property 'h' has no initializer and is not definitely assigned in the constructor.

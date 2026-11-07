@@ -4568,7 +4568,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         );
                     }
                     if value.is_none() {
-                        self.check_base_property_overwrite(l, m, ctor_body);
+                        self.check_base_property_overwrite(l, m, ctor_fn);
                     }
                     if let Some(v) = value {
                         let vl = Loc::new(file, v);
@@ -6064,11 +6064,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// parameters constrained to those, and unions of accepted types; `undefined`,
     /// `unknown`, `never`, literals and plain functions or objects are errors.
     /// TS2612: with `useDefineForClassFields`, an instance field `m` of class `class` with
-    /// no initializer, no `declare` and no assignment in the constructor redeclares a
-    /// field (not an accessor, `accessor` field or method, not `declare`) of its base
-    /// class, which the derived field will reset. `accessor` fields are not checked. The
+    /// no initializer, no `declare` and not assigned on every path through the constructor
+    /// redeclares a field (not an accessor, `accessor` field or method, not `declare` or
+    /// `abstract`) of its base class, which the derived field will reset. `accessor` fields are not checked. The
     /// base prints as the `extends` type.
-    fn check_base_property_overwrite(&mut self, class: Loc, m: NodeId, ctor_body: Option<NodeId>) {
+    fn check_base_property_overwrite(&mut self, class: Loc, m: NodeId, ctor_fn: Option<NodeId>) {
         let file = class.file;
         if !self.c.opts.use_define_for_class_fields
             || !self.reporting(file)
@@ -6078,7 +6078,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         }
         let ast = self.ast(file);
-        let Node::PropertyDef { modifiers, key, .. } = *ast.node(m) else {
+        let Node::PropertyDef {
+            modifiers,
+            key,
+            definite,
+            ..
+        } = *ast.node(m)
+        else {
             return;
         };
         if modifiers.intersects(
@@ -6109,15 +6115,30 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(d) = self.c.value_decl(p) else {
             return;
         };
+        // Abstract base fields and members of a merged interface may be redeclared.
         let base_field = match *self.ast(d.file).node(d.node) {
-            Node::PropertyDef { modifiers, .. } => {
-                !modifiers.intersects(Modifiers::DECLARE | Modifiers::ACCESSOR)
-            }
+            Node::PropertyDef { modifiers, .. } => !modifiers.intersects(
+                Modifiers::DECLARE | Modifiers::ACCESSOR | Modifiers::ABSTRACT,
+            ),
             Node::Param { .. } => self.is_parameter_property(d),
             _ => false,
         };
-        if !base_field || ctor_body.is_some_and(|b| self.assigns_this_property(file, b, key)) {
+        if !base_field {
             return;
+        }
+        // Assigned on every path through the constructor (flow, as TS2564), unless the
+        // field has `!` or strictNullChecks is off (tsc: checker.go,
+        // checkKindsOfPropertyMemberOverrides).
+        if !definite
+            && self.c.opts.strict_null_checks
+            && let Some(f) = ctor_fn
+        {
+            // tsc walks the reference with the class type as its declared type, so only
+            // whether `undefined` is left matters (not the field's own type).
+            let declared = self.declared_type_of_symbol(sym);
+            if self.property_initialized_in_constructor(file, f, name, declared) != Some(false) {
+                return;
+            }
         }
         let mut base_name = self.type_to_string(base);
         // An unnamed class expression takes its variable's name.
