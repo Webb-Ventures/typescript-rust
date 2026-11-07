@@ -1,0 +1,6 @@
+a.tsx(13,13): error TS2604: JSX element type 'L' does not have any construct or call signatures.
+a.tsx(15,12): error TS2604: JSX element type 'G' does not have any construct or call signatures.
+a.tsx(16,12): error TS2604: JSX element type 'H' does not have any construct or call signatures.
+a.tsx(18,11): error TS2339: Property 'span' does not exist on type 'JSX.IntrinsicElements'.
+a.tsx(18,12): error TS2604: JSX element type 'J' does not have any construct or call signatures.
+a.tsx(19,12): error TS2604: JSX element type 'K' does not have any construct or call signatures.

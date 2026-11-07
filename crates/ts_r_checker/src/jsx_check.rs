@@ -355,6 +355,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(p) = self.property_of_type(ie, tag) {
             return Ok(self.type_of_symbol(p));
         }
+        // Index signatures keyed by template literals the tag fits (their values
+        // intersected) win over a `string` one (tsc: `getApplicableIndexInfoForName`).
+        if let Some(i) = self.name_pattern_index_info(ie, tag) {
+            return Ok(i.value);
+        }
         match self.index_info_of(ie, TypeId::STRING) {
             Some(i) => Ok(i.value),
             None => Err(false),
@@ -485,7 +490,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             r.target.props = self.jsx_intrinsic_props(ns, &text).ok();
             return r;
         }
-        let Some((sigs, construct)) = self.jsx_signatures(tt) else {
+        let Some((sigs, construct)) = self.jsx_signatures(tt, ns) else {
             return r;
         };
         if sigs.is_empty() {
@@ -723,7 +728,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// (props are the first parameter; tsc: `getUninstantiatedJsxSignaturesOfType` in
     /// `tsc/internal/checker/jsx.go`). `None` when not modelled (a string or instantiable
     /// member); an empty list is TS2604.
-    pub(crate) fn jsx_signatures(&mut self, tt: TypeId) -> Option<(Vec<SigId>, bool)> {
+    pub(crate) fn jsx_signatures(
+        &mut self,
+        tt: TypeId,
+        ns: Option<SymId>,
+    ) -> Option<(Vec<SigId>, bool)> {
         let construct = self.signatures_of(tt, SigKind::Construct);
         if !construct.is_empty() {
             return Some((construct, true));
@@ -732,13 +741,44 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !call.is_empty() {
             return Some((call, false));
         }
-        let at = self.apparent_type(tt);
+        let at = if self.store().flags(tt).contains(TypeFlags::UNION) {
+            tt
+        } else {
+            self.apparent_type(tt)
+        };
         if !self.store().flags(at).contains(TypeFlags::UNION) {
             return Some((Vec::new(), false));
         }
         let members = self.store().members_of_union(at).to_vec();
         let mut lists = Vec::with_capacity(members.len());
         for m in members {
+            // A string literal member is an intrinsic tag: a signature taking its props
+            // (none for an unknown tag, which leaves the union without signatures).
+            if self.store().flags(m).contains(TypeFlags::STRING_LITERAL)
+                && let Some(text) = self.literal_text(m)
+            {
+                let Ok(props) = self.jsx_intrinsic_props(ns, &text) else {
+                    return Some((Vec::new(), false));
+                };
+                let ret = self.jsx_ns_type(ns, "Element").unwrap_or(TypeId::ANY);
+                let name = self.store().intern_str("props");
+                let sig = ts_r_types::Signature::new(
+                    ts_r_types::SigFlags::NONE,
+                    None,
+                    ListId::EMPTY,
+                    vec![ts_r_types::Param {
+                        name,
+                        ty: props,
+                        optional: false,
+                        sym: SymId::NONE,
+                    }],
+                    None,
+                    1,
+                    Some(ret),
+                );
+                lists.push(vec![self.store().add_signature(sig)]);
+                continue;
+            }
             if self.store().flags(m).intersects(
                 TypeFlags::STRING_LIKE
                     | TypeFlags::ANY
@@ -748,6 +788,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ) {
                 return None;
             }
+            let m = self.apparent_type(m);
             let mut sigs = self.signatures_of(m, SigKind::Construct);
             if sigs.is_empty() {
                 sigs = self.signatures_of(m, SigKind::Call);
@@ -1099,7 +1140,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         let ft = self.type_of_symbol(frag);
-        let Some((sigs, construct)) = self.jsx_signatures(ft) else {
+        let Some((sigs, construct)) = self.jsx_signatures(ft, ns) else {
             return;
         };
         let [sig] = sigs[..] else {
@@ -1688,15 +1729,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        if self
-            .store()
-            .flags(tt)
-            .intersects(TypeFlags::STRING_LIKE | TypeFlags::INSTANTIABLE)
+        let is_union = self.store().flags(tt).contains(TypeFlags::UNION);
+        if !is_union
+            && self
+                .store()
+                .flags(tt)
+                .intersects(TypeFlags::STRING_LIKE | TypeFlags::INSTANTIABLE)
         {
             return;
         }
+        let ns = self.jsx_ns(opening);
+        // Each unknown intrinsic name in a union is TS2339 at the element.
+        if is_union {
+            for m in self.store().members_of_union(tt).to_vec() {
+                if self.store().flags(m).contains(TypeFlags::STRING_LITERAL)
+                    && let Some(text) = self.literal_text(m)
+                    && self.jsx_intrinsic_props(ns, &text) == Err(false)
+                {
+                    self.error(
+                        opening,
+                        dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                        &[&text, "JSX.IntrinsicElements"],
+                    );
+                }
+            }
+        }
         if self
-            .jsx_signatures(tt)
+            .jsx_signatures(tt, ns)
             .is_some_and(|(sigs, _)| sigs.is_empty())
         {
             let text = self.jsx_tag_text(opening.file, name);
