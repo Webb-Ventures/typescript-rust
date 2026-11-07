@@ -1137,6 +1137,39 @@ Files, by layer:
   checker.go getAccessibleSymbolChain), and `in_type_alias` (`Ck::print_skip_alias`, spent
   by the outermost `print_type`: that type prints structurally even when it carries an
   alias, as tsc's TypeFormatFlags.InTypeAlias). Tests: `tests/instantiation_queries.rs`.
+- **Alias names kept for type operators and indexed access** (tsc, read as a reference:
+  `checker.go` getIndexedAccessTypeOrUndefined, instantiateTypeWorker, getConditionalType,
+  getUnionType/filterType/mapType, getIndexType, getIntersectionTypeEx,
+  getTypeFromTypeAliasReference; `relater.go` reportErrorResults; `inference.go`
+  inferFromTypes; `printer.go` for intersection members). An alias names the type its
+  declaration produced when that type is new for it: a deferred indexed access (`T[K]`),
+  or the union an access through a union index yields (`Foo[Keys]`, not for `boolean`
+  indexes). Instantiation keeps the instantiated alias when the result is again a deferred
+  access or such a union. Distributed pieces of a deferred conditional take the root's
+  alias instantiated by the piece's mapper (`Pick1<T, { k: "x" }>`); their union does not.
+  A filtered or mapped union keeps the origin it was written with (`keyof Foo` stays
+  `keyof Foo` after removing a member), `keyof (T | U)` of generic members is the
+  intersection of their `keyof`s and prints without parentheses (`keyof T & keyof U`), an
+  intersection of one union (or of two non-nullable unions) keeps the written form
+  (`(A | B) & (C | D)`). A generic alias reached through an import alias keeps the
+  arguments as written (`Component` prints `Component`, not `Component<any, {}>`); a
+  signature's type parameters print their defaults. In relation errors the names printed
+  are those of the types before mapped access substitution, when the earlier one is an
+  aliased access. Inference to `{ [P in K]: X }[K]` from a non-union source infers to `X`
+  with `P` replaced by `K` (a union source still goes to the access whole).
+  Data model (`ts_r_types::TypeStore`): the alias of an indexed access lives in a side
+  table keyed by the type (`indexed_access_aliased`; the interning key carries the alias, so
+  an aliased and an unaliased `T[K]` are distinct types as in tsc); a union that carries an
+  alias keeps its written origin in a second side table (`set_aliased_union_origin`, first
+  writer wins), because the alias slot of an unaliased union already holds its origin.
+  Buckets at the start (12750 variants, 281 not exact): about 9 tests print an expanded
+  alias, origin or argument list; 4 of them now match (`exhaustiveSwitchStatements1`,
+  `intersectionAndUnionTypes`, `thislessFunctionsNotContextSensitive1`,
+  `inferenceShouldFailOnEvolvingArrays`), 4 more print the names as tsc and differ only in
+  relation chains. Not done: tsc's truncation of long types (`... N more ...`, `{ ...; }`,
+  160 characters) when noErrorTruncation is off; no conformance variant shows it (the
+  harness sets the flag). Tests: `tests/parity/indexed_access_alias_and_union_origin.ts`,
+  `keyof_union_and_written_intersections.ts`, `import_alias_args_and_mapped_access_inference.ts`.
 - **Names in messages** (tsc: `checker.go`, read as a reference). TS2341/TS2445 name the
   declaring class by its declared type, type parameters included (`D<T>`); TS18013 names
   the class symbol (a class expression after its variable, `C`) (`access_error_class_names`).
@@ -3471,12 +3504,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, 077005b, parity/checker-gap-2: generic mapped types in relations,
-  identity and excess property checks, members known to be none; 12750 compared variants):
-  12469 exact (97.8%; all diagnostics and chains), 12489 (98.0%) exact on first lines;
-  135 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, e2b245b, parity/checker-gap-3: alias names of indexed access,
+  `keyof` and union origins, written alias arguments; 12750 compared variants):
+  12473 exact (97.8%; all diagnostics and chains), 12494 (98.0%) exact on first lines;
+  132 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3505,9 +3538,19 @@ and integration tests allow: they link the one library build).
   constrained `V` (relates as `Partial<C>`, where tsc reads `V[P]`), members known only in
   part (`{ [P in K | "c"]: X }` has `c`: `m.d` is not TS2339), and writes through the index
   signature of a generic mapped type (TS2862, TS2551 in `mappedTypeGenericWithKnownKeys`).
-- Type operators: `keyof X` and
-  indexed-access aliases print expanded (`"a" | "b"` where tsc prints `keyof Foo`); TS2589
-  for a recursive alias is reported at the use, not at the recursive reference.
+- Type operators and alias names (see "Alias names kept for type operators and indexed
+  access"): `NoInfer<T>` prints as `T` (`noInferCommonPropertyCheck1`,
+  `noInferUnionExcessPropertyCheck1`); an alias of a template literal index signature key
+  prints expanded (`TaggedString` in `indexSignatures1`); elaboration chains below a
+  `keyof T` or conditional target differ (`conditionalTypes1` `NonNullable` chain,
+  `keyofAndIndexedAccessErrors`); a write through `ChannelOfType<T, E>["type"]` fails at a
+  different member (`complicatedIndexedAccessKeyofReliesOnKeyofNeverUpperBound`: we stop at
+  `Partial<Omit<...>>` where tsc reaches `Pick<..., "type">` through the write type's
+  intersection: a relation gap, the names now match); an intersection of `keyof`s as a
+  source relates structurally (TS2741) where tsc goes through the constraint; tsc's
+  truncation of long types (`... N more ...`, `{ ...; }`, 160 characters) without
+  noErrorTruncation (`print.rs` `truncate` keeps the whole text). TS2589 for a recursive
+  alias is reported at the use, not at the recursive reference.
 - Variance is measured only for classes, interfaces and aliases compared in
   `structured_related` (an alias of a union is decomposed first); method parameters that
   are callbacks are compared strictly
