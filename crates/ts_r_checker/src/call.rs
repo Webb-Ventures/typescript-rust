@@ -1319,7 +1319,31 @@ impl<'c, 'a> Ck<'c, 'a> {
         } else {
             shape.elements.len()
         };
-        let min = if required > 0 { count + required } else { min };
+        let mut min = if required > 0 { count + required } else { min };
+        // Trailing required positions whose type accepts `void` are optional, tuple
+        // elements included (`(...args: [input: void | Date, opts?: O])` takes no
+        // arguments; tsc: getMinArgumentCount).
+        if required > 0 {
+            let elems = self.c.type_args_of(d.params[count].ty);
+            let accepts_void = |t: TypeId| {
+                s.flags(t).contains(TypeFlags::VOID)
+                    || (s.flags(t).contains(TypeFlags::UNION)
+                        && s.members_of_union(t)
+                            .iter()
+                            .any(|&m| s.flags(m).contains(TypeFlags::VOID)))
+            };
+            while min > 0 {
+                let t = if min > count {
+                    elems.get(min - 1 - count).copied()
+                } else {
+                    Some(d.params[min - 1].ty)
+                };
+                if !t.is_some_and(accepts_void) {
+                    break;
+                }
+                min -= 1;
+            }
+        }
         (min, count + len, open)
     }
 
