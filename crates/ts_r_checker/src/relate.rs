@@ -7,7 +7,7 @@
 //! "The types of 'a.b' are incompatible between these types." when they nest; a missing
 //! property or excess property message replaces the enclosing level's message.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_binder::SymbolFlags;
 use ts_r_types::{
     ListId, ObjectFlags, ObjectKind, RelationKind, SigFlags, SigId, StrId, SymId, TupleElement,
@@ -3826,10 +3826,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             return false;
         };
         let props = self.properties_of(t);
-        props.iter().any(|&(n, _)| {
-            let text = self.store().str(n);
-            !names.iter().any(|x| x == text)
-        })
+        let names: FxHashSet<_> = names.into_iter().collect();
+        props
+            .iter()
+            .any(|&(n, _)| !names.contains(self.store().str(n)))
     }
 
     /// Whether `s` and `t` are instantiations of one type alias whose arguments relate by the
