@@ -52,7 +52,6 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     let parents = f.parents();
     for t in &ast.jsdoc_tags {
         let why = match t.kind {
-            JsDocTagKind::Enum => "a JSDoc @enum",
             JsDocTagKind::Private | JsDocTagKind::Protected => "a JSDoc modifier on an assignment",
             JsDocTagKind::This if t.ty.is_none() => "a JSDoc @this without a type",
             _ => continue,

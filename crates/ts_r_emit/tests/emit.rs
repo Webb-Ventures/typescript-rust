@@ -879,6 +879,23 @@ fn javascript_overloads_are_written() {
     }
 }
 
+/// A JSDoc `@enum` const is written as its value's type and the enum name stays a type
+/// reference where JSDoc names it (tsc 7.0.2, jsDeclarationsEnumTag; probed).
+#[test]
+fn javascript_enum_tag() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [], "strict": true }, "files": ["a.js"] }"#;
+    let src = "/** @enum {string} */\nexport const T = { A: \"a\", B: \"b\" };\n/** @param {T} t */\nexport function f(t) { return t; }\nexport const g = /** @type {T} */ (\"a\");\n";
+    let want = "/** @enum {string} */\nexport declare const T: {\n    A: string;\n    B: string;\n};\n/** @param {T} t */\nexport declare function f(t: T): T;\nexport declare const g: T;\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .expect("a.d.ts");
+    assert_eq!(d.text, want);
+}
+
 /// A JSDoc `@type` on a JavaScript function declaration gives its signature when no
 /// `@param`, `@returns` or `@template` comes first (tsc 7.0.2, jsdocTypeParameterTagConflict,
 /// typeTagOnFunctionReferencesGeneric): the type's parameters under the function's names.
