@@ -80,6 +80,32 @@ fn large_object_literal_against_union() {
 }
 
 #[test]
+fn generic_mapped_property_names_are_checked_linearly() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let mut src = String::from("interface Shape {\n");
+    for i in 0..50_000 {
+        src.push_str(&format!("p{i}?: number;\n"));
+    }
+    src.push_str("}\nfunction f<T extends Shape>(q: Shape, p: Partial<T>) { return [q, p]; }\n");
+    let mut fs = MemoryFs::new();
+    fs.set_cwd("/p");
+    fs.add_file("/p/a.ts", &src);
+    fs.add_file(
+        "/p/tsconfig.json",
+        r#"{"compilerOptions": {"strict": true, "target": "es2022", "lib": ["es2022"], "noLib": false, "noEmit": true}, "files": ["a.ts"]}"#,
+    );
+    let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+    let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+    let start = std::time::Instant::now();
+    let result = check_program(&program, CheckRun { threads: 1 });
+    let took = start.elapsed();
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(took.as_secs() < 30, "took {took:?}");
+}
+
+#[test]
 fn wide_array_of_context_sensitive_callbacks() {
     let mut src = String::from(
         "declare function f(fs: ((x: number) => number)[]): void;\n\
