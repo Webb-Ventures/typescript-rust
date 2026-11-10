@@ -1,5 +1,5 @@
 {
-  "$comment": "Machine-readable project state. Agents read this first. `cargo xtask upstream bump` updates `typescript`, `cargo xtask upstream sync` updates `lastSync`, and the nightly job will fill `passRates` and `openTaskGroups`.",
+  "$comment": "Machine-readable project state. Agents read this first. `cargo xtask upstream bump` updates `typescript`, `cargo xtask upstream sync` updates `lastSync`. `passRates` is copied by hand from each entry's `source` until the nightly job fills it; update it with the source line. Pin checked against npm on 2026-11-10: 7.0.2 is the latest stable (7.1.0-beta is not an RC, so it is not tracked yet).",
   "typescript": {
     "pinned": "7.0.2",
     "commit": "1e4744d68260a7cb91b62b12edc3f6a2187faaf1",
@@ -11,10 +11,27 @@
     "commit": "1e4744d68260a7cb91b62b12edc3f6a2187faaf1"
   },
   "passRates": {
-    "conformance": null,
-    "compiler": null,
-    "test262": null,
-    "corpus": null
+    "conformance": {
+      "passed": 12502,
+      "total": 12750,
+      "rate": 98.1,
+      "measure": "tsc 7.0.2 baselines, exact diagnostics and chains, tests/cases/compiler and tests/cases/conformance together",
+      "source": "crates/ts_r_checker/AGENTS.md"
+    },
+    "compiler": {
+      "includedIn": "conformance"
+    },
+    "test262": {
+      "measured": false,
+      "note": "no test262 harness yet"
+    },
+    "corpus": {
+      "passed": 989,
+      "total": 989,
+      "rate": 100.0,
+      "measure": "top 1,000 npm packages parsed with no false errors",
+      "source": "ecosystem/STATUS.md"
+    }
   },
   "openTaskGroups": []
 }

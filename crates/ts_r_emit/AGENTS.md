@@ -234,16 +234,16 @@ import reference.
 
 ## Measurements
 
-Latest (2026-11-06, `parity/emit-3`, `cargo run --release -p ts_r_check --example
-emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,101 (97.3%), shape 2,143
-(99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
-bytes-exact outputs with a map baseline (158 of 162 at all targets); all 17,352 outputs:
-16,599 bytes-exact (95.7%; 16,574 at round 10), JS 13,932 / 14,476 (96.2%), below
-ES2022 11,831 / 12,317, `.d.ts` 2,462 / 2,640 (93.3%; 2,437 at round 10). Declarations
-(E2): 1,463 / 1,634 baselines have every `.d.ts` bytes-exact (89.5%, gate 85% met); 1,463 of
-1,610 without TSR2006 refusals (90.9%). TSR2006 refuses 27 JavaScript inputs' `.d.ts` (53 at
-round 10), TSR2001 13. Tests with every output bytes-exact: 11,248 of 11,925 (11,224 at
-round 10). Extra outputs: 13.
+Latest (2026-11-10, the merged stack at `parity/lsp-1` 0f294508, `cargo run --release -p
+ts_r_check --example emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,101
+(97.3%), shape 2,143 (99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal
+on 17 of 18 bytes-exact outputs with a map baseline (158 of 162 at all targets); below ES2022
+11,831 / 12,317; `.d.ts` 2,467 / 2,640 bytes-exact (93.4%; 2,462 on `parity/emit-3` alone,
+the rest from the checker's alias printing). Declarations (E2): 1,468 / 1,634 baselines have
+every `.d.ts` bytes-exact (89.8%, gate 85% met); 1,468 of 1,610 without TSR2006 refusals
+(91.2%). TSR2006 refuses 27 JavaScript inputs' `.d.ts`, TSR2001 13; extra outputs 8.
+On `parity/emit-3` alone (2026-11-06): all 17,352 outputs 16,599 bytes-exact (95.7%), JS
+13,932 / 14,476 (96.2%), tests with every output bytes-exact 11,248 of 11,925.
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946
