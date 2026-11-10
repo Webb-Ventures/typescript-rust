@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use ts_r_checker::{CheckRun, LibStore, check_program, load_program};
+use ts_r_checker::{CheckRun, Checker, LibStore, check_files, check_program_with, load_program};
 use ts_r_config::{MemoryFs, load_tsconfig};
 use ts_r_diagnostics::{FileId, Files, format_plain};
 use ts_r_span::SourceText;
@@ -43,7 +43,7 @@ fn split_files(text: &str) -> Vec<(String, String)> {
     files
 }
 
-fn run(fixture: &Path, libs: &LibStore) -> String {
+fn run(fixture: &Path, libs: &LibStore, runs: usize, threads: usize) -> String {
     let text = std::fs::read_to_string(fixture).unwrap_or_default();
     let files = split_files(&text);
     let mut fs = MemoryFs::new();
@@ -69,7 +69,17 @@ fn run(fixture: &Path, libs: &LibStore) -> String {
     }
     let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
     let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(libs), 1);
-    let result = check_program(&program, CheckRun { threads: 1 });
+    let checker = Checker::new(&program);
+    let targets: Vec<usize> = program
+        .files
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| (!f.is_lib).then_some(i))
+        .collect();
+    for _ in 1..runs {
+        let _ = check_files(&checker, &targets, CheckRun { threads });
+    }
+    let result = check_program_with(&program, CheckRun { threads }, |_| checker);
     let shown = Shown(
         program
             .files
@@ -107,7 +117,7 @@ fn parity_fixtures() {
     let mut failures = Vec::new();
     for f in &fixtures {
         let expected = std::fs::read_to_string(f.with_extension("txt")).unwrap_or_default();
-        let actual = run(f, &libs);
+        let actual = run(f, &libs, 1, 1);
         if actual.trim_end() != expected.trim_end() {
             failures.push(format!(
                 "{}\n--- expected (tsc 7)\n{}--- actual\n{}",
@@ -118,4 +128,18 @@ fn parity_fixtures() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn circular_bases_survive_cache_hits() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity/circular_base_resolution.ts");
+    let expected = std::fs::read_to_string(fixture.with_extension("txt")).unwrap();
+    for threads in [1, 4] {
+        // The second check uses fresh workers over the first check's shared bases.
+        assert_eq!(run(&fixture, &libs, 2, threads), expected);
+    }
 }
