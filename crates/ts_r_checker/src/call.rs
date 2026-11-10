@@ -2691,17 +2691,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut rctx = InferenceContext::new(&ctx.params);
         rctx.from_return_context = true;
         self.infer_types(&mut rctx, c, ret, 0);
-        // A parameter of a returned function (`(self: Effect<A>) => Effect<A>` against
-        // `(a: Effect<boolean>) => B`) infers contravariantly; with nothing else, that is
-        // what the context implies.
-        for j in 0..rctx.params.len() {
-            if rctx.candidates[j].is_empty() && rctx.contra[j].len() == 1 {
-                let t = rctx.contra[j][0];
-                if t != TypeId::UNRESOLVED && !self.store().is_error(t) {
-                    rctx.candidates[j].push(t);
-                }
-            }
-        }
+        self.settle_return_context(&mut rctx);
         // What the context implies once the outer calls' type parameters still being
         // inferred infer nothing (`pipe(tap({ next(r) {} }))` against `OperatorFunction<V,
         // E, V1, E1>` infers `TValue = V` from the source parameter, not `V1`).
@@ -2718,18 +2708,50 @@ impl<'c, 'a> Ck<'c, 'a> {
                         .collect();
                     *list = keep;
                 }
-                if r.candidates[j].is_empty() && r.contra[j].len() == 1 {
-                    let t = r.contra[j][0];
-                    if t != TypeId::UNRESOLVED && !self.store().is_error(t) {
-                        r.candidates[j].push(t);
-                    }
-                }
             }
+            self.settle_return_context(&mut r);
             r
         } else {
             rctx.clone()
         };
         Some((rctx, generic, rinf))
+    }
+
+    /// The candidates a return context implies, with its contravariant inferences settled
+    /// as `getInferredType` does (tsc: `tsc/internal/checker/inference.go`). A parameter of
+    /// a returned function (`(self: Effect<A>) => Effect<A>` against `(a: Effect<boolean>)
+    /// => B`) infers contravariantly; with nothing else, that is what the context implies.
+    /// A covariant inference that is `never`, `any`, or fits none of the contravariant
+    /// ones gives way to them: `Mono<T>` (a `(s: Obs<T>) => Obs<T>`) against
+    /// `Op<string, number>` implies `T = string`.
+    fn settle_return_context(&mut self, r: &mut InferenceContext) {
+        let usable = |ck: &Self, t: TypeId| t != TypeId::UNRESOLVED && !ck.store().is_error(t);
+        for j in 0..r.params.len() {
+            let contra: Vec<TypeId> = r.contra[j]
+                .iter()
+                .copied()
+                .filter(|&t| usable(self, t))
+                .collect();
+            if contra.is_empty() {
+                continue;
+            }
+            if r.candidates[j].is_empty() {
+                if contra.len() == 1 {
+                    r.candidates[j].push(contra[0]);
+                }
+                continue;
+            }
+            let cands = r.candidates[j].clone();
+            let w = self.union(&cands);
+            let w = self.widened_type(w);
+            if w == TypeId::NEVER
+                || self.store().flags(w).contains(TypeFlags::ANY)
+                || !contra.iter().any(|&c| self.is_assignable(w, c))
+            {
+                let t = self.contra_inference(&contra);
+                r.candidates[j] = vec![t];
+            }
+        }
     }
 
     /// `t` mentions type parameters other than those of the declarations enclosing `e`
@@ -3729,6 +3751,25 @@ impl<'c, 'a> Ck<'c, 'a> {
                         && !self.nested_context_sigs(vl, t, depth + 1, out)
                     {
                         return false;
+                    }
+                }
+            }
+            // Both branches of a conditional take its contextual type (`c ? (x, y) => x :
+            // (x, y) => y` against rxjs's `reduce` fixes `A` to its default `V`); they share
+            // its signatures, which count once.
+            Node::Conditional { cons, alt, .. } => {
+                let mut sigs = Vec::new();
+                for x in [cons, alt] {
+                    let xl = Loc::new(l.file, x);
+                    if !self.is_context_sensitive_expr(xl)
+                        || !self.nested_context_sigs(xl, ct, depth + 1, &mut sigs)
+                    {
+                        return false;
+                    }
+                }
+                for s in sigs {
+                    if !out.contains(&s) {
+                        out.push(s);
                     }
                 }
             }

@@ -1297,7 +1297,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// The contravariant inference: the most specific candidate.
-    fn contra_inference(&mut self, cs: &[TypeId]) -> TypeId {
+    pub(crate) fn contra_inference(&mut self, cs: &[TypeId]) -> TypeId {
         let mut best = cs[0];
         for &c in &cs[1..] {
             if self.is_subtype(c, best) {
