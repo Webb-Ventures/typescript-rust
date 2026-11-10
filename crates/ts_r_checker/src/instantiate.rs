@@ -341,12 +341,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                         // Keep the fresh/regular relation for object literals. The
                         // INSTANTIATED mark only tells the declaration writer that this is an
                         // instantiation (its nesting bound).
-                        s.literal_object(
+                        // A fresh literal's instantiation is fresh, and its regular twin is
+                        // the regular twin's instantiation (else it would stay fresh in every
+                        // later assignment and excess-property check).
+                        let regular = s.regular(t);
+                        let regular = (regular != t).then(|| self.instantiate(regular, m));
+                        let s = self.store();
+                        let nt = s.literal_object(
                             sym,
                             od.flags | ts_r_types::ObjectFlags::INSTANTIATED,
                             ResolvedMembers::new(nprops, ncall, ncons, nindex),
                             traits,
-                        )
+                        );
+                        if let Some(r) = regular {
+                            s.set_regular(nt, r);
+                        }
+                        // A literal with spreads checks only its own written properties
+                        // for excess, instantiated or not.
+                        if let Some(&e) = self.spread_literals.get(&t) {
+                            self.spread_literals.insert(nt, e);
+                        }
+                        nt
                     }
                     ObjectKind::Mapped { decl, mapper } => {
                         self.instantiate_mapped(t, decl, mapper, m)

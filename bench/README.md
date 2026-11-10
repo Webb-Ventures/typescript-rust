@@ -270,7 +270,7 @@ Yarn 4 install needs corepack).
 
 Each `check-*` scenario's project at `ea41eac`, `--pretty false`, ts-r-check with
 `--no-history`, compared with tsc 7.0.2 by file, line, column and code. Playwright, RxJS and
-the React Compiler were measured again on 2026-11-06 at `3042fe0` (parity/checker-3), through
+the React Compiler were measured again on 2026-11-10 at `a47e09a` (parity/checker-4), through
 their `tsconfig.ts-r-bench.json` wrappers:
 
 | Project | tsc 7 | ts-r-check | Only ts-r-check | Only tsc |
@@ -280,13 +280,29 @@ their `tsconfig.ts-r-bench.json` wrappers:
 | TypeORM `packages/typeorm` | 31 | 31 | 0 | 0 |
 | Playwright | 13 | 13 | 0 | 0 |
 | RxJS `packages/rxjs` | 21,908 | 21,908 | 0 | 0 |
-| React Compiler | 156 | 227 | 71 | 0 |
+| React Compiler | 156 | 156 | 0 | 0 |
 
-5 of the 6 match tsc 7 exactly (tRPC, date-fns, TypeORM, Playwright, RxJS). RxJS's expect-type
-`toEqualTypeOf` assertions now agree: identity compares two `Observable<T>` references by their
-arguments and deferred types by their parts. The React Compiler's 71 extra are 65 TS4111
-(property access on `env.config.*`, whose type is zod 4's `z.infer` of a schema), 4 TS7022,
-1 TS7006 and 1 TS2345.
+All 6 match tsc 7 exactly. RxJS's expect-type `toEqualTypeOf` assertions agree: identity
+compares two `Observable<T>` references by their arguments and deferred types by their parts.
+The React Compiler's last 71 extra (65 TS4111 on `env.config.*`, zod 4's `z.infer` of a
+schema) came from a type argument handed out as an unresolved forward reference while a type
+alias was resolving below a value check, and cached as `any` (parity/checker-4).
+
+The other tRPC packages, each with its own `tsconfig.json` (same date and commit; they are
+no bench scenarios):
+
+| tRPC package | tsc 7 | ts-r-check | Only ts-r-check | Only tsc |
+|---|---:|---:|---:|---:|
+| `client` | 0 | 0 | 0 | 0 |
+| `next` | 0 | 0 | 0 | 0 |
+| `openapi` | 0 | 11 | 11 | 0 |
+| `react-query` | 0 | 25 | 25 | 0 |
+| `tanstack-react-query` | 0 | 4 | 4 | 0 |
+| `tests` | 0 | 15 | 15 | 0 |
+| `upgrade` | 41 | 48 | 25 | 18 |
+
+(Before parity/checker-4: next 5, openapi 11, react-query 384, tanstack-react-query 162,
+tests 478 and upgrade 154 extra, upgrade 20 missing.)
 
 ## Dedicated Linux run (2026-10-24)
 

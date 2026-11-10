@@ -7068,7 +7068,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ts_r_types::ObjectKind::Literal { sym } => sym,
             _ => SymId::NONE,
         };
-        let traits = s.traits(t) & TypeTraits::CONTAINS_WIDENING;
+        let traits = s.traits(t) & (TypeTraits::CONTAINS_WIDENING);
         s.literal_object(sym, flags, rm, traits)
     }
 
@@ -7279,11 +7279,13 @@ impl<'c, 'a> Ck<'c, 'a> {
             );
             props.push((n, np));
         }
+        let mut traits = TypeTraits::CONTAINS_OBJECT_LITERAL;
+        traits |= self.store().traits(x) & TypeTraits::CONTAINS_TYPE_PARAMETER;
         self.store().literal_object(
             SymId::NONE,
             ObjectFlags::OBJECT_LITERAL,
             ResolvedMembers::new(props, Vec::new(), Vec::new(), Vec::new()),
-            TypeTraits::CONTAINS_OBJECT_LITERAL,
+            traits,
         )
     }
 
@@ -7501,6 +7503,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if widening {
             traits |= TypeTraits::CONTAINS_WIDENING;
         }
+        // A spread of a generic function's local (`{ ...trpcServerResource(router) }` with
+        // `router: TRouter`) keeps its type parameters: the inferred return type is
+        // instantiated at each call.
+        let s = self.store();
+        traits |= (s.traits(left) | s.traits(right)) & TypeTraits::CONTAINS_TYPE_PARAMETER;
         self.store().literal_object(
             sym,
             ObjectFlags::OBJECT_LITERAL | ObjectFlags::CONTAINS_SPREAD,

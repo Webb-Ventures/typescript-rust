@@ -646,6 +646,11 @@ pub struct Ck<'c, 'a> {
     /// The first resolution cycle found through each symbol's type (the stack from its
     /// `Resolving::Type` entry up), for TS2502 (`circular_annotations`).
     pub(crate) type_cycles: FxHashMap<SymId, Vec<Resolving>>,
+    /// Symbols met inside a resolution cycle that closed at another entry and went through a
+    /// checked node (`Resolving::Node`): their circularity depends on our check order
+    /// (the iterated expression of a `for`-`of` variable narrowed in its loop), so TS7022
+    /// stays silent for them when they have no cycle of their own.
+    pub(crate) node_cycle_types: FxHashSet<SymId>,
     /// The first cycle found through each inferred return type (as `type_cycles`), for
     /// every return type on a cycle that closes at a return type.
     pub(crate) return_cycles: FxHashMap<SigId, Vec<Resolving>>,
@@ -678,6 +683,10 @@ pub struct Ck<'c, 'a> {
     /// last): a contextual return type that is one of their type parameters reads as what
     /// the call's contextual type implies for it.
     pub(crate) ret_ctx_mappers: Vec<ts_r_types::MapperId>,
+    /// What the calls whose literal or function arguments are being inferred have inferred
+    /// so far (innermost last, nothing fixed): a call nested in such an argument reads its
+    /// contextual type through them (tsc: the outer inference context's mapper).
+    pub(crate) outer_inference_mappers: Vec<ts_r_types::MapperId>,
     /// Set while resolving a type node in a deferred position (an array or tuple element,
     /// a type argument of a class or interface): a reference there to a non-generic type
     /// alias that is being resolved reads as a forward reference to it.
@@ -928,6 +937,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             resolving_defaults: Vec::new(),
             circular: FxHashSet::default(),
             type_cycles: FxHashMap::default(),
+            node_cycle_types: FxHashSet::default(),
             return_cycles: FxHashMap::default(),
             base_constraints: Vec::new(),
             flow_cache: FxHashMap::default(),
@@ -942,6 +952,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             alias_roots: FxHashMap::default(),
             cond_alias_depth: 0,
             ret_ctx_mappers: Vec::new(),
+            outer_inference_mappers: Vec::new(),
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
             pending_node_forwards: Vec::new(),
@@ -1287,6 +1298,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 let path = self.resolving[i..].iter().take(256).map(|e| e.0).collect();
                 self.type_cycles.insert(s, path);
+            }
+            // The other symbols on the cycle are marked circular too; one on a cycle that
+            // goes through a checked node is noted (see `node_cycle_types`).
+            if self.resolving[i..]
+                .iter()
+                .any(|e| matches!(e.0, Resolving::Node(_)))
+            {
+                for e in &self.resolving[i + 1..] {
+                    if let Resolving::Type(s) = e.0 {
+                        self.node_cycle_types.insert(s);
+                    }
+                }
             }
             if let Resolving::Return(_) = r {
                 let path: Vec<Resolving> =
