@@ -15,7 +15,7 @@ use ts_r_types::{
 use crate::checker::{Ck, GlobalType, Loc, Resolving};
 use crate::declared::anon;
 use crate::nodes::{fn_parts, is_this_param};
-use crate::symbols::{SynthSym, check_flags};
+use crate::symbols::{ResolvedBases, SynthSym, check_flags};
 
 static EMPTY_MEMBERS: LazyLock<ResolvedMembers> = LazyLock::new(ResolvedMembers::empty);
 
@@ -691,7 +691,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(l) = self.c.sym_links(sym)
             && let Some(b) = l.bases.get()
         {
-            return b.clone();
+            if b.circular {
+                self.circular.insert(Resolving::BaseTypes(sym));
+            }
+            return b.types.clone();
         }
         if !self.push_resolution(Resolving::BaseTypes(sym)) {
             return Box::new([]);
@@ -738,10 +741,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         // A cycle through this resolution (TS2310, `base_resolution_circular`) still keeps
         // the bases the outer resolution found; only the inner request saw none
         // (tsc: checker.go, getBaseTypes).
-        self.pop_resolution();
+        let circular = !self.pop_resolution();
         let b: Box<[TypeId]> = out.into_boxed_slice();
         if let Some(l) = self.c.sym_links(sym) {
-            let _ = l.bases.set(b.clone());
+            let _ = l.bases.set(ResolvedBases {
+                types: b.clone(),
+                circular,
+            });
         }
         b
     }
