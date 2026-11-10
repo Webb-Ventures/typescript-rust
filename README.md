@@ -12,7 +12,7 @@ Each tool is its own small binary and works on its own next to tsc, ESLint and V
 you can adopt one without the rest.
 
 ```sh
-npm install --save-dev @ts-r.dev/cli@next   # the ts-r launcher and every tool
+npm install --save-dev @ts-r.dev/cli@0.1.0-alpha.6   # the ts-r launcher and every tool
 npx ts-r check           # type check, with tsc 7's diagnostics
 npx ts-r lint            # lint, with ESLint and typescript-eslint rules
 npx ts-r build           # bundle, with esbuild's CLI
@@ -57,8 +57,8 @@ Every tool is an npm package with a native binary for macOS (arm64, x64), Linux 
 glibc and musl) and Windows (arm64, x64). Install one, or the `ts-r` launcher (`@ts-r.dev/cli`) with all of them:
 
 ```sh
-npm install --save-dev @ts-r.dev/cli@next      # every tool and the ts-r launcher
-npm install --save-dev @ts-r.dev/check@next    # just ts-r-check (or run, dev, build, lint, lsp)
+npm install --save-dev @ts-r.dev/cli@0.1.0-alpha.6      # every tool and the ts-r launcher
+npm install --save-dev @ts-r.dev/check@0.1.0-alpha.6    # just ts-r-check (or run, dev, build, lint, lsp)
 ```
 
 To type-check with ts-r wherever your scripts and tools already run `tsc`, use the drop-in
@@ -68,13 +68,14 @@ TypeScript on that project, and hands everything else to your TypeScript:
 ```jsonc
 // package.json
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@next",
+  "typescript": "npm:@ts-r.dev/typescript@7.0.1000-alpha.6",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```
 
-During the alpha, use `@next` or an exact version (`@7.0.1000-alpha.3`): a range like `^7`
-doesn't match prerelease versions.
+During the alpha, name an exact version, as above (`npm view @ts-r.dev/cli version` prints the
+newest): a range like `^7` doesn't match prerelease versions, and the `next` dist-tag still names
+0.1.0-alpha.3, whose drop-in fails to install in place with `ERESOLVE`.
 
 The details are in [npm/typescript/README.md](npm/typescript/README.md). Packages and platforms
 are in [npm/ts-r/README.md](npm/ts-r/README.md).

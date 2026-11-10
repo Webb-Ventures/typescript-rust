@@ -10,7 +10,7 @@ export const FAQ = [
   { q: 'Do I have to switch everything at once?', a: 'No. Each tool works on its own next to tsc, ESLint and Vite, and reads the config you already have: tsconfig.json, your ESLint config, your vite.config. Switch one at a time, in any order.' },
   { q: 'Is it a fork of tsc, esbuild or oxc?', a: 'No. Every layer (lexer, parser, type checker, bundler, minifier, linter) is written in this project. Other tools’ test suites and outputs are used to check that ts-r gives the same answers.' },
   { q: 'Will it be free?', a: 'Yes. ts-r is open source and MIT licensed, with no paid tier. Sponsorships help fund development time.' },
-  { q: 'When can I use it?', a: `${site.mode === 'launched' ? 'Now, as an alpha: npm install --save-dev @ts-r.dev/cli@next.' : 'It runs from source today and isn’t on npm yet.'} The type checker doesn’t give the same errors as tsc on every project yet, so keep tsc in CI until it does.` },
+  { q: 'When can I use it?', a: `${site.mode === 'launched' ? 'Now, as an alpha: npm install --save-dev @ts-r.dev/cli@0.1.0-alpha.6.' : 'It runs from source today and isn’t on npm yet.'} The type checker doesn’t give the same errors as tsc on every project yet, so keep tsc in CI until it does.` },
 ];
 
 const fmtDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
