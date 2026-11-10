@@ -88,10 +88,6 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
             continue;
         };
         let why = match *ast.node(n) {
-            // `@callback` with `@param {...T} a`: tsc writes `...a: T` (no array).
-            Node::TypeAlias { ty, .. } if ast.is_jsdoc(n) && callback_has_rest(ast, ty) => {
-                Some("a JSDoc @callback with a rest parameter")
-            }
             Node::Assign { left, right, .. } => {
                 assignment_target(c, file, ast, parents, &mut members, left, right)
             }
@@ -492,16 +488,6 @@ const RESERVED: &[&str] = &[
     "arguments",
     "eval",
 ];
-
-/// `ty` (a `@callback`'s function type) has a rest parameter.
-fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
-    let Node::FunctionType { params, .. } = *ast.node(ty) else {
-        return false;
-    };
-    ast.list(params)
-        .iter()
-        .any(|&p| matches!(ast.node(p), Node::Param { rest: true, .. }))
-}
 
 /// Identifier `n` is a name rather than a reference: a member access's property
 /// (`a.exports`), a property, method or member key (`{ module: 1 }`, `module() {}`), a

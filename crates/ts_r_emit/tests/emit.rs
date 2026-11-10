@@ -804,7 +804,7 @@ fn dropped_aliases_release_their_imports() {
 
 /// JavaScript declarations are refused (TSR2006, the file's `.js` still written) when the
 /// file uses a pattern tsc declares from that the emitter does not write: CommonJS
-/// exports, a dotted `@typedef` name, a `@callback` rest parameter, a class's statics.
+/// exports, a dotted `@typedef` name, a class's statics.
 #[test]
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
@@ -814,7 +814,6 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "const { y } = require(\"./y\");\nmodule.exports = y;\n",
         "exports.a = require(\"./y\");\n",
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
-        "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
         "class A {}\nexport class C extends A {}\nC.count = 1;\n",
         "export class C {}\nfunction f() { C.count = 1; }\nf();\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
@@ -877,6 +876,23 @@ fn javascript_overloads_are_written() {
             .unwrap();
         assert_eq!(d.text, want, "{src}");
     }
+}
+
+/// A `@callback`'s `@param {...T} a` is `...a: T`, without the array (tsc 7.0.2,
+/// callbackTagVariadicType; probed).
+#[test]
+fn javascript_callback_rest_parameter() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    let src = "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n";
+    let want = "export type F = (...args: string) => any;\n/**\n * @callback F\n * @param {...string} args\n */\nexport declare const x = 1;\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .expect("a.d.ts");
+    assert_eq!(d.text, want);
 }
 
 /// `/** @type {T} */ this["x"] = v` declares a member `"x": T` (tsc 7.0.2,
