@@ -329,7 +329,23 @@ impl<'a> Checker<'a> {
                 TypeKind::IndexedAccess { obj: o2, index: i2 },
             ) => self
                 .compare_types(o1, o2, depth + 1)
-                .then_with(|| self.compare_types(i1, i2, depth + 1)),
+                .then_with(|| self.compare_types(i1, i2, depth + 1))
+                .then_with(|| match (s.alias_of(a), s.alias_of(b)) {
+                    (Some(p), Some(q)) => self
+                        .sym_name(p.sym)
+                        .cmp(self.sym_name(q.sym))
+                        .then_with(|| self.decl_position(p.sym).cmp(&self.decl_position(q.sym)))
+                        .then_with(|| {
+                            self.compare_lists(
+                                s.list_items(p.args),
+                                s.list_items(q.args),
+                                depth + 1,
+                            )
+                        }),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }),
             (TypeKind::TemplateLiteral(_), TypeKind::TemplateLiteral(_)) => {
                 match (s.template_parts(a), s.template_parts(b)) {
                     (Some((xt, xs)), Some((yt, ys))) => {
