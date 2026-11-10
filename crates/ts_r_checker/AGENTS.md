@@ -1784,6 +1784,8 @@ Files, by layer:
   `type D = Box<D>` (an alias), `type E = [...E]`, `type F = typeof v; var v: F[]` are
   not. A circular alias is not generic for its references (tsc never records its type
   parameters): arguments give TS2315, a bare reference nothing.
+  Reference arity checks only probe circularity when local type parameters exist;
+  non-generic aliases already have the same arity either way.
   `circular_annotations.rs` walks the syntax for this; not yet followed: a
   conditional's branches when its check type is not generic, mapped type constraints,
   unannotated variables, functions' return types and interface members.
