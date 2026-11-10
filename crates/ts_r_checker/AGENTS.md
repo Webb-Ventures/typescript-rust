@@ -637,9 +637,12 @@ Files, by layer:
   declarations whose `extends` names a class: `interface K extends J<K["x"]>`,
   `class Foo extends Next<Foo>` where `Next`'s default reads `C["p"]` (tsc: checker.go,
   getBaseTypes). The outer resolution keeps the bases it found (they are cached, as tsc
-  keeps `resolvedBaseTypes`); only the inner request sees none. The type of a class's
-  `extends` expression is resolved under its own key, `Resolving::BaseConstructor` (tsc's
-  base constructor type), so a cycle through a mixin call's argument alone
+  keeps `resolvedBaseTypes`); only the inner request sees none. The shared bases slot
+  publishes the circularity flag together with the types, and cache hits restore that
+  flag in the reading worker so TS2310 does not depend on which worker resolved first.
+  The type of a class's `extends` expression is resolved under its own key,
+  `Resolving::BaseConstructor` (tsc's base constructor type), so a cycle through a mixin
+  call's argument alone
   (`mixinWithBaseDependingOnSelfNoCrash1`) is not TS2310; classes extending an expression
   never get it here, since our order of resolution there differs from tsc's. A class `extends` naming an interface with no value
   (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
