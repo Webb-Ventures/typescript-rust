@@ -117,6 +117,15 @@ fn split_test(text: &str, default_name: &str) -> (Pairs, Pairs) {
         if let Some((k, v)) = parse_directive(line) {
             if k == "filename" {
                 if let Some(n) = cur_name.take() {
+                    // tsc's harness joins a unit's lines with `\n`: the line break before the
+                    // next `@filename` is not part of the unit (EOF diagnostics sit one
+                    // line up: jsxParsingError2).
+                    if cur.ends_with('\n') {
+                        cur.pop();
+                        if cur.ends_with('\r') {
+                            cur.pop();
+                        }
+                    }
                     files.push((n, std::mem::take(&mut cur)));
                 } else {
                     cur.clear();

@@ -358,6 +358,12 @@ impl<'a> Parser<'a> {
             let pos = self.prev_end;
             return self.add_node(Span::at(pos), Node::Empty {});
         }
+        // A substatement that starts at an assignment operator (`if (a ^= b`'s `)` missing) is
+        // an expression statement with a missing left side, whose right side is parsed
+        // (tsc `parseStatement` has no start-of-statement check): constructorWithIncompleteTypeAnnotation.
+        if self.kind().is_assignment() {
+            return self.parse_expression_statement();
+        }
         match self.parse_statement() {
             Some(s) => s,
             None => {
@@ -818,8 +824,10 @@ impl<'a> Parser<'a> {
                         | T::Enum
                         | T::Export
                         | T::Import => true,
+                        // `declare type` commits to a type alias, whatever follows;
+                        // `parse_type_alias` reports a line break after `type` (tsc).
+                        T::Type => true,
                         T::Interface
-                        | T::Type
                         | T::Namespace
                         | T::Module
                         | T::Global
@@ -1397,6 +1405,9 @@ impl<'a> Parser<'a> {
 
     fn parse_type_alias(&mut self, start: u32, modifiers: Modifiers) -> NodeId {
         self.expect(T::Type);
+        if self.newline_before() {
+            self.error(messages::LINE_BREAK_NOT_PERMITTED_HERE);
+        }
         let name = self.parse_identifier();
         let type_params = self.parse_type_params_opt();
         self.expect(T::Eq);

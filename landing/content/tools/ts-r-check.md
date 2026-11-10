@@ -46,7 +46,7 @@ Keep tsc in CI until ts-r-check covers the features your project uses.
 - Some inference: contextual types that flow through a reverse mapped type print wider than
   tsc's (`number | T["a"]` where tsc prints `number`).
 - Some relation and narrowing results differ from tsc's, mostly in TS2322, TS2339 and TS2345:
-  248 of tsc's 12,750 conformance test variants (1.9%) don't match exactly.
+  242 of tsc's 12,750 conformance test variants (1.9%) don't match exactly.
 
 The full list is in [ts_r_checker's notes](../../../crates/ts_r_checker/AGENTS.md).
 
@@ -106,7 +106,7 @@ Against tsc 7.0.2:
 
 | Test | Result |
 |---|---|
-| tsc's conformance baselines, 12,750 compared test variants | 98.1% exact (all diagnostics and chains); 117 variants with a diagnostic tsc does not report, 4 of them in tests where tsc reports nothing |
+| tsc's conformance baselines, 12,750 compared test variants | 98.1% exact (all diagnostics and chains); 110 variants with a diagnostic tsc does not report, 4 of them in tests where tsc reports nothing |
 | Six public projects: tRPC, date-fns, TypeORM, Playwright, RxJS, the React Compiler | All 6 match exactly (React Compiler: all 156; RxJS: all 21,908) |
 | Ecosystem check stage | 709 packages pass, 0 fail (100%) |
 

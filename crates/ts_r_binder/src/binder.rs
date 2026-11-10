@@ -3153,6 +3153,13 @@ impl<'a> Binder<'a> {
                         .get(span.start as usize..span.end as usize)
                         .unwrap_or("")
                         .to_owned();
+                    // A name the parser could not read (`<in in>`) prints as tsc prints a
+                    // missing identifier.
+                    let text = if matches!(ast.node(name), Node::Missing {}) {
+                        "(Missing)".to_owned()
+                    } else {
+                        text
+                    };
                     self.error(m::DUPLICATE_IDENTIFIER, span, &[&text]);
                     self.new_symbol(
                         n,

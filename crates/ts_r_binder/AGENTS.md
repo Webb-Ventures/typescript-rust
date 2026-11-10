@@ -86,6 +86,9 @@ texts), `dump.rs`.
   TS2306).
 - **JSDoc type aliases** (`@typedef`/`@callback`, `Ast::is_jsdoc`): at the top level of a
   JavaScript ES module they are exported; in a CommonJS module or a script they stay local.
+  Two type parameters of one list that the parser gave a missing name (`type T<in in> = T`)
+  clash as TS2300 `Duplicate identifier '(Missing)'` at the zero-width name (tsc prints a
+  missing identifier as `(Missing)`; varianceAnnotationsWithCircularlyReferencesError).
   A JSDoc `@typedef default` that clashes with a default export is TS2300 under each
   declaration's own name, not TS2528.
 - **CommonJS exports** (`bind_commonjs_exports`). A JavaScript module without ECMAScript
