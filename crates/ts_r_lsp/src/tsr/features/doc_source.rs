@@ -64,7 +64,9 @@ fn own_raw(ck: &Ck<'_, '_>, d: Loc) -> Option<String> {
             .find(|cm| cm.span.start < span.start && span.end <= cm.span.end)
     {
         let raw = comment.span.text(text);
-        return raw.starts_with("/**").then(|| raw.to_string());
+        return raw
+            .starts_with("/**")
+            .then(|| with_column(text, comment.span.start, raw));
     }
     // The last `/** */` of the comments right before the node (other comments may follow).
     let mut pos = span.start;
@@ -75,11 +77,19 @@ fn own_raw(ck: &Ck<'_, '_>, d: Loc) -> Option<String> {
         }
         let raw = comment.span.text(text);
         if raw.starts_with("/**") && raw.len() > 4 {
-            return Some(raw.to_string());
+            return Some(with_column(text, comment.span.start, raw));
         }
         pos = comment.span.start;
     }
     None
+}
+
+/// `raw` with as many spaces before it as the comment's column (bytes from the start of its
+/// line), which `jsdoc::parse` reads to place the margin as tsc does.
+fn with_column(text: &str, start: u32, raw: &str) -> String {
+    let start = (start as usize).min(text.len());
+    let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+    format!("{}{raw}", " ".repeat(start - line_start))
 }
 
 /// The function-like node a parameter or type parameter list belongs to, seen as its
@@ -456,6 +466,10 @@ fn documentation_of(ck: &mut Ck<'_, '_>, d: Loc) -> String {
 /// details).
 pub fn documentation(ck: &mut Ck<'_, '_>, s: SymId, at: Option<Loc>) -> String {
     let c = ck.c;
+    // tsc 7 documents no member of a mapped type (`{ [K in keyof I]: .. }`, `Pick<I, "m">`).
+    if super::quick_info::synthetic_kind(c, s) == super::quick_info::Synthetic::Mapped {
+        return String::new();
+    }
     // At a call through a call or construct signature of an interface: that signature.
     if let Some(at) = at
         && let Some(call) = call_of(ck, at)

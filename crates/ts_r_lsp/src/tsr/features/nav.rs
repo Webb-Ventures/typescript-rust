@@ -119,6 +119,12 @@ pub fn definition(cx: &Ctx<'_, '_>, ck: &mut Ck<'_, '_>, offset: u32) -> Value {
     let mut own = Vec::new();
     for s in m.iter() {
         own.extend(c.decls(s));
+        // `const { a } = require("m")` in JavaScript imports `a` (tsc 7 binds it as an
+        // alias): the module's export `a`.
+        if let Some(t) = super::aliases::require_target(ck, s, true) {
+            decls.extend(c.decls(c.resolve_alias(t).unwrap_or(t)));
+            continue;
+        }
         match c.resolve_alias(s) {
             Some(t) => decls.extend(c.decls(t)),
             // An import from a shorthand ambient module (`declare module "x";`) has nothing
@@ -1338,6 +1344,9 @@ fn references_with(
         }
     }
     let Some(mut target) = Target::at(ck, Loc::new(cx.file, n), rename) else {
+        if let Some(refs) = unresolved_type_references(cx, ck, n, scope) {
+            return refs;
+        }
         // A JSX attribute that sets no prop is a reference to itself alone.
         if is_jsx_attr_name(c, Loc::new(cx.file, n)) {
             let span = c.ast(cx.file).span(n);
@@ -1748,6 +1757,60 @@ fn default_keyword_references(
 }
 
 /// The files a project-wide search looks at.
+/// An unresolved name in a type (`let a: Bar`, `Bar.X`): tsc resolves every such name to one
+/// "unknown" symbol, so its references are the unresolved names with the same text used in
+/// the same meanings (a type name and the namespace left of a `.` are kept apart).
+/// `None` when `n` resolves, declares or is used as a value.
+fn unresolved_type_references(
+    cx: &Ctx<'_, '_>,
+    ck: &mut Ck<'_, '_>,
+    n: NodeId,
+    scope: Scope,
+) -> Option<Vec<Ref>> {
+    use super::ref_meaning::location_meaning;
+    let c = cx.checker;
+    let l = Loc::new(cx.file, n);
+    let name = name_text(c.ast(cx.file), n)?.to_string();
+    let unresolved = |ck: &mut Ck<'_, '_>, l: Loc| {
+        let m = meaning_at(ck, l);
+        m.primary.is_none() && !m.is_decl && m.contextual.is_none()
+    };
+    let want = location_meaning(ck, l);
+    if want & ts_r_binder::meaning::VALUE != 0 || !unresolved(ck, l) {
+        return None;
+    }
+    let files: Vec<FileId> = match scope {
+        Scope::File => vec![cx.file],
+        Scope::Project => project_files(cx).collect(),
+    };
+    let mut out = Vec::new();
+    for f in files {
+        if !c.file(f).text.contains(name.as_str()) {
+            continue;
+        }
+        let ast = c.ast(f);
+        for m in super::locate::names_in(ast) {
+            if name_text(ast, m) != Some(name.as_str()) {
+                continue;
+            }
+            let ml = Loc::new(f, m);
+            if location_meaning(ck, ml) != want || !unresolved(ck, ml) {
+                continue;
+            }
+            let span = ast.span(m);
+            out.push(Ref {
+                file: f,
+                start: span.start,
+                end: span.end,
+                is_decl: false,
+                is_write: false,
+                shorthand: None,
+            });
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 fn project_files(cx: &Ctx<'_, '_>) -> impl Iterator<Item = FileId> {
     let c = cx.checker;
     (0..c.files.len())

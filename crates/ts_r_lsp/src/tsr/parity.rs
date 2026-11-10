@@ -29,7 +29,7 @@ use ts_r_diagnostics::{Files, format_plain};
 use ts_r_span::SourceText;
 
 /// Bumped when the comparison changes (old cached results are ignored).
-const PARITY_VERSION: u32 = 1;
+const PARITY_VERSION: u32 = 2;
 /// Memory cap of the user's tsc (whole process tree).
 const TSC_MEM_MB: u64 = 4096;
 /// Time cap of the user's tsc.
@@ -261,12 +261,26 @@ fn worker(root: PathBuf, queue: Arc<(Mutex<Queue>, Condvar)>, cancel: Arc<Atomic
     }
 }
 
-/// Relative display path.
+/// `p` relative to `root`, as tsc prints paths relative to its working directory: a file
+/// outside `root` (another package of a monorepo, a hoisted `node_modules`) goes up with
+/// `../` to the common ancestor. A path with nothing in common (another drive) stays
+/// absolute.
 fn rel(root: &Path, p: &str) -> String {
     let r = root.to_string_lossy().replace('\\', "/");
-    p.strip_prefix(&format!("{}/", r.trim_end_matches('/')))
-        .unwrap_or(p)
-        .to_string()
+    let r = r.trim_end_matches('/');
+    let p = p.replace('\\', "/");
+    if let Some(inside) = p.strip_prefix(&format!("{r}/")) {
+        return inside.to_string();
+    }
+    let rs: Vec<&str> = r.split('/').collect();
+    let ps: Vec<&str> = p.split('/').collect();
+    let common = rs.iter().zip(&ps).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return p;
+    }
+    let mut out: Vec<&str> = vec![".."; rs.len() - common];
+    out.extend(&ps[common..]);
+    out.join("/")
 }
 
 /// One comparison.
@@ -733,5 +747,20 @@ mod tests {
         assert_eq!(k.get("TS5102"), Some(&1));
         assert_eq!(k.get("tsconfig.json(2,5): TS5023"), Some(&1));
         assert_eq!(k.len(), 3);
+    }
+
+    #[test]
+    fn paths_relative_to_the_root_like_tsc() {
+        let root = Path::new("/w/repo/packages/app");
+        assert_eq!(rel(root, "/w/repo/packages/app/src/a.ts"), "src/a.ts");
+        assert_eq!(
+            rel(root, "/w/repo/packages/lib/src/b.ts"),
+            "../lib/src/b.ts"
+        );
+        assert_eq!(
+            rel(root, "/w/repo/node_modules/x/index.d.ts"),
+            "../../node_modules/x/index.d.ts"
+        );
+        assert_eq!(rel(Path::new("C:/w"), "D:/x/a.ts"), "D:/x/a.ts");
     }
 }
