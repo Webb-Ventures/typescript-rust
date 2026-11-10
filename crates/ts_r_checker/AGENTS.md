@@ -1007,7 +1007,12 @@ Files, by layer:
   each of them read as `any` (`placeholder_fns`), and the first candidate whose in-order
   check reaches the literal fixes their contexts (`fix_nested_contexts`). A single candidate never fixes; a single
   generic candidate whose other arguments fail is instantiated without its
-  context-sensitive arguments too.
+  context-sensitive arguments too. A function whose context is already fixed (by an
+  earlier candidate or the subtype pass) fixes no type parameter when a later generic
+  candidate infers: its parameters are typed, so only its return infers (tsc assigns a
+  function's contextual parameter types once). `arr.reduceRight((v, k) => x as any, init)`
+  is `U = any` without `strictFunctionTypes`, where a single generic candidate fixes `U`
+  from `init` (TypeORM's `incrementOrDecrementBy`; `overload_fixed_callback_inference`).
 - **Inference between type operators.** `S[K]` to `T[L]` infers `S` to `T` and `K` to `L`;
   `keyof S` to `keyof T` infers `S` to `T` contravariantly (tsc: inference.go,
   inferFromTypes), so `find<T, K extends keyof T>(o: T[K]): [T, K]` called with an `A[B]`
@@ -2661,6 +2666,18 @@ Files, by layer:
      known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
      During one excess-property check, interned-name sets are reused per mapped target,
      including union/intersection members; this cache ends with the check.
+  5. *Same alias first* (`alias_args_related_by_variance`): before rule 1, two
+     instantiations of one alias whose arguments relate by its measured variances are
+     related, as tsc probes alias variance before the mapped target case
+     (`DecorateRouterRecord<any>` is a `DecorateRouterRecord<TRecord>`: tRPC's
+     `createCallerFactory`; `generic_mapped_alias_variance`).
+  6. *Subtype needs every target property* (`generic_mapped_lacks_target_property`; tsc:
+     `requireOptionalProperties` in `propertiesRelatedTo`): under the subtype relations a
+     generic mapped source with known names that lacks a property of an object target,
+     optional ones included, is no subtype (`Partial<E>` of an unconstrained `E` against
+     `FindManyOptions<any>`). A type predicate then drops it: the narrowing's assignability
+     fallback (`narrow_to_type_with`) does not keep such a member, since tsc narrows by
+     subtype only (TypeORM's `MongoEntityManager`; `generic_mapped_predicate_narrowing`).
   A `?` generic mapped type prints its template with `| undefined` (`print_mapped`), as tsc
   prints the template type it relates.
   What stays silent (related, never a new error): templates other than `X[P]` when the keys
@@ -2668,7 +2685,8 @@ Files, by layer:
   relating `T[P]` to the template), keys that are conditional or indexed-access types
   (`as` clauses like `T[P] extends F ? P : never`, `Exclude<keyof T, K>` against a generic
   source), intersection, indexed-access and conditional sources, a generic mapped source
-  against targets with properties or signatures (tsc compares the resolved members), and
+  against targets with properties or signatures (tsc compares the resolved members; only
+  rule 6's missing property under subtype is modelled), and
   `Partial<V>` with a constrained `V`, which still relates as its apparent type
   `Partial<C>` (tsc reads `V[P]`). Our data model adds nothing: the rules read the mapped
   type's parts (`mapped_info`, `mapped_constraint`, `mapped_template_and_name_for_key`).
@@ -3540,12 +3558,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, a24c22a, parity/checker-gap-4: variance annotations, per-parameter
-  unmeasurable/unreliable variance, circular aliases not generic; 12750 compared variants):
-  12480 exact (97.9%; all diagnostics and chains), 12500 (98.0%) exact on first lines;
-  129 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, dc65132, parity/checker-gap-4-fix: the gap-2 regressions on tRPC
+  and TypeORM fixed; 12750 compared variants):
+  12481 exact (97.9%; all diagnostics and chains), 12501 (98.0%) exact on first lines;
+  128 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

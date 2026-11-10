@@ -3208,6 +3208,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                     f = body;
                 }
             }
+            // A function whose parameters an earlier overload (or an earlier pass) already
+            // typed fixes nothing: its parameter types are no longer read through this
+            // inference, so its return type still infers (observed: `reduceRight((v, k) =>
+            // x as any, init)` infers `U = any` in the assignability pass after the subtype
+            // pass typed `v`, where a single generic candidate fixes `U` from `init`).
+            if !nested && self.fixed_arg_contexts.contains_key(&Loc::new(e.file, n)) {
+                pt_calls.clear();
+                inner_calls.clear();
+            }
             for cs in pt_calls {
                 let n = self.store().sig(cs).params.len();
                 for k in 0..n {
