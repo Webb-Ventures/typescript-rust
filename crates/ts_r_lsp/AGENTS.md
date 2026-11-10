@@ -182,7 +182,8 @@ editor window ──stdio──> ts-r-lsp tsserver (front) ───────
   job (one at a time, `nice`d) runs the user's own tsc (`node tsc.js` next to the found
   tsserver, or the TS 7 binary; `-p <config> --noEmit --pretty false`, capped at 4096 MB and
   600 s like `scripts/limit.sh`) and our checker on the project from disk, and compares the
-  multisets of `file(line,col): TScode` keys. The result is cached in
+  multisets of `file(line,col): TScode` keys, with paths relative to the workspace root as
+  tsc prints them (`../lib/src/a.ts` for a sibling package). The result is cached in
   `<cache>/lsp/parity/` under a key of the config's inputs (the tsconfig and everything it
   extends), the nearest lockfile and the TypeScript version, so it reruns only when those
   change. `TS_R_LSP_PARITY=off` disables it; `TS_R_LSP_PARITY_TSC` (JSON argv) replaces tsc in
@@ -306,6 +307,16 @@ terms. The fourslash tests are the oracle.
 Rules from `tsc: tsc/internal/ls/completions.go` and `tsc: tsc/internal/binder/binder.go`
 (v7.0.2), in our words; the fourslash tests are the oracle.
 
+- Where a name is being declared there is no list (`completions.go`,
+  `isSolelyIdentifierDefinitionLocation`): after `var`/`let`/`const`/`abstract`/`declare`
+  (not after a `.`), `interface`, `enum`, a binding pattern's `:` or a declared binding
+  pattern's element, `...` in parameters, rest elements and declared array patterns, a
+  rest parameter's name, a parameter modifier outside a constructor (in a constructor the
+  list is the parameter keywords), a `,` in a declaration list outside type arguments, and
+  the word right after a declared name on the same line (a class, interface or type
+  parameter name may still take `extends`). An unterminated block comment counts as a
+  comment to its end; `..` (not `...`, not a number) gives no list. A cursor just past a
+  closed function or arrow body takes scope names and argument context from outside it.
 - Object literal: when the name being typed follows the literal's `{`, a `,`, or the end of
   an earlier member with no comma yet (a shorthand member only from an earlier line), the
   list is the contextual type's properties (a parenthesized literal takes its parens'
@@ -493,6 +504,15 @@ Rules from `tsc: tsc/internal/ls/hover.go` (`getDocumentationFromDeclaration`,
 `getJSDocOrTag`, `writeNameLink`) and `tsc: tsc/internal/parser/jsdoc.go` (where a tag
 starts), v7.0.2, in our words.
 
+- Margins (`jsdoc.go`): a comment's text keeps its columns. The first line's text starts at
+  the comment's column + 4 (after `/** `); on later lines the `*` becomes a space. The
+  margin is the column where the first text of the part starts (the comment, or a tag's
+  comment); later lines lose at most that many columns, never text after the `*`. In a tag
+  whose text starts on a later line, the margin is the column after the `*`.
+- Hover leaves out the owner and the documentation of a mapped type's member, and the
+  owner of a union's synthetic member (declared by more than one member type), which
+  shows as a `(property)` even when its declarations are methods. An empty display is no
+  hover.
 - `jsdoc.rs` parses `/** */` text itself (the parser's JSDoc pass only lowers types): a
   tag starts at any `@` followed by an identifier start, except in a fenced block, an
   inline `` `code` `` span (to the end of its line), `{@link ...}` and `@author`'s
@@ -623,6 +643,13 @@ and `tsc/internal/ls/definition.go` (tsc 7.0.2); written here in our own terms o
     the `this` keyword.
 - `ident_at` takes the name that ends exactly at the cursor when the cursor is not on a name
   (`a|()`), as tsserver's touching-name lookup does.
+- **Unresolved names** (`nav.rs`, from `tsc: tsc/internal/ls/findallreferences.go`): tsc
+  resolves every unknown name to one symbol, so references on an unresolved type name find
+  the unresolved names with the same text and the same meaning in every project file.
+- **Definition through `require`**: in JavaScript, `const { a } = require("m")` binds an
+  import, so a use of `a` goes to the module's export `a` (followed through aliases; a
+  `module.exports = { a }` shorthand is where it stops). An expando assignment
+  (`C.prop = ..`) is shown at its property name.
 - **Inherited members** (`inherit.rs`, from `tsc: tsc/internal/ls/findallreferences.go`,
   `forEachRelatedSymbol`): a non-static class or interface member is one with the
   same-named members its container inherits (base class, `implements`, interface
@@ -838,7 +865,13 @@ placeholder for the reason); `ts-r/fileDiagnostics` (pull) has no sound diagnost
   8.09 ms, one lint 2.4-3.0 ms (13 problems), RSS 31.7 -> 34.4 MB; `card-form.tsx` 2.79 /
   3.72 -> 3.31 / 4.10 ms, 2.4 ms per lint, RSS 47.6 -> 50.6 MB. Gap: loading the config
   (~0.3-0.5 s of Node on a cold `lint-config` cache) runs on the project thread, so a
-  request arriving then waits (hover p95 in those runs 325-525 ms).
+  request arriving then waits (hover p95 in those runs 325-525 ms). On tRPC
+  (`eslint.config.js`, 2026-11-06) that load takes 0.8-1.4 s right after the first
+  diagnostics, also with the client's lint off (only `TS_R_LSP_TYPED_LINT=0` skips it), and
+  one hover in editor-latency.js waited 4.7 s for it.
+- Project load: up to 4 threads read and parse the files (`load_threads`). tRPC
+  `router.ts` cold open to first diagnostics (942 files, busy shared machine,
+  interleaved runs): 2 threads median 90 ms (81-199), 4 threads median 70 ms (66-73).
 
 ## Releasing closed files (M5 history, `tsr/project/release.rs`)
 
@@ -1151,7 +1184,7 @@ features stay on ts-r (hover p50 0.12 ms).
   like a cold check). An import change reloads the whole program (worst project,
   infra-project with 1559 files: 158 ms) and rebuilds the project's levels; lib and
   dependency levels are found again by content.
-- Features (the fourslash oracle, 2211 of 2513 tests at a191679, lists the rest by cause:
+- Features (the fourslash oracle, 2234 of 2505 tests at b3e973c, lists the rest by cause:
   bench/lsp-oracle/README.md): hover has no `@property`-name hovers in JSDoc and no keyword
   or meta-property hovers (`new`); it
   prints names in signatures unqualified (`Iterator<T>` where tsc writes
@@ -1169,7 +1202,14 @@ features stay on ts-r (hover p50 0.12 ms).
 - Unopened dependents are not checked (only open files get diagnostics). Projects do not share
   `SourceFile`s, so a file in two projects is parsed twice.
 - Parity: 22 of 24 private-app projects fall back today (checker gaps, mostly TS7031 /
-  TS7006 implicit any in callbacks and JSX attribute checks). Parity is all-or-nothing per
+  TS7006 implicit any in callbacks and JSX attribute checks). tRPC (2026-11-06, after the
+  path fix): `server` and `client` match TypeScript 7.0.2; `next` (TS2554 4, TS2345 1),
+  `react-query` (TS2339 92, TS7006 12, TS2344 10, ...), `tanstack-react-query` (TS2339 94,
+  TS7006 26, TS2344 22, TS2345 14, TS2430 6) and, against their TypeScript 6.0.3, `openapi`
+  (TS2322 11) and `upgrade` (160 only ours, 18 only tsc's) fall back, every difference a
+  checker diagnostic (plus TS2688 for `jest` types in `node_modules` declarations, only
+  ours). The parity program does not apply project references, option errors or
+  `noCheck` the way `ts-r-check` does (neither does the editor's program). Parity is all-or-nothing per
   project; there is no per-file or per-code fallback. The fallback TypeScript sees only the
   open documents' texts (other files from disk), like any editor.
 - VS Code windows reach the ts-r backend through the extension's tsserver bridge (an LSP

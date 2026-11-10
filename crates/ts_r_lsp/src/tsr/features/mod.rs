@@ -208,6 +208,12 @@ impl LinesCache {
 pub fn decl_span(checker: &Checker<'_>, d: Loc) -> (u32, u32) {
     let ast = checker.ast(d.file);
     let n = ts_r_binder::decl_name_node(ast, d.node).unwrap_or(d.node);
+    // An expando assignment (`C.prop = ..`, `C.prototype.m = ..`) is declared by its
+    // property name, as tsc shows it.
+    let n = match *ast.node(n) {
+        ts_r_ast::Node::Member { prop, .. } => prop,
+        _ => n,
+    };
     let s = ast.span(n);
     (s.start, s.end)
 }

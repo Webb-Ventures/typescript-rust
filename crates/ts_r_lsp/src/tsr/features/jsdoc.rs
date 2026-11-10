@@ -76,33 +76,86 @@ impl JsDoc {
     }
 }
 
-/// The lines of a comment without `/**`, `*/` and the leading `*` margin.
-fn lines(raw: &str) -> Vec<String> {
+/// The lines of a comment without `/**` and `*/`, every character at the column tsc's JSDoc
+/// scanner gives it: a line's first `*` becomes a space (it counts toward the indentation),
+/// and the first line's text starts at the comment's column + 4 (the whitespace after `/**`
+/// does not count). With each line, the column where whitespace that may be kept starts
+/// (after the `*`).
+fn lines(raw: &str) -> (Vec<String>, Vec<usize>) {
+    let col0 = raw.len() - raw.trim_start_matches(' ').len();
+    let raw = &raw[col0..];
     let body = raw.strip_prefix("/**").unwrap_or(raw);
     let body = body.strip_suffix("*/").unwrap_or(body);
     let mut out = Vec::new();
-    let mut margin: Option<usize> = None;
+    let mut keep_from = Vec::new();
     for (i, line) in body.split('\n').enumerate() {
+        // Trailing spaces stay (tsc keeps them inside the text: `this \nsecond`).
         let line = line.strip_suffix('\r').unwrap_or(line);
         if i == 0 {
-            out.push(line.trim().to_string());
+            let t = line.trim_start();
+            out.push(if t.is_empty() {
+                String::new()
+            } else {
+                format!("{}{t}", " ".repeat(col0 + 4))
+            });
+            keep_from.push(0);
             continue;
         }
-        let t = line.trim_start();
-        let (t, starred) = match t.strip_prefix('*') {
-            Some(r) => (r, true),
-            None => (t, false),
+        let lead = line.len() - line.trim_start_matches([' ', '\t']).len();
+        match line[lead..].strip_prefix('*') {
+            Some(rest) => {
+                out.push(format!("{} {rest}", &line[..lead]));
+                keep_from.push(lead + 1);
+            }
+            None => {
+                out.push(line.to_string());
+                keep_from.push(0);
+            }
+        }
+    }
+    (out, keep_from)
+}
+
+/// Removes the margin of one comment part (the comment before the tags, or a tag's own
+/// comment) as tsc 7 does; a later line keeps the whitespace (after its `*`) that reaches past
+/// the margin. The margin is the column of the part's first text, except in a tag whose text
+/// starts on a later line: there it is one column past that line's `*` (and a line with no
+/// `*` keeps nothing). Learned from tsc 7's answers on `commentsLinePreservation`,
+/// `quickInfoForJSDocUnknownTag` and `jsDocIndentationPreservation*`.
+/// `first_col` is the column the part starts at on its first line; `keep_from` is
+/// [`lines`]' per line.
+fn dedent(part: &str, first_col: usize, keep_from: &[usize], tag: bool) -> String {
+    let mut margin: Option<usize> = None;
+    let mut out = String::with_capacity(part.len());
+    for (i, line) in part.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let lead = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let col = if i == 0 { first_col + lead } else { lead };
+        let star = keep_from.get(i).copied().unwrap_or(0);
+        if line[lead..].is_empty() {
+            continue;
+        }
+        let Some(m) = margin else {
+            margin = Some(if tag && i > 0 {
+                if star > 0 { star + 1 } else { usize::MAX }
+            } else {
+                col
+            });
+            out.push_str(&line[lead..]);
+            continue;
         };
-        if !starred {
-            out.push(t.trim_end().to_string());
+        if i == 0 {
+            out.push_str(&line[lead..]);
             continue;
         }
-        let spaces = t.len() - t.trim_start_matches([' ', '\t']).len();
-        if margin.is_none() && !t.trim().is_empty() {
-            margin = Some(spaces.min(1));
-        }
-        let cut = spaces.min(margin.unwrap_or(1));
-        out.push(t[cut..].trim_end().to_string());
+        let from = if tag && star == 0 {
+            lead
+        } else {
+            m.max(star).min(lead)
+        };
+        out.push_str(&line[from..]);
     }
     out
 }
@@ -123,8 +176,11 @@ fn tag_name_at(text: &str, i: usize) -> Option<&str> {
 
 /// Parses a `/** ... */` comment. A tag starts at every `@` followed by a name, except
 /// in fenced code blocks, inside `{@link ...}` and inside `@author`'s `<email>`.
+///
+/// Spaces before the `/**` give the comment's column (tsc measures the margin from it).
 pub fn parse(raw: &str) -> JsDoc {
-    let text = lines(raw).join("\n");
+    let (lines, keep_from) = lines(raw);
+    let text = lines.join("\n");
     let b = text.as_bytes();
     let mut doc = JsDoc::default();
     // (tag name, start of its body, end).
@@ -171,14 +227,52 @@ pub fn parse(raw: &str) -> JsDoc {
         i += 1;
     }
     pieces.push((cur.0, cur.1, b.len()));
+    // Pieces are ordered, so visit each line boundary only once.
+    let mut line_starts = text.match_indices('\n').map(|(i, _)| i + 1).peekable();
+    let mut line = 0;
+    let mut line_start = 0;
     for (name, start, end) in pieces {
-        let body = text[start..end].trim();
+        while let Some(next) = line_starts.next_if(|&next| next <= start) {
+            line += 1;
+            line_start = next;
+        }
+        let piece = Piece {
+            text: &text[start..end],
+            col: start - line_start,
+            keep_from: &keep_from[line..],
+        };
         match name {
-            None => doc.comment = parts(body),
-            Some(n) => doc.tags.push(tag(&n, body)),
+            None => doc.comment = parts(piece.dedent(0, false).trim()),
+            Some(n) => doc.tags.push(tag(&n, &piece)),
         }
     }
     doc
+}
+
+/// A comment part as written (columns kept): its text, the column it starts at and
+/// [`lines`]' `keep_from` from its first line on.
+struct Piece<'a> {
+    text: &'a str,
+    col: usize,
+    keep_from: &'a [usize],
+}
+
+impl Piece<'_> {
+    /// The text from byte `from` on, without its margin ([`dedent`]).
+    fn dedent(&self, from: usize, tag: bool) -> String {
+        let before = &self.text[..from];
+        let line = before.matches('\n').count();
+        let col = match before.rfind('\n') {
+            Some(i) => from - i - 1,
+            None => self.col + from,
+        };
+        dedent(
+            &self.text[from..],
+            col,
+            &self.keep_from[line.min(self.keep_from.len())..],
+            tag,
+        )
+    }
 }
 
 /// A balanced `{...}` at the start of `s` (after spaces): its text and the rest.
@@ -223,10 +317,11 @@ fn entity(s: &str) -> (&str, &str) {
     (&s[..e], &s[e..])
 }
 
-fn tag(name: &str, body: &str) -> Tag {
+fn tag(name: &str, piece: &Piece<'_>) -> Tag {
+    let body = piece.text;
     let mut t = Tag {
         name: name.to_string(),
-        raw: body.to_string(),
+        raw: piece.dedent(0, true).trim().to_string(),
         ..Tag::default()
     };
     let mut rest = body;
@@ -314,8 +409,13 @@ fn tag(name: &str, body: &str) -> Tag {
         }
         _ => {}
     }
-    let comment = rest.trim();
-    t.comment = parts(comment);
+    // The comment after the tag's name and type, without its own margin.
+    let comment = if body.ends_with(rest) {
+        piece.dedent(body.len() - rest.len(), true)
+    } else {
+        rest.to_string()
+    };
+    t.comment = parts(comment.trim());
     t
 }
 
@@ -562,8 +662,33 @@ pub fn render(doc: &JsDoc, resolve: &mut Resolve<'_>) -> String {
 mod tests {
     use super::*;
 
+    ts_r_testing::cap_memory!();
+
     fn md(raw: &str) -> String {
         render(&parse(raw), &mut |_| None)
+    }
+
+    #[test]
+    fn tag_margins_follow_line_boundaries() {
+        let doc = parse(
+            "/** Intro {@link A\n * label}.\n * @first\n *   one\n *     continued\n * @second two @third three\n *  last\n */",
+        );
+        assert_eq!(doc.tags.len(), 3);
+        assert_eq!(doc.tags[0].raw, "one\n    continued");
+        assert_eq!(doc.tags[1].raw, "two");
+        assert_eq!(doc.tags[2].raw, "three\nlast");
+    }
+
+    #[test]
+    fn many_tags_parse_in_linear_time() {
+        let raw = format!("/**\n{} */", " * @tag x\n".repeat(100_000));
+        let t = std::time::Instant::now();
+        let doc = parse(&raw);
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(doc.tags.len(), 100_000);
+        assert!(doc.tags.iter().all(|tag| tag.name == "tag"
+            && tag.raw == "x"
+            && tag.comment == [Part::Text("x".to_string())]));
     }
 
     /// The fence is one backtick longer than the longest run in the code (at least three),

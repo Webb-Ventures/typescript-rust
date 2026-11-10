@@ -195,6 +195,10 @@ impl Writer {
         let shown = SymbolFlags::VALUE | SymbolFlags::SIGNATURE | SymbolFlags::TYPE;
         let shown = shown | SymbolFlags::NAMESPACE | SymbolFlags::CONSTRUCTOR;
         let mut flags = all & (flags_for(self.meaning) | SymbolFlags::CONSTRUCTOR);
+        // A union's property is a property, whatever its constituents declare (methods).
+        if flags.intersects(SymbolFlags::METHOD) && synthetic_kind(c, s) == Synthetic::Union {
+            flags = flags.without(SymbolFlags::METHOD) | SymbolFlags::PROPERTY;
+        }
         if flags.is_empty() {
             if self.alias.is_some() || !self.out.is_empty() {
                 return;
@@ -631,6 +635,9 @@ impl Writer {
         );
         let mut out = base;
         let mut cur = c.sym_parent(s);
+        if member && synthetic_kind(c, s) != Synthetic::No {
+            return out;
+        }
         if member {
             match owner(ck, s).or_else(|| prototype_owner(ck, s)) {
                 Some(o) => {
@@ -704,6 +711,44 @@ impl Writer {
         }
         self.type_params(ck, o)
     }
+}
+
+/// What kind of synthetic property `s` is, for the facts tsc shows differently.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Synthetic {
+    /// A declared symbol, or a copy that keeps its owner (spreads, instantiations).
+    No,
+    /// A mapped type's member (or a copy of one): no owner, no documentation.
+    Mapped,
+    /// A union's property made from several declarations: a `(property)` with no owner.
+    Union,
+}
+
+pub(super) fn synthetic_kind(c: &ts_r_checker::Checker<'_>, s: SymId) -> Synthetic {
+    use ts_r_checker::symbols::check_flags::{MAPPED, SYNTHETIC_UNION};
+    let mut cur = s;
+    for _ in 0..8 {
+        let Some(x) = c.synth_sym(cur) else {
+            return Synthetic::No;
+        };
+        if x.check & MAPPED != 0 || x.mapped.is_some() {
+            return Synthetic::Mapped;
+        }
+        if x.check & SYNTHETIC_UNION != 0 {
+            let mut decls: Vec<_> = x.origins.iter().filter_map(|&o| c.first_decl(o)).collect();
+            decls.dedup();
+            return if decls.len() > 1 {
+                Synthetic::Union
+            } else {
+                Synthetic::No
+            };
+        }
+        match x.origins.first() {
+            Some(&o) if o != cur => cur = o,
+            _ => return Synthetic::No,
+        }
+    }
+    Synthetic::No
 }
 
 /// `.name`, or `["name"]` / `[1]` for a member declared with a literal name.
