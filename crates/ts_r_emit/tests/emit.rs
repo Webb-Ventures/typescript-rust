@@ -1005,7 +1005,7 @@ fn javascript_this_properties_next_to_base_members() {
 /// is no entity name goes through `declare const _exports`.
 #[test]
 fn javascript_commonjs_export_assignment_is_written() {
-    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    let config = r#"{ "compilerOptions": { "target": "es2022", "lib": ["es2022"], "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for (src, want) in [
         (
             "class Foo {}\nmodule.exports = new Foo();\n",
@@ -1036,6 +1036,10 @@ fn javascript_commonjs_export_assignment_is_written() {
             "class Foo {}\nmodule.exports = new Foo();\nmodule.exports.n = 20;\n",
             "declare const _exports: Foo;\nexport = _exports;\ndeclare namespace _exports {\n    export var n: 20;\n}\ndeclare class Foo {\n}\n",
         ),
+        (
+            "const _exports = 0; module.exports = {}; module.exports.n = 20;",
+            "declare const _exports_1: {};\nexport = _exports_1;\ndeclare namespace _exports_1 {\n    export var n: 20;\n}\n",
+        ),
         // A class's statics assigned from outside are a namespace merged with it, a static
         // block's `this.x` a static member (jsDeclarationsClassStatic,
         // jsDeclarationEmitThisAssignment).
@@ -1056,6 +1060,36 @@ fn javascript_commonjs_export_assignment_is_written() {
             .find(|o| o.path == "/p/out/a.d.ts")
             .unwrap();
         assert_eq!(d.text, want, "{src}");
+    }
+}
+
+#[test]
+fn javascript_commonjs_many_members_preflight() {
+    let config = r#"{"compilerOptions":{"target":"es2022","noLib":true,"allowJs":true,"declaration":true,"types":[]},"files":["a.js"]}"#;
+    let mut src = String::from("module.exports = {};\n");
+    for i in 0..50_000 {
+        use std::fmt::Write;
+        writeln!(src, "module.exports.p{i} = {i};").unwrap();
+    }
+    for (text, refused) in [
+        (src.as_str(), false),
+        (
+            "module.exports = {}; module.exports.p = 1; module.exports.p = 2;",
+            true,
+        ),
+        (
+            "module.exports = {}; module.exports.p = 1; const other = module.exports;",
+            true,
+        ),
+    ] {
+        let (fs, parsed) = project(&[("tsconfig.json", config), ("a.js", text)]);
+        let program = load_program(&fs, &parsed.file_names, &parsed.options, None, 1);
+        let checker = Checker::new(&program);
+        let file = ts_r_diagnostics::FileId(program.file_index("/p/a.js").unwrap() as u32);
+        assert_eq!(
+            ts_r_emit::dts::js::unsupported(&checker, file).is_some(),
+            refused
+        );
     }
 }
 

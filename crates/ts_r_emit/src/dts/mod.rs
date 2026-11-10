@@ -2281,13 +2281,14 @@ impl<'c, 'a> Emitter<'c, 'a> {
         let members = self.cjs_members.clone();
         let inner = skip_parens(&self.ast, value);
         let local = js::is_local_name(self.c, self.file, inner);
-        if local {
+        let name = if local {
             self.export_value_named(s, value, "export = ", "_exports");
+            None
         } else {
-            self.export_value_const(s, value, "export = ", "_exports");
-        }
-        if !local {
-            self.w("declare namespace _exports {");
+            Some(self.export_value_const(s, value, "export = ", "_exports"))
+        };
+        if let Some(name) = &name {
+            self.w(&format!("declare namespace {name} {{"));
             self.nl();
             self.indent += 1;
         }
@@ -2332,11 +2333,12 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if prefix.starts_with("export default") {
             self.iso_default(expr);
         }
-        self.export_value_const(s, expr, prefix, base)
+        self.export_value_const(s, expr, prefix, base);
+        true
     }
 
     /// `declare const _exports: T;` (`base`, made unique) then `{prefix}_exports;`.
-    fn export_value_const(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> bool {
+    fn export_value_const(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> String {
         let name = self.unique_name(base);
         self.w("declare const ");
         self.w(&name);
@@ -2357,7 +2359,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
         self.w(&name);
         self.w(";");
         self.nl();
-        true
+        name
     }
 
     fn var_statement(&mut self, s: NodeId, scope: Scope, keep_export: bool, prev_end: u32) -> bool {
