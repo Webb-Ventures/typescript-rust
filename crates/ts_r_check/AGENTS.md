@@ -63,6 +63,12 @@ diagnostics in tsc's format. Root rules:
   diagnostics (`build::syntax_before_options`, observed); without syntax errors the option
   errors are reported and nothing is checked, except TS2318 for missing core global types
   (`noLib`), which is global and reported with them.
+- An ambiguous project root (TS2209/TS2210: outputs configured, no `rootDir`, no tsconfig)
+  is a program diagnostic: tsc asks for global and semantic diagnostics only when there is
+  none, so the checker's diagnostics are dropped (`build::check`; missing `/// <reference>`
+  targets stay), with or without emit (observed; tsc:
+  tsc/internal/compiler/program.go, `GetDiagnosticsOfAnyProgram`). Such a program is
+  never checked through history, which does not keep TS2209/TS2210.
 - Option errors (a missing referenced config among them) also keep the rootDir program
   diagnostics (TS6059 at an import, TS6307) out of a `--build` project (observed:
   `tsbuildWatch/sample/watches-config-files-that-are-not-present`).

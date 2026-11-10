@@ -953,7 +953,13 @@ fn main() -> ExitCode {
     let needs_program = emitting || incremental || project_refs || no_check
             // Option errors: the program's syntax errors win over them (see below).
             || options_failed
-            || report.needs_program();
+            || report.needs_program()
+            // The project root may be ambiguous (TS2209/TS2210, which the history does not
+            // keep): outputs configured, no `rootDir` and no tsconfig.
+            || (parsed.options.config_file_path.is_none()
+                && parsed.options.root_dir().is_none()
+                && (parsed.options.out_dir().is_some()
+                    || parsed.options.declaration_dir().is_some()));
     // Sound mode needs the loaded program, and history does not save its results: with a
     // sound configuration, skip history; without one, use it unless a source mentions `@ts-r`
     // (a pragma may turn a file on), then check fully. A warm run never misses sound results.

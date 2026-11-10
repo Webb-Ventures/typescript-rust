@@ -325,6 +325,10 @@ pub struct Reported {
     pub no_check: bool,
 }
 
+/// Program diagnostics at a file that the checker's result carries next to its own: a
+/// missing `/// <reference path>` (TS6053) or `/// <reference types>` (TS2688) target.
+const PROGRAM_CODES: [u32; 2] = [6053, 2688];
+
 /// Checks `program`: under `noCheck` only its syntax ([`syntactic_diagnostics`]). Returns
 /// the diagnostics and how many of them are semantic errors.
 pub fn check(program: &ProgramFiles, threads: usize, no_check: bool) -> (Vec<Diagnostic>, usize) {
@@ -332,8 +336,16 @@ pub fn check(program: &ProgramFiles, threads: usize, no_check: bool) -> (Vec<Dia
     if no_check {
         return (syntax, 0);
     }
-    let d = check_program(program, CheckRun { threads }).diagnostics;
+    let mut d = check_program(program, CheckRun { threads }).diagnostics;
     let syntax_errors = syntax.iter().filter(|d| d.is_error()).count();
+    if syntax_errors == 0 && !program.ambiguous_roots.is_empty() {
+        // An ambiguous project root (TS2209/TS2210) is a program diagnostic: tsc asks for
+        // global and semantic diagnostics only when the program has none, so the checker's
+        // are not reported (tsc: tsc/internal/compiler/program.go,
+        // GetDiagnosticsOfAnyProgram). The other program diagnostics stay.
+        d.retain(|d| d.file.0 == u32::MAX || PROGRAM_CODES.contains(&d.code));
+        return (d, 0);
+    }
     let semantic = d
         .iter()
         .filter(|d| d.is_error())
