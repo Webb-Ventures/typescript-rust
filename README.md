@@ -7,7 +7,7 @@
 
 **Fast TypeScript tooling, written from scratch in Rust.** ts-r type-checks, lints, bundles,
 runs and serves TypeScript, aiming for the same results as the tools you use today, and faster:
-ts-r-check type-checks tRPC, date-fns and RxJS 2.0–5.4× faster than tsc 7 ([benchmarks](#benchmarks)).
+ts-r-check type-checks tRPC, date-fns and RxJS 1.1–2.2× faster than tsc 7, with the same diagnostics ([benchmarks](#benchmarks)).
 Each tool is its own small binary and works on its own next to tsc, ESLint and Vite, so
 you can adopt one without the rest.
 

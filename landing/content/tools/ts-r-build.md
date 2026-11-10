@@ -127,10 +127,10 @@ build a library while the app keeps Vite. It has no JavaScript API, so scripts t
 
 ## Measured
 
-On four dedicated Linux cores (the review box's bench of pull request #42 on 2026-10-24,
-`cargo xtask bench --repos three-x10`, median of 10, peak memory not measured), three.js x10
-minified with source maps took 962.9 ms without the cache and 484.6 ms with it, against
-esbuild 0.28.2's 1,409.8 ms.
+On a shared GitHub-hosted ubuntu-24.04 runner (the bench of pull request #133 on 2026-11-10,
+`cargo xtask bench --repos three-x10`, 4 threads, median of 10, peak memory not measured),
+three.js x10 minified with source maps took 606.4 ms without the cache and 238.7 ms with it,
+against esbuild 0.28.2's 937.6 ms.
 
 Older runs on an Apple M-series Mac (a shared laptop), 4 threads, against esbuild 0.28.2, on
 public projects pinned in `bench/repos.toml` (`cargo xtask bench --repos excalidraw,three-x10`):
