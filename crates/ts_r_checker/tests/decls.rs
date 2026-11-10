@@ -233,6 +233,28 @@ namespace CE { export const z = 1; }
 }
 
 #[test]
+fn unused_many_merged_namespaces() {
+    let count = 20_000;
+    let src = format!("export {{}};\n{}", "namespace N {}\n".repeat(count));
+    let Some(out) = check(
+        "\"target\": \"es2022\", \"lib\": [\"es2022\"], \"noLib\": false, \"noUnusedLocals\": true",
+        &src,
+    ) else {
+        return;
+    };
+    assert_eq!(out.len(), count);
+    for (i, diagnostic) in out.iter().enumerate() {
+        assert_eq!(
+            diagnostic,
+            &format!(
+                "a.ts:{}:11 TS6133: 'N' is declared but its value is never read.",
+                i + 2
+            )
+        );
+    }
+}
+
+#[test]
 fn unused_declaration_holding_a_parse_error() {
     // tsc drops an unused report whose declaration holds a parse error: `{ z` is a pattern
     // missing its `}` (unusedLocalsAndParameters.ts).
