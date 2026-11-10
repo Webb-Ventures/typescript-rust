@@ -860,8 +860,8 @@ Files, by layer:
   as `type_mentions` save and restore both flags and the count. Conditional tail recursion
   stops at 1000 steps, tuples at 10 000 elements, template cross products at 100 000.
 - **The `this` argument** (`check_this_arg`, observed): a candidate with a declared `this`
-  parameter checks the call's receiver (through parentheses, `!` and `?.`), or `void`
-  without one, before its arguments; a failure is TS2684 at the receiver (or the whole
+  parameter checks the call's or tag's receiver (through parentheses, `!`, `as`,
+  `satisfies`, type assertions and `?.`), or `void` without one, before its arguments; a failure is TS2684 at the receiver (or the whole
   call), a missing property replacing that head like TS2345's, and under TS2769 for
   overloads. `super.m()` is not checked. A union's combined signature intersects the
   members' `this` types. In signature relations a strict function type's `this` is
@@ -2538,11 +2538,27 @@ Files, by layer:
   `U | NonNullable<T>`; `&&`'s left operand has no contextual type
   (`logical_operator_generics`). A tuple's minimum length counts its required elements, and
   an optional source element for a required target one is TS2623 (`tuple_arity_messages`).
-- **Tagged templates.** Resolved like calls (`call::Args::Tagged`): the effective arguments are
-  a `TemplateStringsArray` (`Arg::Elem` at the template) and each substitution, contextually
-  typed as argument `1 + i`; an unterminated template accepts too few arguments. A
-  constructable tag is TS2349 (no TS2348, no untyped `Function` call); two templates in an
-  array literal are TS2796; a `super` tag is not resolved (`tagged_template_calls`).
+- **Tagged templates** (design note for the parity round's gap 5; tsc: checker.go,
+  resolveTaggedTemplateExpression, getEffectiveCallArguments, getThisArgumentOfCall). A
+  tagged template is a call through `resolve_call_like` with `call::Args::Tagged`, the same
+  overload, arity, inference, explicit type argument and elaboration path as calls, `new`
+  and JSX. Its effective arguments are the strings array (`Arg::Elem` at the template) and
+  then each substitution, contextually typed as argument `1 + i`, so arity counts the array
+  (`f\`\`` against `(s, a)` is TS2554 "Expected 2 arguments, but got 1"); an unterminated
+  template accepts too few arguments. The array is the global `TemplateStringsArray`, or
+  `{}` with global TS2318 when no file declares it (`noLib`). Where it differs from a call:
+  the tag is not checked for null or undefined (no TS2721-TS2723: a possibly undefined tag
+  has no call signatures and is TS2349 "Not all constituents", `unknown` printed as
+  `unknown`); a not-callable error sits at the whole tag, not at a member name; an untyped
+  `Function` tag takes type arguments without TS2347 (an `any` tag returns before
+  resolution); a constructable tag is TS2349 (no TS2348); the tag's object is the `this`
+  argument (TS2684, TS2741) as a callee's is. Two templates in an array literal are TS2796;
+  a `super` tag is not resolved (`tagged_template_calls`, `tagged_template_tags`,
+  `tagged_template_no_strings_array`). Affected conformance tests: the 97
+  `taggedTemplate*` tests (144 TS2769, 90 TS2345, 16 TS2554 in their baselines) were all
+  exact before this round and stay exact; the round's fixes (this argument, nullable and
+  `unknown` tags, TS2347, missing `TemplateStringsArray`) are covered by no conformance
+  baseline, only by the parity fixtures and tsc 7.0.2 probes.
 - **`new` of a callable.** A callee with call signatures but no construct signatures is
   resolved against its call signatures, so `new f()` gets the same arity and argument
   errors as `f()` (JS functions, `@constructor` ones too, are never constructable in tsc 7).
@@ -3558,12 +3574,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, dc65132, parity/checker-gap-4-fix: the gap-2 regressions on tRPC
-  and TypeORM fixed; 12750 compared variants):
+  Current (2026-11-07, e8416dd, parity/checker-gap-5: tagged templates take tsc's tag
+  rules; 12750 compared variants):
   12481 exact (97.9%; all diagnostics and chains), 12501 (98.0%) exact on first lines;
   128 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3642,8 +3658,10 @@ and integration tests allow: they link the one library build).
   overloaded functions and merged declarations are not reported (silent).
 - Sibling type parameters in the constraints of a cloned generic method signature keep
   their original identity (`<K extends keyof T, U extends K>` instantiated by a receiver).
-- Calls and patterns: TS2769 for tagged-template overloads (only call, `new` and JSX
-  arguments are elaborated), TS2671
+- Inferred type predicates: `(x: boolean) => x` is inferred as `(x: boolean) => x is true`
+  where tsc 7 keeps `(x: boolean) => boolean` (seen in a TS2345 argument message, calls and
+  tagged templates alike; found in gap 5, not fixed).
+- Calls and patterns: TS2671
   for an `export =` that is only a function, TS2300 for duplicate late-bound methods and
   accessors in object literals, TS2465 (`this` in a computed name), implied index signatures merged across
   several declarations of one interface (the first declaration's win).
