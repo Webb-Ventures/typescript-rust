@@ -367,6 +367,8 @@ struct Server {
     configs: HashMap<String, Option<Arc<ConfigInfo>>>,
     projects: BTreeMap<String, ProjectHandle>,
     parity: parity::Runner,
+    /// Some client wants lint results (`ts-r/lintWanted`); with none, no lint config is read.
+    lint_wanted: bool,
     fallback: Option<fallback::Fallback>,
     /// Times the fallback TypeScript exited; after `MAX_FALLBACK_RESTARTS` projects go back
     /// to our checker (state `unknown`) instead of restarting it again.
@@ -393,6 +395,7 @@ impl Server {
             docs: BTreeMap::new(),
             configs: HashMap::new(),
             projects: BTreeMap::new(),
+            lint_wanted: false,
             fallback: None,
             fallback_exits: 0,
             init_options: Value::Null,
@@ -522,6 +525,14 @@ impl Server {
                 "textDocument/didClose" => self.did_close(&params),
                 "workspace/didChangeWatchedFiles" => self.watched(&params),
                 "ts-r/reloadProjects" => self.reload_projects(),
+                "ts-r/lintWanted" => {
+                    let on = params["on"].as_bool().unwrap_or(false);
+                    if std::mem::replace(&mut self.lint_wanted, on) != on {
+                        for p in self.projects.values() {
+                            let _ = p.tx.send(PMsg::LintWanted(on));
+                        }
+                    }
+                }
                 _ => {}
             },
             _ => {}
@@ -1006,19 +1017,23 @@ impl Server {
             self.watch_files(&c.inputs);
         }
         let name = self.display_name(key);
+        let (tx, rx) = mpsc::channel();
         let project = Project::new(
             key.to_string(),
             name.clone(),
             self.shared.clone(),
             options,
             roots,
-        );
-        let (tx, rx) = mpsc::channel();
+        )
+        .with_inbox(tx.clone());
         let handle = thread::Builder::new()
             .name(format!("tsr-project {name}"))
             .stack_size(PROJECT_STACK)
             .spawn(move || project.run(rx))
             .ok();
+        if self.lint_wanted {
+            let _ = tx.send(PMsg::LintWanted(true));
+        }
         // Bring it up to date with every open document.
         for (path, d) in &self.docs {
             let _ = tx.send(PMsg::Doc {

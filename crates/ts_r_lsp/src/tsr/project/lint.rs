@@ -16,8 +16,10 @@
 use super::{KeptCk, Project};
 use crate::lint::{Linted, TypedConfigs};
 use crate::text::TextDoc;
+use crate::tsr::PMsg;
 use crate::tsr::convert::LspLines;
 use serde_json::Value;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
 use ts_r_ast::SourceKind;
@@ -35,6 +37,10 @@ fn enabled() -> bool {
 #[derive(Debug, Default)]
 pub struct LintState {
     configs: TypedConfigs,
+    /// A client wants lint results (off until the daemon says so).
+    wanted: bool,
+    /// This project's inbox, for the config loader's answers.
+    pub(super) inbox: Option<std::sync::mpsc::Sender<PMsg>>,
     /// Files linted at least once (the first run is logged).
     seen: std::collections::HashSet<String>,
     /// Runs, their total and slowest time.
@@ -60,8 +66,7 @@ impl Project {
         if f.is_lib || f.is_declaration() {
             return Vec::new();
         }
-        let root = self.shared.root.clone();
-        let Some(cfg) = self.lint.configs.config_for(&root, path) else {
+        let Some(cfg) = self.lint.configs.cached(path) else {
             return Vec::new();
         };
         let first = self.lint.seen.insert(path.to_string());
@@ -92,10 +97,59 @@ impl Project {
             .collect()
     }
 
-    /// Whether `path`'s lint config is known (or type-aware lint is off), so linting it
-    /// costs only the rules.
-    pub(super) fn lint_config_ready(&self, path: &str) -> bool {
-        !enabled() || self.lint.configs.is_known(path)
+    /// Whether lint results are wanted at all (a client has `ts-r.lint.enable` on, and
+    /// type-aware lint is not switched off): with lint off no config is ever evaluated.
+    pub(super) fn lint_active(&self) -> bool {
+        self.lint.wanted && enabled()
+    }
+
+    /// Whether `path`'s lint config is answered, so linting it costs only the rules. When it
+    /// is not, the config is requested from the loader thread (Node evaluates it there,
+    /// never on this thread); [`Project::on_lint_config`] queues the file again.
+    pub(super) fn lint_config_ready(&mut self, path: &str) -> bool {
+        if self.lint.configs.is_known(path) {
+            return true;
+        }
+        if let Some(tx) = self.lint.inbox.clone() {
+            let sink: crate::lint::ConfigSink = Arc::new(move |generation, path, config| {
+                let _ = tx.send(PMsg::LintConfig {
+                    generation,
+                    path,
+                    config,
+                });
+            });
+            let root = self.shared.root.clone();
+            self.lint.configs.request(&root, path, &sink);
+        }
+        false
+    }
+
+    /// The loader thread answered for `path`: lint it (the file is checked again, which is
+    /// cheap, and publishes with the lint results).
+    pub(super) fn on_lint_config(
+        &mut self,
+        generation: u64,
+        path: String,
+        config: Option<Arc<ts_r_lint::FileConfig>>,
+    ) {
+        if self.lint.configs.deliver(generation, path.clone(), config)
+            && self.owned.contains_key(&path)
+            && !self.todo.contains(&path)
+        {
+            self.todo.push_back(path);
+        }
+    }
+
+    /// The daemon says whether any client wants lint results.
+    pub(super) fn on_lint_wanted(&mut self, on: bool) {
+        if std::mem::replace(&mut self.lint.wanted, on) == on || !on {
+            return;
+        }
+        for p in self.owned.keys() {
+            if !self.todo.contains(p) {
+                self.todo.push_back(p.clone());
+            }
+        }
     }
 
     /// The published lint diagnostics of a file as LSP diagnostics.

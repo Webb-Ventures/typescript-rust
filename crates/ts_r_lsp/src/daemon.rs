@@ -154,6 +154,8 @@ struct Slot {
     first_ready: Option<Duration>,
     /// Last `ts-r/status` (ts-r backend).
     tsr_status: Option<Value>,
+    /// What the ts-r backend was last told with `ts-r/lintWanted`.
+    lint_sent: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -598,6 +600,7 @@ impl Daemon {
                 );
                 self.touch(cid);
                 self.ensure_started(sid);
+                self.sync_lint_wanted();
             }
             Err(e) => {
                 log(&format!("{}: {e}", hello.name));
@@ -778,6 +781,7 @@ impl Daemon {
         if active_any == 0 && self.last_client_left.is_none() {
             self.last_client_left = Some(Instant::now());
         }
+        self.sync_lint_wanted();
     }
 
     // ------------------------------------------------------------------------------------
@@ -1609,7 +1613,38 @@ impl Daemon {
         }
     }
 
+    /// Whether any editor connection wants lint results from the type backend (lint-only
+    /// connections use the daemon's lint worker, not the backend).
+    fn lint_wanted(&self) -> bool {
+        self.clients
+            .values()
+            .any(|c| c.kind == Some(FrontKind::Lsp) && !c.lint_only && c.lint.is_on())
+    }
+
+    /// Tells every running ts-r backend whether lint results are wanted, when that changed:
+    /// with none wanted it reads no lint config (Node evaluates ESLint configs).
+    fn sync_lint_wanted(&mut self) {
+        let on = self.lint_wanted();
+        let sids: Vec<SlotId> = self
+            .slots
+            .iter()
+            .filter(|(_, s)| {
+                s.lint_sent != Some(on)
+                    && crate::tsr::is_tsr(&s.spec)
+                    && s.backend.as_ref().is_some_and(|b| b.in_process())
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for sid in sids {
+            if let Some(s) = self.slots.get_mut(&sid) {
+                s.lint_sent = Some(on);
+            }
+            self.send_backend(sid, lint_wanted_message(on));
+        }
+    }
+
     fn ensure_started(&mut self, sid: SlotId) {
+        let lint_on = self.lint_wanted();
         let tx = self.tx.clone();
         let root = self.root.clone();
         let Some(slot) = self.slots.get_mut(&sid) else {
@@ -1702,6 +1737,12 @@ impl Daemon {
                 let m = jsonrpc::request(json!(id), "initialize", params);
                 if let Some(b) = slot.backend.as_mut() {
                     let _ = b.send(&m);
+                    // The ts-r backend learns before its first document whether to read
+                    // lint configs (the queue is sent in order once it is ready).
+                    if b.in_process() && crate::tsr::is_tsr(&slot.spec) {
+                        slot.lint_sent = Some(lint_on);
+                        slot.queue.insert(0, lint_wanted_message(lint_on));
+                    }
                 }
             }
         }
@@ -2903,6 +2944,10 @@ impl Daemon {
         if was == enable.is_on() {
             return;
         }
+        self.sync_lint_wanted();
+        let Some(c) = self.clients.get(&cid) else {
+            return;
+        };
         let keys: Vec<String> = c.docs.keys().cloned().collect();
         log(&format!(
             "{}: ts-r.lint.enable = {}",
@@ -3058,6 +3103,7 @@ impl Slot {
             idle_stops: 0,
             first_ready: None,
             tsr_status: None,
+            lint_sent: None,
         }
     }
 
@@ -3202,6 +3248,10 @@ fn add_lint_capabilities(caps: &mut Value) {
         }
         _ => {}
     }
+}
+
+fn lint_wanted_message(on: bool) -> Value {
+    jsonrpc::notification("ts-r/lintWanted", json!({ "on": on }))
 }
 
 fn default_configure() -> Value {
