@@ -190,7 +190,9 @@ Files, by layer:
     (`fixed_arg_contexts`, kept in the resolution cache so a cache hit sets them again).
     Only then do the full attributes get checked. When every candidate fails, the
     functions are fixed to the last candidate's props. The call path's skip pass also
-    compares a fresh object argument as regular (`regular_object_literal`).
+    compares a fresh object argument as regular (`regular_object_literal`). Ordinary-call
+    probes save and restore the placeholder type along with the function set, using `any`
+    for their own functions even when nested inside a JSX probe.
   - Generic components infer from the attributes typed in the context of the generic
     props. Suppose the remaining type parameters are only ones the props are made of
     (naked) and only the context-sensitive attributes infer them. A lone candidate then
