@@ -888,7 +888,8 @@ Files, by layer:
   `namespace` and `interface`/`type` + `const` each give one report per declaration;
   private members are walked one by one too, so method overloads report every signature.
   `merged_ok` admits only conflict-free merges whose declarations are all in the file
-  (overloads with one body, one value kind, no decorated class), and a merge with an
+  (overloads with one body, one value kind, no decorated class). Eligibility is cached by
+  `SymbolId` for this pass, so repeated declarations do not rescan the merge. A merge with an
   enum or namespace keeps counting its self reads, so a doubt stays silent. A report is
   dropped when its declaration node holds a parse error: tsc checks the node flag
   that marks a subtree with a parse error before reporting, and a binding element reports
