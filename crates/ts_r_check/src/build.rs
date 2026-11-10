@@ -249,6 +249,26 @@ pub fn compile(
         references::drop_referenced_outputs(&mut e.0, &program, ref_configs, fs.case_sensitive());
         e
     });
+    let mut dts_errors = emitted
+        .as_ref()
+        .map_or(0, |(r, _)| crate::declaration_error_count(r));
+    let mut dts_error_files = emitted.as_ref().map_or_else(Vec::new, |(r, _)| {
+        crate::declaration_error_files(&r.diagnostics)
+    });
+    let mut dts_computed = emitting && ts_r_emit::emits_declarations(&parsed.options);
+    if !emitting
+        && !options_failed
+        && crate::reports_declaration_diagnostics(parsed, &diags, &config_diags)
+        && ts_r_projects::roots::missing_root_diagnostics(parsed, fs, &mut |_| {
+            ts_r_diagnostics::FileId(u32::MAX)
+        })
+        .is_empty()
+    {
+        diags = ts_r_emit::declaration_diagnostics(&program, &cfg);
+        dts_errors = diags.iter().filter(|d| d.is_error()).count();
+        dts_error_files = crate::declaration_error_files(&diags);
+        dts_computed = true;
+    }
     let emit_errors = errors_before_emit == 0 && error_count(&diags, &config_diags) > 0;
     let mut sources = crate::sources_of(&program, &diags);
     let diags = merge_config_diagnostics(diags, &config_diags, &mut sources, fs);
@@ -262,9 +282,11 @@ pub fn compile(
     }
     let errors = rendered.errors > 0;
     let reported = Reported {
-        errors: rendered.errors > semantic,
+        errors: rendered.errors > semantic + dts_errors,
         semantic_errors: semantic > 0,
         no_check,
+        dts_computed,
+        dts_error_files,
     };
     let blocked = errors && parsed.options.no_emit_on_error() == Some(true);
     let mut skipped = emitted.as_ref().is_none_or(|(r, _)| r.skipped) || blocked;
@@ -315,7 +337,7 @@ pub fn compile(
 }
 
 /// What a build reported, for the buildinfo ([`incremental::Built`]).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Reported {
     /// Errors other than semantic ones (syntax, options, emit).
     pub errors: bool,
@@ -323,6 +345,11 @@ pub struct Reported {
     pub semantic_errors: bool,
     /// The build ran with `noCheck`.
     pub no_check: bool,
+    /// The build computed declaration diagnostics (emitting declarations, or reporting
+    /// them under `noEmit`).
+    pub dts_computed: bool,
+    /// Program files whose declarations reported errors (not counted in `errors`).
+    pub dts_error_files: Vec<u32>,
 }
 
 /// Program diagnostics at a file that the checker's result carries next to its own: a
@@ -493,6 +520,8 @@ pub fn write_project(
             errors: reported.errors,
             semantic_errors: reported.semantic_errors,
             no_check: reported.no_check,
+            dts_computed: reported.dts_computed,
+            dts_error_files: &reported.dts_error_files,
             write_all: force || clash || (build_mode && !prev.incremental),
             with_buildinfo,
             package_jsons,

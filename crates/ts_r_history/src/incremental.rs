@@ -77,6 +77,68 @@ pub struct FileState {
     pub syntax: Vec<PathDiag>,
     /// Path-reference diagnostics, refreshed when the file's resolutions change.
     pub references: Vec<PathDiag>,
+    /// Declaration diagnostics, computed with the check diagnostics when a
+    /// [`DeclarationHook`] is given (`None`: not computed; record 0012, "Declaration
+    /// diagnostics under `--noEmit`").
+    pub decls: Option<Vec<PathDiag>>,
+}
+
+/// Computes one file's declaration diagnostics on the checker that just checked it:
+/// ts-r-check passes `ts_r_emit::declaration_diagnostics_of` (this crate does not depend on
+/// the emitter).
+pub type DeclarationHook<'h> =
+    &'h (dyn for<'c, 'a> Fn(&'c Checker<'a>, FileId) -> Vec<Diagnostic> + Sync);
+
+/// Whether declaration diagnostics are asked of the file at `path` (tsc asks every file a
+/// declaration would be written for: not a declaration, `node_modules` or JSON file; lib
+/// files are never asked).
+pub fn has_declarations(path: &str, external: bool) -> bool {
+    !external
+        && !ts_r_ast::SourceKind::from_path(path).is_declaration()
+        && (path.len() < 5 || !path.as_bytes()[path.len() - 5..].eq_ignore_ascii_case(b".json"))
+}
+
+/// [`DeclarationHook`] over `targets` (file ids of `checker`'s program), on up to
+/// `threads` threads; results in `targets` order.
+pub fn declaration_results(
+    checker: &Checker<'_>,
+    targets: &[usize],
+    threads: usize,
+    hook: DeclarationHook<'_>,
+) -> Vec<Vec<Diagnostic>> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let slots: Vec<Mutex<Vec<Diagnostic>>> =
+        targets.iter().map(|_| Mutex::new(Vec::new())).collect();
+    let next = AtomicUsize::new(0);
+    let work = || {
+        loop {
+            let k = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&i) = targets.get(k) else { break };
+            let d = hook(checker, FileId(i as u32));
+            *slots[k].lock().unwrap_or_else(|e| e.into_inner()) = d;
+        }
+    };
+    let threads = threads.clamp(1, 4).min(targets.len());
+    if threads <= 1 {
+        work();
+    } else {
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                // The declaration emitter recurses like the checker: the emitter's stacks.
+                let spawned = std::thread::Builder::new()
+                    .stack_size(64 << 20)
+                    .spawn_scoped(s, work);
+                if spawned.is_err() {
+                    work();
+                }
+            }
+        });
+    }
+    slots
+        .into_iter()
+        .map(|s| s.into_inner().unwrap_or_else(|e| e.into_inner()))
+        .collect()
 }
 
 /// Counts from one [`History::check`].
@@ -262,6 +324,19 @@ impl History {
         run: CheckRun,
         make: impl FnOnce(&'a ProgramFiles) -> Checker<'a>,
     ) -> (Vec<Diagnostic>, CheckStats) {
+        self.check_with(program, run, make, None)
+    }
+
+    /// [`History::check`] that also computes, with `decl`, the declaration diagnostics of
+    /// the files it re-checks (and of the files that get declarations without a check),
+    /// keeping the others' ([`History::declaration_diagnostics`]).
+    pub fn check_with<'a>(
+        &mut self,
+        program: &'a ProgramFiles,
+        run: CheckRun,
+        make: impl FnOnce(&'a ProgramFiles) -> Checker<'a>,
+        decl: Option<DeclarationHook<'_>>,
+    ) -> (Vec<Diagnostic>, CheckStats) {
         let mut stats = CheckStats::default();
         let mut t = std::time::Instant::now();
         let mut lap = |i: usize, stats: &mut CheckStats| {
@@ -362,29 +437,34 @@ impl History {
                 continue;
             }
             let check = should_check(program, i);
-            if !check {
+            let declares = decl.is_some() && has_declarations(&f.path, f.is_external);
+            if !check && !declares {
                 continue;
             }
             let shape = &shapes.shapes[&f.path];
             let used: Vec<Hash> = shape.uses.iter().map(|u| deep.of(u)).collect();
-            let reuse = check
-                && !new_shapes.contains_key(&f.path)
+            // Stored diagnostics stay valid while every file they point into is unchanged.
+            let still = |ds: &Option<Vec<PathDiag>>| {
+                ds.as_ref().is_some_and(|ds| {
+                    ds.iter().all(|d| {
+                        d.paths().all(|p| {
+                            present.contains(p)
+                                && !changed.contains(p)
+                                && !removed.iter().any(|r| r == p)
+                        })
+                    })
+                })
+            };
+            let reuse = !new_shapes.contains_key(&f.path)
                 && match self.files.get(&f.path) {
                     Some(st) => {
                         st.used == used
-                            && st.diags.as_ref().is_some_and(|ds| {
-                                ds.iter().all(|d| {
-                                    d.paths().all(|p| {
-                                        present.contains(p)
-                                            && !changed.contains(p)
-                                            && !removed.iter().any(|r| r == p)
-                                    })
-                                })
-                            })
+                            && (!check || still(&st.diags))
+                            && (!declares || still(&st.decls))
                     }
                     None => false,
                 };
-            if check && !reuse {
+            if !reuse {
                 targets.push(i);
             }
             used_now.insert(i, used);
@@ -396,6 +476,7 @@ impl History {
         let mut out = syntax;
         out.extend(global_diagnostics(program));
         let mut results: FxHashMap<usize, Vec<PathDiag>> = FxHashMap::default();
+        let mut decl_results: FxHashMap<usize, Vec<PathDiag>> = FxHashMap::default();
         let link_changed = !fresh.is_empty() || !removed.is_empty() || self.link.is_none();
         if link_changed || !targets.is_empty() {
             let checker = make(program);
@@ -413,11 +494,33 @@ impl History {
                     .filter(&mut reported)
                     .cloned(),
             );
-            for (&i, ds) in targets.iter().zip(check_files(&checker, &targets, run)) {
+            let checked: Vec<usize> = targets
+                .iter()
+                .copied()
+                .filter(|&i| should_check(program, i))
+                .collect();
+            for (&i, ds) in checked.iter().zip(check_files(&checker, &checked, run)) {
                 results.insert(
                     i,
                     ds.iter().map(|d| PathDiag::from_diag(program, d)).collect(),
                 );
+            }
+            if let Some(hook) = decl {
+                let declaring: Vec<usize> = targets
+                    .iter()
+                    .copied()
+                    .filter(|&i| {
+                        let f = &program.files[i];
+                        has_declarations(&f.path, f.is_external)
+                    })
+                    .collect();
+                let found = declaration_results(&checker, &declaring, run.threads, hook);
+                for (&i, ds) in declaring.iter().zip(found) {
+                    decl_results.insert(
+                        i,
+                        ds.iter().map(|d| PathDiag::from_diag(program, d)).collect(),
+                    );
+                }
             }
             self.link = Some(
                 checker
@@ -449,6 +552,13 @@ impl History {
                 }
                 None => None,
             };
+            let decls = match decl_results.remove(&i) {
+                Some(ds) => Some(ds),
+                None if decl.is_some() && has_declarations(&f.path, f.is_external) => {
+                    self.files.get_mut(&f.path).and_then(|s| s.decls.take())
+                }
+                None => None,
+            };
             next.insert(
                 f.path.clone(),
                 FileState {
@@ -464,6 +574,7 @@ impl History {
                         .iter()
                         .map(|d| PathDiag::from_diag(program, d))
                         .collect(),
+                    decls,
                 },
             );
         }
@@ -477,6 +588,19 @@ impl History {
             }
         }
         (ts_r_checker::sort_and_dedup(program, out), stats)
+    }
+
+    /// The declaration diagnostics the last check kept, by file ids of `program`, sorted
+    /// (empty without a [`DeclarationHook`]).
+    pub fn declaration_diagnostics(&self, program: &ProgramFiles) -> Vec<Diagnostic> {
+        let index = path_index(program);
+        let out = self
+            .files
+            .values()
+            .flat_map(|st| st.decls.iter().flatten())
+            .filter_map(|d| d.to_diag(&index))
+            .collect();
+        ts_r_checker::sort_and_dedup(program, out)
     }
 }
 

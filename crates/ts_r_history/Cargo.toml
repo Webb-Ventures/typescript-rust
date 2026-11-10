@@ -26,3 +26,4 @@ blake3 = "1.8"
 
 [dev-dependencies]
 ts_r_testing = { path = "../ts_r_testing" }
+ts_r_emit = { path = "../ts_r_emit" }

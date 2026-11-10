@@ -2761,6 +2761,30 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if let Some(n) = name {
             self.name_text(n);
         }
+        if let Some(tag) = js::applicable_function_type_tag(&self.ast, s, params) {
+            let built = self.type_tag_signature(s, tag, params);
+            match built.map(|n| (n, *self.ast.node(n))) {
+                Some((
+                    n,
+                    Node::FunctionType {
+                        type_params,
+                        params,
+                        return_type,
+                    },
+                )) => {
+                    self.type_params(type_params);
+                    self.params(params, n);
+                    self.w(": ");
+                    self.type_node(return_type);
+                }
+                _ => {
+                    self.fail(s, NotNameable::Unresolved);
+                    self.w("(): any");
+                }
+            }
+            self.semi_end(s);
+            return;
+        }
         self.type_params(type_params);
         self.params(params, s);
         self.w(": ");
@@ -2772,6 +2796,75 @@ impl<'c, 'a> Emitter<'c, 'a> {
             }
         }
         self.semi_end(s);
+    }
+
+    /// The one call signature of the `@type` (type node `tag`) of JavaScript function
+    /// declaration `f` as a function type node, its parameters named as `f`'s (tsc 7.0.2:
+    /// `export declare function inJs<T>(l: T): T;` for `/** @type {<T>(m: T) => T} */`,
+    /// typeTagOnFunctionReferencesGeneric). `None` when the type has no single call signature
+    /// with as many parameters, or a part of it cannot be written.
+    fn type_tag_signature(&mut self, f: NodeId, tag: NodeId, params: NodeList) -> Option<NodeId> {
+        let t = self.ck.type_from_node(self.loc(tag));
+        let sigs = self
+            .ck
+            .signatures_of(t, ts_r_checker::members::SigKind::Call);
+        let [sig] = sigs[..] else {
+            return None;
+        };
+        let own: Vec<NodeId> = self.ast.list(params).to_vec();
+        let mut cx = TypeNodeCx::new(&mut self.ast, Loc::new(self.file, f)).with_host(self.host);
+        let built = self.ck.signature_node(
+            sig,
+            ts_r_checker::typenode::SigShape::Function,
+            None,
+            &mut cx,
+        );
+        let refs = std::mem::take(&mut cx.refs);
+        drop(cx);
+        let n = built.ok()?;
+        let Node::FunctionType {
+            params: sp,
+            return_type,
+            ..
+        } = *self.ast.node(n)
+        else {
+            return None;
+        };
+        let sp: Vec<NodeId> = self.ast.list(sp).to_vec();
+        if sp.len() != own.len() {
+            return None;
+        }
+        if let Node::TypePredicate { asserts, param, ty } = *self.ast.node(return_type)
+            && !matches!(self.ast.node(param), Node::ThisType {})
+        {
+            let pred = self.ck.predicate_of(sig)?;
+            let &p = own.get(pred.param_index as usize)?;
+            let Node::Param { pattern, .. } = *self.ast.node(p) else {
+                return None;
+            };
+            let Node::Ident { name } = *self.ast.node(pattern) else {
+                return None;
+            };
+            let param = self.ast.add(Node::Ident { name }, Span::EMPTY);
+            let pred = self
+                .ast
+                .add(Node::TypePredicate { asserts, param, ty }, Span::EMPTY);
+            if let Node::FunctionType { return_type, .. } = self.ast.node_mut(n) {
+                *return_type = pred;
+            }
+        }
+        for (&s, &o) in sp.iter().zip(&own) {
+            let Node::Param { pattern, .. } = *self.ast.node(o) else {
+                return None;
+            };
+            if let Node::Param { pattern: p, .. } = self.ast.node_mut(s) {
+                *p = pattern;
+            }
+        }
+        for r in refs {
+            self.reference_symbol(r);
+        }
+        Some(n)
     }
 
     /// One JSDoc `@overload` signature (`ty`, the function type it desugared into): type

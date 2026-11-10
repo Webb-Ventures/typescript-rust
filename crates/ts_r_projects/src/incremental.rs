@@ -92,7 +92,27 @@ pub fn option_hashes(options: &CompilerOptions, config_dir: &str) -> OptionHashe
                 | u8::from(options.inline_source_map() == Some(true)) << 1,
         ),
         dts_maps: Some(u8::from(options.declaration_map() == Some(true))),
+        declarations: Some(declaration_bits(options)),
     }
+}
+
+/// [`OptionHashes::declarations`]: 1 when `options` ask for declarations, 2 with
+/// `declarationMap`, `noEmit` aside.
+pub fn declaration_bits(options: &CompilerOptions) -> u8 {
+    let e = options.effective();
+    let on = e.declaration() || options.emit_declaration_only() == Some(true);
+    u8::from(on) | u8::from(options.declaration_map() == Some(true)) << 1
+}
+
+/// Whether declaration bits changed from `old` to `now` leave declaration work pending: the
+/// current options ask for declarations or a map (both kinds' pending work is masked by
+/// them). tsc 7.0.2 rewrites its buildinfo for such a change alone, and otherwise only when
+/// something else changed (observed: `tsc/noEmit/dts-errors-with-declaration-enable-
+/// changes-with-multiple-files`, `--noEmit` after `--declaration --declarationMap` writes
+/// nothing; `tsbuild/noEmit/dts-errors-with-declaration-enable-changes-with-incremental`,
+/// an edit then stores the options without declarations).
+fn declarations_pending(old: u8, now: u8) -> bool {
+    old != now && now != 0
 }
 
 fn value_text(v: &OptionValue, ty: OptionType, config_dir: &str) -> String {
@@ -201,6 +221,11 @@ pub struct Built<'a> {
     pub semantic_errors: bool,
     /// The build ran with `noCheck` (no semantic diagnostics).
     pub no_check: bool,
+    /// The build computed declaration diagnostics (emitting declarations, or reporting
+    /// them under `noEmit`).
+    pub dts_computed: bool,
+    /// Program file ids whose declarations reported errors (not in `errors`).
+    pub dts_error_files: &'a [u32],
     /// Always write every output and the buildinfo (`--build` of a project without
     /// program state: tsc rewrites everything).
     pub write_all: bool,
@@ -224,9 +249,13 @@ pub fn plan(prev: &Previous, b: &Built, on_disk: &dyn Fn(&str) -> Option<Vec<u8>
     let mut info = BuildInfo {
         version: current_version(),
         root,
-        errors: b.errors,
+        // Declaration diagnostics: emit diagnostics of an incremental program, other errors
+        // otherwise (tsc 7.0.2's buildinfo; `tsbuild/noEmit/dts-errors-with-declaration-
+        // enable-changes` and its `-with-incremental` variant).
+        errors: b.errors || (!b.dts_error_files.is_empty() && !prev.incremental),
         semantic_errors: b.semantic_errors,
         check_pending: false,
+        dts_errors: false,
         program: None,
     };
 
@@ -321,6 +350,26 @@ pub fn plan(prev: &Previous, b: &Built, on_disk: &dyn Fn(&str) -> Option<Vec<u8>
             None => info.check_pending = true,
         }
     }
+    info.dts_errors = info
+        .program
+        .as_ref()
+        .is_some_and(|s| s.files.iter().any(|f| f.dts_errors));
+    // Declaration bits changed without pending work, and nothing else: keep the old ones,
+    // so the buildinfo is not rewritten.
+    if let (Some(old), Some(state)) = (
+        prev.state().and_then(|s| s.options.declarations),
+        info.program.as_mut(),
+    ) && let Some(now) = state.options.declarations
+        && !declarations_pending(old, now)
+    {
+        state.options.declarations = Some(old);
+        let kept = buildinfo::to_text(&info);
+        if on_disk(bi_path).is_none_or(|d| d != kept.as_bytes())
+            && let Some(state) = info.program.as_mut()
+        {
+            state.options.declarations = Some(now);
+        }
+    }
     let text = buildinfo::to_text(&info);
     let unchanged = !b.write_all && on_disk(bi_path).is_some_and(|old| old == text.as_bytes());
     Plan {
@@ -369,12 +418,24 @@ fn program_state(
             Some(o) => (o.signature.clone(), o.api.clone()),
             None => (String::new(), String::new()),
         };
+        // Declaration errors: this build's when it computed them, else the last ones while
+        // the file is unchanged (tsc keeps a file's emit diagnostics until it changes;
+        // observed: `tsc/noEmit/dts-errors-with-incremental`, `--noEmit` after an emit with
+        // TS4094 rewrites nothing).
+        let dts_errors = if b.dts_computed {
+            b.dts_error_files.contains(&(pi as u32))
+        } else {
+            old_files
+                .get(rel.as_str())
+                .is_some_and(|o| o.dts_errors && o.hash == hash)
+        };
         files.push(FileState {
             path: rel,
             hash,
             signature,
             api,
             global: !f.bound.is_module || !f.bound.table(f.bound.global_augmentations).is_empty(),
+            dts_errors,
             deps: Vec::new(),
         });
         emittable.push(ts_r_emit::emittable(f));
@@ -612,6 +673,7 @@ fn program_state(
         dts: old_hashes.and_then(|h| h.dts.clone()),
         js_maps: old_hashes.and_then(|h| h.js_maps),
         dts_maps: old_hashes.and_then(|h| h.dts_maps),
+        declarations: Some(declaration_bits(&b.config.options)),
     };
     if kinds & pending::JS != 0 && stored.js != hashes.js {
         pending_bits.iter_mut().for_each(|p| *p |= pending::JS);
