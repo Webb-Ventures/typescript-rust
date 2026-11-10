@@ -2744,7 +2744,9 @@ Files, by layer:
   typed by one marker object (`Ck::non_inferrable_fn`) that `infer_from` skips, and infers it
   against the parameter's generic mapped type (`infer_partial_literal`). Candidates that
   still hold the marker are dropped, except for `T` itself, where the members holding it
-  become `unknown`. The deferred pass fixes what the context-sensitive functions'
+  become `unknown`. Exhausting the marker search's depth or node budget counts as a possible
+  marker, so an unchecked candidate cannot retain the internal placeholder.
+  The deferred pass fixes what the context-sensitive functions'
   contextual signatures read (`sensitive_fn_sigs`, every function, not only literals made of
   functions), types the literal once in that context (`fixed_arg_contexts`; with `T` fixed
   to `unknown`, the context maps `T` to the literal's keys typed `unknown`, so `Box<T["k"]>`
