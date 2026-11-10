@@ -61,16 +61,44 @@ for name in "${packages[@]}"; do
     echo "$name: not on npm (or the registry didn't answer); skipped"
     failed=$((failed + 1)); continue
   fi
+  # Prints "<latest> <next> <behind>": behind is yes when `next` names an older version than
+  # `latest` (or none). Semver precedence, the same rule as tag_is_newer in
+  # .github/scripts/npm-publish.sh: a release is newer than its prereleases, numeric
+  # identifiers compare as numbers.
   # shellcheck disable=SC2016 # JavaScript template literal, not shell
-  read -r latest next <<<"$(node -e '
+  read -r latest next behind <<<"$(node -e '
     const t = JSON.parse(process.argv[1] || "{}");
-    console.log(`${t.latest || "-"} ${t.next || "-"}`);
+    const parse = (v) => {
+      const i = v.indexOf("-");
+      const core = (i < 0 ? v : v.slice(0, i)).split(".").map(Number);
+      return [core, i < 0 ? null : v.slice(i + 1).split(".")];
+    };
+    const ident = (a, b) => {
+      const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+      if (na && nb) return Number(a) - Number(b);
+      if (na !== nb) return na ? -1 : 1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    };
+    const cmp = (x, y) => {
+      const [cx, px] = parse(x), [cy, py] = parse(y);
+      for (let k = 0; k < 3; k++) if (cx[k] !== cy[k]) return cx[k] - cy[k];
+      if (!px || !py) return (px ? -1 : 0) - (py ? -1 : 0);
+      for (let k = 0; k < Math.min(px.length, py.length); k++) {
+        const d = ident(px[k], py[k]);
+        if (d) return d;
+      }
+      return px.length - py.length;
+    };
+    const behind = t.latest && (!t.next || cmp(t.next, t.latest) < 0);
+    console.log(`${t.latest || "-"} ${t.next || "-"} ${behind ? "yes" : "no"}`);
   ' "$tags")"
   if [ "$latest" = - ] || [[ "$latest" != *-* ]]; then
     echo "$name: latest is ${latest} (not a prerelease); left alone"
     skipped=$((skipped + 1)); continue
   fi
-  if [ "$next" = "$latest" ]; then
+  if [ "$behind" != yes ]; then
+    # `next` already names `latest` or something newer (a publish under `next` only): keep it.
+    [ "$next" = "$latest" ] || echo "$name: next $next is newer than latest $latest; left alone"
     skipped=$((skipped + 1)); continue
   fi
   if [ "$apply" = true ]; then
