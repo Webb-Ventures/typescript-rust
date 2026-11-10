@@ -55,10 +55,6 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
             JsDocTagKind::Enum => "a JSDoc @enum",
             JsDocTagKind::Private | JsDocTagKind::Protected => "a JSDoc modifier on an assignment",
             JsDocTagKind::This if t.ty.is_none() => "a JSDoc @this without a type",
-            // tsc takes the function's signature from the type (its type parameters too).
-            JsDocTagKind::Type if matches!(ast.node(t.host), Node::FunctionDecl { .. }) => {
-                "a JSDoc @type on a function declaration"
-            }
             _ => continue,
         };
         return Some((t.span, why));
@@ -805,6 +801,46 @@ fn base_member_of(c: &Checker, file: FileId, class: NodeId, name: &str) -> BaseM
     let mut ck = ts_r_checker::Ck::new(c, file);
     ck.no_report += 1;
     base_member(&mut ck, sym, name)
+}
+
+/// The type node of the JSDoc `@type` that types JavaScript function declaration `f`: tsc 7
+/// applies it when no `@param`, `@returns` or `@template` comes before it and no parameter
+/// has its own `@type`; otherwise the function is written from those tags (tsc 7.0.2,
+/// jsdocTypeParameterTagConflict).
+pub(super) fn applicable_function_type_tag(
+    ast: &Ast,
+    f: NodeId,
+    params: ts_r_ast::NodeList,
+) -> Option<NodeId> {
+    if ast.jsdoc_tags.is_empty() || !matches!(ast.node(f), Node::FunctionDecl { .. }) {
+        return None;
+    }
+    // (The tags are grouped by kind: the first in the source is the one that starts first.)
+    let first = ast
+        .jsdoc_tags_of(f)
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.kind,
+                JsDocTagKind::Type
+                    | JsDocTagKind::Param
+                    | JsDocTagKind::Returns
+                    | JsDocTagKind::Template
+            )
+        })
+        .min_by_key(|t| t.span.start)?;
+    if first.kind != JsDocTagKind::Type {
+        return None;
+    }
+    // A parameter's own `/** @type {T} */ p` (inside the function; `@param` tags of the
+    // function's comment come before it).
+    let start = ast.span(f).start;
+    let own_type = ast.list(params).iter().any(|&p| {
+        ast.jsdoc_tags_of(p)
+            .iter()
+            .any(|t| t.kind == JsDocTagKind::Type && t.span.start > start)
+    });
+    if own_type { None } else { first.ty }
 }
 
 /// The property `name` of the first `extends` base of `class` that has one.

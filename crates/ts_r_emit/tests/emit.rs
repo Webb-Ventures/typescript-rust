@@ -804,8 +804,7 @@ fn dropped_aliases_release_their_imports() {
 
 /// JavaScript declarations are refused (TSR2006, the file's `.js` still written) when the
 /// file uses a pattern tsc declares from that the emitter does not write: CommonJS
-/// exports, a dotted `@typedef` name, a `@callback` rest parameter, `@type` on a function
-/// declaration, a class's statics.
+/// exports, a dotted `@typedef` name, a `@callback` rest parameter, a class's statics.
 #[test]
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
@@ -816,7 +815,6 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "exports.a = require(\"./y\");\n",
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
         "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
-        "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
         "class A {}\nexport class C extends A {}\nC.count = 1;\n",
         "export class C {}\nfunction f() { C.count = 1; }\nf();\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
@@ -877,6 +875,37 @@ fn javascript_overloads_are_written() {
             .iter()
             .find(|o| o.path == "/p/out/a.d.ts")
             .unwrap();
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
+/// A JSDoc `@type` on a JavaScript function declaration gives its signature when no
+/// `@param`, `@returns` or `@template` comes first (tsc 7.0.2, jsdocTypeParameterTagConflict,
+/// typeTagOnFunctionReferencesGeneric): the type's parameters under the function's names.
+#[test]
+fn javascript_type_tag_on_a_function_declaration() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "/** @type {<T>(m: T) => T} */\nexport function f(a) { return a; }\n",
+            "/** @type {<T>(m: T) => T} */\nexport declare function f<T>(a: T): T;\n",
+        ),
+        (
+            "/**\n * @param {string} a\n * @type {(a: number) => number}\n * @returns {string}\n */\nexport function g(a) { return a; }\n",
+            "/**\n * @param {string} a\n * @type {(a: number) => number}\n * @returns {string}\n */\nexport declare function g(a: string): string;\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .expect("a.d.ts");
         assert_eq!(d.text, want, "{src}");
     }
 }
