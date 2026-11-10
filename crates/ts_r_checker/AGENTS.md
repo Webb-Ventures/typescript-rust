@@ -1789,6 +1789,8 @@ Files, by layer:
   `type D = Box<D>` (an alias), `type E = [...E]`, `type F = typeof v; var v: F[]` are
   not. A circular alias is not generic for its references (tsc never records its type
   parameters): arguments give TS2315, a bare reference nothing.
+  Reference arity checks only probe circularity when local type parameters exist;
+  non-generic aliases already have the same arity either way.
   `circular_annotations.rs` walks the syntax for this; not yet followed: a
   conditional's branches when its check type is not generic, mapped type constraints,
   unannotated variables, functions' return types and interface members.
@@ -2678,6 +2680,8 @@ Files, by layer:
      known to have no member at all is its own apparent type (`apparent_type`), so
      `pick.foo` on `Pick<T, K>` and `rec.foo` on `Record<K, V>` are TS2339 (with members
      known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
+     During one excess-property check, interned-name sets are reused per mapped target,
+     including union/intersection members; this cache ends with the check.
   5. *Same alias first* (`alias_args_related_by_variance`): before rule 1, two
      instantiations of one alias whose arguments relate by its measured variances are
      related, as tsc probes alias variance before the mapped target case
