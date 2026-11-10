@@ -33,6 +33,11 @@
 //! - A type parameter and a parameter of one name (`function f<T>(T: T)`) share a symbol;
 //!   a read as a type reference's name uses the type parameter, any other read the
 //!   parameter, and each is reported on its own.
+//! - An unread merged symbol is reported at every declaration, each with its own kind's
+//!   message: overloads (`function f(): void; function f(x?) {}` twice), `function`/
+//!   `class`/`enum` + `namespace`, `class` + `interface`, `interface`/`type` + `const`,
+//!   namespace + namespace; private method overloads at every signature (`merged_ok`).
+//! - A variable's report is dropped when its declaration holds a parse error.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use ts_r_ast::{AssignOp, Ast, BinaryOp, MethodKind, Modifiers, Node, NodeId, Span, VarKind};
@@ -77,6 +82,8 @@ struct Unused<'x, 'a> {
     read_value: FxHashSet<SymbolId>,
     /// Script-global symbols (never reported).
     global: FxHashSet<SymbolId>,
+    /// Merge eligibility, computed once per symbol in this file.
+    merged: FxHashMap<SymbolId, bool>,
     /// Property names accessed in the file: name → (access node, is a read).
     accesses: FxHashMap<String, Vec<(NodeId, bool)>>,
     locals: bool,
@@ -94,6 +101,9 @@ struct Unused<'x, 'a> {
     dynamic_access: Vec<(NodeId, bool)>,
     /// Private members whose reads need types, so `check_unused` decides.
     escaped: Vec<Escaped>,
+    /// Starts of the file's syntax errors (sorted): tsc reports nothing at a declaration
+    /// whose nodes hold one.
+    syntax_errors: Vec<u32>,
     out: Vec<Report>,
 }
 
@@ -124,6 +134,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             read_type: FxHashSet::default(),
             read_value: FxHashSet::default(),
             global: FxHashSet::default(),
+            merged: FxHashMap::default(),
             accesses: FxHashMap::default(),
             locals,
             params,
@@ -134,6 +145,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             jsdoc_names: FxHashSet::default(),
             dynamic_access: Vec::new(),
             escaped: Vec::new(),
+            syntax_errors: ts_r_parser::without_grammar(&sf.syntax, &sf.grammar)
+                .iter()
+                .filter(|d| d.is_error() && !crate::driver::CHECKER_GRAMMAR_CODES.contains(&d.code))
+                .map(|d| d.span.start)
+                .collect(),
             out: Vec::new(),
         };
         u.collect();
@@ -213,6 +229,11 @@ impl<'x, 'a> Unused<'x, 'a> {
                     | SymbolFlags::CLASS
                     | SymbolFlags::INTERFACE
                     | SymbolFlags::TYPE_ALIAS,
+            ) && !s.flags.intersects(
+                // Merged with an enum or a namespace: their self reads count (see below).
+                SymbolFlags::REGULAR_ENUM
+                    | SymbolFlags::VALUE_MODULE
+                    | SymbolFlags::NAMESPACE_MODULE,
             ) {
                 // Enums and namespaces reading themselves count: tsc's baselines (taken after
                 // emit) do not report them.
@@ -459,6 +480,68 @@ impl<'x, 'a> Unused<'x, 'a> {
         self.b.decls(s).len() == 1 && self.c.decls(self.c.sym(self.file, s)).len() == 1
     }
 
+    /// A merge of declarations in this file that tsc reports one by one when the symbol is
+    /// unread (overloads, `function`/`class`/`enum` + `namespace`, `class`/`function` +
+    /// `interface`, `interface`/`type` + `const`): only conflict-free combinations, all
+    /// in this file and none decorated.
+    fn merged_ok(&mut self, s: SymbolId) -> bool {
+        if let Some(&ok) = self.merged.get(&s) {
+            return ok;
+        }
+        let ok = self.merged_ok_uncached(s);
+        self.merged.insert(s, ok);
+        ok
+    }
+
+    fn merged_ok_uncached(&self, s: SymbolId) -> bool {
+        let decls = self.b.decls(s);
+        if decls.len() < 2 || self.c.decls(self.c.sym(self.file, s)).len() != decls.len() {
+            return false;
+        }
+        let ast = self.ast;
+        let (mut f, mut bodies, mut c, mut i, mut t, mut e, mut m, mut v) =
+            (0, 0, 0, 0, 0, 0, 0, 0);
+        for &d in decls {
+            match *ast.node(d) {
+                Node::FunctionDecl { body, .. } => {
+                    f += 1;
+                    bodies += usize::from(body.is_some());
+                }
+                Node::ClassDecl { decorators, .. } if ast.list(decorators).is_empty() => c += 1,
+                Node::Interface { .. } => i += 1,
+                Node::TypeAlias { .. } if !ast.is_jsdoc(d) => t += 1,
+                // `const enum` + `namespace` is a conflict (TS2567).
+                Node::Enum { modifiers, .. } if !modifiers.intersects(Modifiers::CONST) => e += 1,
+                Node::Module { name, .. } if matches!(ast.node(name), Node::Ident { .. }) => m += 1,
+                // A variable's declaration is its name.
+                Node::Ident { .. }
+                    if self.parents.parent(d).is_some_and(
+                        |p| matches!(*ast.node(p), Node::VarDeclarator { name, .. } if name == d),
+                    ) =>
+                {
+                    v += 1
+                }
+                _ => return false,
+            }
+        }
+        let values = [f, c, e, v].iter().filter(|&&k| k > 0).count();
+        values <= 1
+            && bodies <= 1
+            && c <= 1
+            && t <= 1
+            && v <= 1
+            && !(t > 0 && i > 0)
+            && !(v > 0 && m > 0)
+    }
+
+    /// A syntax error starts inside `n` (or right at its end, where a node finished after
+    /// an error, like a pattern missing its `}`, ends).
+    fn has_syntax_error(&self, n: NodeId) -> bool {
+        let sp = self.ast.span(n);
+        let i = self.syntax_errors.partition_point(|&p| p < sp.start);
+        self.syntax_errors.get(i).is_some_and(|&p| p <= sp.end)
+    }
+
     fn unread(&self, s: SymbolId) -> bool {
         self.reportable(s)
             && !self.read.contains(&s)
@@ -520,8 +603,9 @@ impl<'x, 'a> Unused<'x, 'a> {
                         && !modifiers.intersects(Modifiers::EXPORT | Modifiers::DEFAULT)
                         && let Some(nm) = name
                         && let Some(s) = self.sym_of(n)
-                        && self.b.decls(s).len() == 1
-                        && self.b.symbol(s).flags == SymbolFlags::FUNCTION
+                        && ((self.b.decls(s).len() == 1
+                            && self.b.symbol(s).flags == SymbolFlags::FUNCTION)
+                            || self.merged_ok(s))
                         && self.unread(s)
                     {
                         self.push(
@@ -578,7 +662,7 @@ impl<'x, 'a> Unused<'x, 'a> {
                     let single = self.sym_of(n).is_some_and(|s| self.single_decl(s));
                     if self.locals
                         && decorators.is_empty()
-                        && single
+                        && (single || self.sym_of(n).is_some_and(|s| self.merged_ok(s)))
                         && !modifiers.intersects(Modifiers::EXPORT | Modifiers::DEFAULT)
                         && let Some(nm) = name
                         && let Some(s) = self.sym_of(n)
@@ -623,7 +707,7 @@ impl<'x, 'a> Unused<'x, 'a> {
                         .decls(s)
                         .iter()
                         .all(|&d| matches!(ast.node(d), Node::Interface { .. }));
-                    if self.locals && all_ifaces && self.unread(s) {
+                    if self.locals && (all_ifaces || self.merged_ok(s)) && self.unread(s) {
                         self.push(
                             name,
                             dg::_0_IS_DECLARED_BUT_NEVER_USED_6196,
@@ -653,7 +737,11 @@ impl<'x, 'a> Unused<'x, 'a> {
                         && self.b.scopes.first().is_some_and(|sc| {
                             self.b.lookup(sc.locals, self.b.symbol(s).name) == Some(s)
                         });
-                    if self.locals && !top_jsdoc && self.b.decls(s).len() == 1 && self.unread(s) {
+                    if self.locals
+                        && !top_jsdoc
+                        && (self.b.decls(s).len() == 1 || self.merged_ok(s))
+                        && self.unread(s)
+                    {
                         self.push(
                             name,
                             dg::_0_IS_DECLARED_BUT_NEVER_USED_6196,
@@ -674,7 +762,7 @@ impl<'x, 'a> Unused<'x, 'a> {
                 if self.locals
                     && !ambient
                     && let Some(s) = self.sym_of(n)
-                    && self.b.decls(s).len() == 1
+                    && (self.b.decls(s).len() == 1 || self.merged_ok(s))
                     && self.unread(s)
                 {
                     self.push(
@@ -703,7 +791,7 @@ impl<'x, 'a> Unused<'x, 'a> {
                         Some(Node::Program { .. } | Node::ModuleBlock { .. } | Node::Block { .. })
                     )
                     && let Some(s) = self.sym_of(n)
-                    && self.b.decls(s).len() == 1
+                    && (self.b.decls(s).len() == 1 || self.merged_ok(s))
                     && self.unread(s)
                 {
                     self.push(
@@ -816,11 +904,17 @@ impl<'x, 'a> Unused<'x, 'a> {
             return;
         }
         if names.len() > 1 && names.iter().all(|&nm| self.binding_unused(nm, for_in_of)) {
-            self.push(n, dg::ALL_VARIABLES_ARE_UNUSED_6199, "");
+            if !self.has_syntax_error(n) {
+                self.push(n, dg::ALL_VARIABLES_ARE_UNUSED_6199, "");
+            }
             return;
         }
-        for nm in names {
-            self.report_binding(nm, for_in_of);
+        for (d, nm) in list.into_iter().zip(names) {
+            // tsc reports at the declaration and drops a report there when its nodes hold a
+            // parse error (`for (let x: y) { z(x); }` binds `z` in a broken pattern).
+            if !self.has_syntax_error(d) {
+                self.report_binding(nm, for_in_of);
+            }
         }
     }
 
@@ -1173,8 +1267,31 @@ impl<'x, 'a> Unused<'x, 'a> {
             }
         }
         for (name, key, nodes, computed) in seen {
-            // A get/set pair or a single member; overloads are not handled.
+            // Overloads of one method (same staticness, at most one body) are reported at
+            // every declaration, as tsc reports each member.
+            let overloads = nodes.len() > 1 && {
+                let mut bodies = 0;
+                let mut statics = 0;
+                let all = nodes.iter().all(|&m| match *ast.node(m) {
+                    Node::MethodDef {
+                        kind: MethodKind::Method,
+                        modifiers,
+                        value,
+                        ..
+                    } => {
+                        statics += usize::from(modifiers.intersects(Modifiers::STATIC));
+                        if let Node::FunctionExpr { body: Some(_), .. } = *ast.node(value) {
+                            bodies += 1;
+                        }
+                        true
+                    }
+                    _ => false,
+                });
+                all && bodies <= 1 && (statics == 0 || statics == nodes.len())
+            };
+            // A get/set pair, a single member or overloads.
             let ok = nodes.len() == 1
+                || overloads
                 || (nodes.len() == 2
                     && nodes.iter().all(|&m| {
                         matches!(
@@ -1243,7 +1360,14 @@ impl<'x, 'a> Unused<'x, 'a> {
                     .map(|&(a, _)| a)
                     .collect()
             };
-            if !used && (!escapes.is_empty() || !dynamic_reads.is_empty() || computed.is_some()) {
+            if !used
+                && overloads
+                && (!escapes.is_empty() || !dynamic_reads.is_empty() || computed.is_some())
+            {
+                // Overloads read through element access: not tracked (silent).
+            } else if !used
+                && (!escapes.is_empty() || !dynamic_reads.is_empty() || computed.is_some())
+            {
                 self.escaped.push(Escaped {
                     key,
                     name,
@@ -1252,6 +1376,16 @@ impl<'x, 'a> Unused<'x, 'a> {
                     outside: escapes,
                     dynamic: dynamic_reads,
                 });
+            } else if !used && overloads {
+                for &m in &nodes {
+                    if let Node::MethodDef { key, .. } = *ast.node(m) {
+                        self.push(
+                            key,
+                            dg::_0_IS_DECLARED_BUT_ITS_VALUE_IS_NEVER_READ_6133,
+                            &name,
+                        );
+                    }
+                }
             } else if !used {
                 self.push(
                     key,
