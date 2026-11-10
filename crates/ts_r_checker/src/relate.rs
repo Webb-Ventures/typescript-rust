@@ -6110,6 +6110,15 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether a property name is known in `t` (properties or applicable index signatures).
     pub fn is_known_property(&mut self, t: TypeId, name: StrId) -> bool {
+        self.is_known_property_with_names(t, name, &mut FxHashMap::default())
+    }
+
+    fn is_known_property_with_names(
+        &mut self,
+        t: TypeId,
+        name: StrId,
+        mapped_names: &mut FxHashMap<TypeId, Option<FxHashSet<StrId>>>,
+    ) -> bool {
         let st = self.store();
         let f = st.flags(t);
         if f.intersects(TypeFlags::UNION_OR_INTERSECTION) {
@@ -6135,7 +6144,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             } else {
                 members
             };
-            return members.into_iter().any(|m| self.is_known_property(m, name));
+            return members
+                .into_iter()
+                .any(|m| self.is_known_property_with_names(m, name, mapped_names));
         }
         if !f.contains(TypeFlags::OBJECT) || self.is_empty_object_type(t) {
             // `{}` accepts any property (`const x: {} | undefined = { a: 1 }`).
@@ -6146,11 +6157,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             .is_some_and(|o| matches!(o.kind, ObjectKind::Mapped { .. }))
             && self.is_generic_mapped_type(t)
         {
-            let text = self.store().str(name).to_owned();
-            return match self.generic_mapped_known_names(t) {
-                Some(Ok(names)) => names.contains(&text),
-                Some(Err(())) | None => true,
-            };
+            let names = mapped_names.entry(t).or_insert_with(|| {
+                self.generic_mapped_known_names(t)
+                    .and_then(Result::ok)
+                    .map(|names| names.iter().map(|n| self.store().intern_str(n)).collect())
+            });
+            return names.as_ref().is_none_or(|names| names.contains(&name));
         }
         let m = self.resolved_members(t);
         if m.find(name).is_some() {
@@ -6273,8 +6285,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let props = self.properties_of(s);
         let owner = self.spread_literals.get(&s).copied();
+        let mut mapped_names = FxHashMap::default();
         for (n, p) in props {
-            if self.is_known_property(reduced, n) || self.is_hyphenated_jsx_attr(p) {
+            if self.is_known_property_with_names(reduced, n, &mut mapped_names)
+                || self.is_hyphenated_jsx_attr(p)
+            {
                 continue;
             }
             // A literal with spreads: only its own written properties are excess.

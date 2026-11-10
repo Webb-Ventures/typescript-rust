@@ -6409,16 +6409,16 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
+        let mut tps = self.local_type_params(sym);
         // A circular alias (TS2456) is not generic for its references: arguments get
         // TS2315 and a bare reference nothing.
-        let circular = !flags.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE)
+        if !tps.is_empty()
+            && !flags.intersects(SymbolFlags::CLASS | SymbolFlags::INTERFACE)
             && !self.c.file(file).is_js()
-            && self.alias_is_circular(sym);
-        let tps = if circular {
-            Vec::new()
-        } else {
-            self.local_type_params(sym)
-        };
+            && self.alias_is_circular(sym)
+        {
+            tps.clear();
+        }
         let min = {
             let mut m = tps.len();
             while m > 0 && self.has_type_param_default(tps[m - 1]) {
@@ -11104,4 +11104,43 @@ fn has_type_json_attribute(ast: &ts_r_ast::Ast, attributes: Option<NodeId>) -> b
         key == "type"
             && matches!(*ast.node(value), Node::StringLit { value: v } if ast.atom(v) == "json")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Checker, LibStore, load_program};
+    use ts_r_config::{MemoryFs, load_tsconfig};
+
+    #[test]
+    fn non_generic_alias_references_skip_circularity_walks() {
+        let Some(libs) = LibStore::locate() else {
+            return;
+        };
+        let mut aliases = String::from("type A0 = number;\n");
+        let mut src = String::new();
+        for i in 0..10_000 {
+            if i > 0 {
+                aliases.push_str(&format!("type A{i} = A{};\n", i - 1));
+            }
+            src.push_str(&format!("declare let v{i}: A{i};\n"));
+        }
+        let mut fs = MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file("/p/aliases.d.ts", &aliases);
+        fs.add_file("/p/main.ts", &src);
+        fs.add_file(
+            "/p/tsconfig.json",
+            r#"{"compilerOptions": {"skipLibCheck": true, "target": "es2022", "lib": ["es2022"], "noLib": false, "noEmit": true}, "files": ["aliases.d.ts", "main.ts"]}"#,
+        );
+        let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+        let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+        let checker = Checker::new(&program);
+        let file = FileId(program.file_index("/p/main.ts").unwrap() as u32);
+        let mut ck = Ck::new(&checker, file);
+        // tsc 7.0.2 reports no diagnostics with these options.
+        let diags = ck.check_source_file(file);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(ck.circular_alias.is_empty());
+    }
 }
