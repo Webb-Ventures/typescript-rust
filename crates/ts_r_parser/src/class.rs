@@ -649,6 +649,17 @@ impl<'a> Parser<'a> {
                         }
                         if !p.eat(T::Comma) && !matches!(p.kind(), T::RParen | T::Eof) {
                             p.error_expected(",");
+                            if p.tok().start == before
+                                && matches!(
+                                    p.kind(),
+                                    T::Null | T::Void | T::True | T::False | T::TypeOf | T::New
+                                )
+                            {
+                                // The parameter without a name (TS1359 above) consumed
+                                // nothing: the list skips the word as a parameter of its own.
+                                p.bump();
+                                continue;
+                            }
                             // As in tsc, the list goes on at anything that starts a parameter
                             // (or a type, which becomes a parameter with a missing name) and
                             // skips a few tokens that cannot end it; other tokens end it.
@@ -656,7 +667,11 @@ impl<'a> Parser<'a> {
                                 || !(p.at_identifier()
                                     || matches!(
                                         p.kind(),
-                                        T::LBrace | T::LBracket | T::DotDotDot | T::At
+                                        T::LBrace
+                                            | T::LBracket
+                                            | T::DotDotDot
+                                            | T::At
+                                            | T::Question
                                     )
                                     || p.at_nameless_param_start()
                                     || p.at_skipped_in_params())
@@ -692,6 +707,32 @@ impl<'a> Parser<'a> {
         // Also in JavaScript, and modifiers no parameter allows (`static x`): the checker
         // reports them.
         let modifiers = self.parse_modifiers(ModCtx::Param);
+        if self.at(T::This) {
+            // A `this` parameter right after its modifiers is just `this` and a type: no `?`
+            // and no initializer, which the list reports (`this?: C` is `',' expected` at the
+            // `?`). `...this` is not one (tsc: parseParameterEx).
+            let s = self.start();
+            let name = self.intern_token();
+            self.bump();
+            let pattern = self.finish_node(s, Node::Ident { name });
+            let type_ann = if self.ts && self.eat(T::Colon) {
+                Some(self.parse_type())
+            } else {
+                None
+            };
+            return self.finish_node(
+                start,
+                Node::Param {
+                    decorators,
+                    modifiers,
+                    rest: false,
+                    pattern,
+                    optional: false,
+                    type_ann,
+                    init: None,
+                },
+            );
+        }
         let rest = self.eat(T::DotDotDot);
         if self.at_nameless_param_start() {
             // `f(a!: T)`, `f(a<T>)`, `f(a 1)`: tsc makes a parameter with a missing name
@@ -713,10 +754,12 @@ impl<'a> Parser<'a> {
             );
         }
         let pattern = if self.at(T::This) {
-            let s = self.start();
-            let name = self.intern_token();
+            // `...this`: not a `this` parameter; the word is a reserved name (TS1359).
+            let span = self.tok().span();
+            self.error_at(messages::RESERVED_WORD_CANNOT_BE_USED_HERE, span, &["this"]);
+            let name = self.missing();
             self.bump();
-            self.finish_node(s, Node::Ident { name })
+            name
         } else if self.at(T::PrivateName) {
             // `m(#foo: string)`: TS18009, and the parameter goes on with that name
             // (privateNamesNotAllowedAsParameters).
@@ -741,6 +784,27 @@ impl<'a> Parser<'a> {
                     .unwrap_or("");
                 self.error_at(messages::RESERVED_WORD_CANNOT_BE_USED_HERE, span, &[word]);
                 let name = self.missing();
+                if matches!(
+                    k,
+                    T::Null | T::Void | T::True | T::False | T::TypeOf | T::New
+                ) {
+                    // These words start a type, so tsc reads them as a list element: the
+                    // parameter ends here without the word, which the list then skips; the
+                    // `:` that follows is TS1138 and `string` a parameter (reservedWords2).
+                    // Other reserved words are consumed with their `: T`.
+                    return self.finish_node(
+                        start,
+                        Node::Param {
+                            decorators,
+                            modifiers,
+                            rest,
+                            pattern: name,
+                            optional: false,
+                            type_ann: None,
+                            init: None,
+                        },
+                    );
+                }
                 self.bump();
                 name
             } else if k.is_identifier_or_keyword() && !reserved_word_ends_params(k) {
@@ -811,7 +875,7 @@ impl<'a> Parser<'a> {
     fn at_skipped_in_params(&self) -> bool {
         matches!(
             self.kind(),
-            T::Colon | T::Semi | T::Dot | T::Arrow | T::RBrace | T::Unknown
+            T::Colon | T::Semi | T::Dot | T::Arrow | T::RBrace | T::Unknown | T::Eq | T::Comma
         )
     }
 
@@ -885,7 +949,6 @@ fn reserved_word_ends_params(k: T) -> bool {
         k,
         T::Function
             | T::Class
-            | T::New
             | T::Enum
             | T::Var
             | T::Const

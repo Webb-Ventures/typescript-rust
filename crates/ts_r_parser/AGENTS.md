@@ -427,6 +427,36 @@ Files:
     `Seq` led by a zero-width `Missing` (tsc's synthesized comma: no TS2695).
     `</` (no space between) is one closing-tag token as in tsc: never a `<` operator,
     no expression (TS1109) and no statement start (TS1128, both characters skipped).
+  - Recovery rules of parity/parser-3 (tsc: `tsc/internal/parser/parser.go`, written in
+    our words; each is in `tests::parser_3_recovery_matches_tsc`):
+    - Every unclosed JSX element reports its TS17008 first, then `'</' expected.` (it is
+      reported once in the output: a repeated diagnostic is dropped when diagnostics are
+      sorted). The enclosing `{` containers then report `'}' expected.` at the same place
+      and lose to the previous error's position (`push_diag`).
+    - A `}` missing in an attribute container skips nothing; the tag goes on from that
+      token (`<a b={x;` leaves `;` for the statement). A `>` missing at the end of a closing
+      or self-closing tag in children is read again as JSX text from the end of the tag so
+      far (`<b/` + newline + text; `eat_tag_end`).
+    - `<` before `</` has a missing name and no type arguments (`</` is one token).
+    - `<` starts a tag in expression position only before a name, keyword or `>` (`<.a>`
+      is TS1109, `<`, `.a`); after a unary operator (`+ <1234> x`) it is always a tag
+      (parseUpdateExpression and parseSimpleUnaryExpression, `mustBeUnary`).
+    - In TSX `<T = X,>` and `<T,>` start a generic arrow (isParenthesizedArrowFunction).
+    - A conditional without its `:` has no false branch; `a ? b` at the end of the file is
+      one `':' expected.` and no `Expression expected`.
+    - A substatement may start at an assignment operator: `if (a ^= {` after the missing
+      `)` is an expression with a missing left side, whose `{...}` is an object literal.
+    - Parameters: `null`, `void`, `true`, `false`, `typeof`, `new` (words that start a type)
+      are TS1359 and a nameless parameter that consumes nothing; the list skips the word and
+      then the `:` is TS1138 and the type name a parameter (reservedWords2). Other
+      reserved words are consumed with their `: T`. A `this` parameter right after its
+      modifiers is `this` and a type only, so `this?: C` is `',' expected.` and `?`
+      starts a nameless parameter; `...this` is a reserved name (TS1359). `=` and `,` are
+      skipped with TS1138 in the list.
+    - `declare type` commits to a type alias even when a line break follows `type`
+      (TS1142 at the next token).
+    - The conformance example drops the line break before the next `@filename` from a
+      unit, as tsc's harness does (EOF diagnostics are one line up).
   - JSX tag, member and attribute names take `-` and `\u` escapes (`rescan_jsx_identifier`).
     A name with an escape is decoded (`<\u0061></a>` closes; tags compare by decoded
     names, `jsx_tag_key`) and is TS17021 on the whole name, a syntax error (tsc
