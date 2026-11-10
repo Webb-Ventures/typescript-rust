@@ -20,6 +20,12 @@ impl<'a> Parser<'a> {
     fn eat_tag_end(&mut self, child_mode: bool) -> bool {
         if !self.at(T::Gt) {
             self.error_expected(">");
+            if child_mode && !self.at(T::Eof) {
+                // tsc does not advance: the parent's children loop reads this token again
+                // as JSX text from the end of the tag so far (`<b/` then `text` in children).
+                self.lx.seek(self.prev_end);
+                self.lx.next_jsx_child();
+            }
             return false;
         }
         if child_mode {
@@ -102,14 +108,15 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 // tsc 7 reports it from the end of the previous token to the `<>`.
-                self.closing_tag_expected_at_eof();
                 let span = Span::new(full_start, open_end);
                 self.error_at(messages::JSX_FRAGMENT_NO_CLOSING, span, &[]);
+                self.closing_tag_expected_at_eof();
             }
             return self.finish_node(start, Node::JsxFragment { children });
         }
         let name = self.parse_jsx_tag_name();
-        let type_args = if self.ts && !self.js_ts && self.at(T::Lt) {
+        // `</` is one token to tsc in JSX, never the start of type arguments (`<\n</div>`).
+        let type_args = if self.ts && !self.js_ts && self.at(T::Lt) && !self.at_lt_slash() {
             Some(self.parse_type_args())
         } else {
             None
@@ -212,10 +219,12 @@ impl<'a> Parser<'a> {
             self.error_at(messages::EXPECTED, span, &["</"]);
             self.bump();
         } else {
-            self.closing_tag_expected_at_eof();
+            // tsc reports the unclosed tag first, then `'</' expected.` (dropped when it
+            // lands where an error already is), then the enclosing constructs' own.
             let text = self.ast.span(name).text(self.src);
             let span = self.ast.span(name);
             self.error_at(messages::JSX_NO_CLOSING_TAG, span, &[text]);
+            self.closing_tag_expected_at_eof();
         }
         self.finish_node(
             start,
@@ -227,11 +236,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// Children that run to the end of the file: `'</' expected.` there, once for all the
-    /// unclosed elements.
+    /// Children that run to the end of the file: `'</' expected.` there (every unclosed
+    /// element reports it; the sorted output keeps one).
     fn closing_tag_expected_at_eof(&mut self) {
-        let eof = self.start();
-        if self.at(T::Eof) && !self.diags.iter().rev().any(|d| d.span.start == eof) {
+        // Each unclosed element reports it; the last error's position decides (push_diag).
+        if self.at(T::Eof) {
             self.error_expected("</");
         }
     }
@@ -307,18 +316,8 @@ impl<'a> Parser<'a> {
                 self.lx.next_jsx_child();
             }
         } else {
+            // As tsc: nothing is skipped; the tag goes on from this token.
             self.expect_closing(T::RBrace, T::LBrace, open);
-            // Resynchronize: skip to the closing brace.
-            while !matches!(self.kind(), T::RBrace | T::Eof | T::Lt) {
-                self.bump();
-            }
-            if self.at(T::RBrace) {
-                if in_children {
-                    self.bump_jsx_child()
-                } else {
-                    self.bump()
-                }
-            }
         }
         match (spread, expr) {
             (true, Some(expr)) => self.finish_node(start, Node::JsxSpreadChild { expr }),

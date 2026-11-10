@@ -3471,3 +3471,57 @@ fn member_name_await_does_not_trigger_module_reparse() {
             .is_empty()
     );
 }
+
+/// Recovery rules found by the conformance run (parity/parser-3), checked against tsc 7.0.2.
+#[test]
+fn parser_3_recovery_matches_tsc() {
+    // (source, kind, error codes in position order)
+    let cases: &[(&str, SourceKind, &[u32])] = &[
+        // JSX: `</` is one token, so `<` before it is a tag with a missing name only.
+        ("x = <div>\n    <\n</div>;", SourceKind::Tsx, &[1003]),
+        // The false branch of a conditional is not parsed without its `:`.
+        (
+            "x = <a>{y ? <b><c></c> : 1}</a>",
+            SourceKind::Tsx,
+            &[17008, 1381, 17002, 1005, 1005],
+        ),
+        // An attribute container without `}` skips nothing.
+        (
+            "x = <foo test={<foo>{}}>hello{<foo>{}}</foo>;",
+            SourceKind::Tsx,
+            &[17008, 1381, 1382, 1381, 1005, 1005],
+        ),
+        // `<T = X>` is a generic arrow in TSX; `<.a>` is no tag.
+        ("x = <T = string,>() => {};", SourceKind::Tsx, &[]),
+        (
+            "<.a></.a>;",
+            SourceKind::Tsx,
+            &[1109, 1109, 1109, 1128, 1109],
+        ),
+        // A reserved type-start word is a parameter of its own (reservedWords2), and a
+        // `this` parameter takes no `?` or initializer.
+        (
+            "function f(a, null: string) {}",
+            SourceKind::Ts,
+            &[1359, 1138],
+        ),
+        ("function f(this?: C) {}", SourceKind::Ts, &[1005]),
+        ("function f(...this: C) {}", SourceKind::Ts, &[1359]),
+        (
+            "function f(a, new C()) {}",
+            SourceKind::Ts,
+            &[1359, 1005, 1109, 1005],
+        ),
+        // A substatement may start at an assignment operator.
+        (
+            "if (a != 0 ^=  {\n  return 1;\n}",
+            SourceKind::Ts,
+            &[1005, 1005, 1005],
+        ),
+        // `declare type` commits to a type alias.
+        ("declare type\nT = 1;", SourceKind::Ts, &[1142]),
+    ];
+    for &(src, kind, want) in cases {
+        assert_eq!(err_codes(src, kind), want, "for {src:?}");
+    }
+}

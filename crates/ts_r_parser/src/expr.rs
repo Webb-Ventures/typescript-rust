@@ -401,7 +401,16 @@ impl<'a> Parser<'a> {
     /// namespace (`<:a />`) or at `</`, a closing tag; other bad starts (`< <`, `<1>`)
     /// are tags with a missing name.
     fn lt_starts_jsx(&mut self) -> bool {
-        self.peek_kind() != T::Colon && !self.at_lt_slash()
+        let next = self.peek_kind();
+        if self.at_lt_slash() {
+            return false;
+        }
+        // After a unary operator (`+ <1234> x`) tsc parses a tag whatever follows the `<`;
+        // elsewhere only a name or `>` starts one (`<.a>` is `Expression expected`).
+        if self.unary_operand_start == self.start() {
+            return next != T::Colon;
+        }
+        next.is_identifier_or_keyword() || next == T::Gt
     }
 
     /// At `<`: is `/` the very next character (`</`, a JSX closing tag)?
@@ -459,7 +468,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// In TSX, `<T,>` and `<T extends X>` start generic arrows; `<T>` is JSX.
+    /// In TSX, `<T,>`, `<T = X>` and `<T extends X>` start generic arrows; `<T>` is JSX.
     fn tsx_lt_starts_generic_arrow(&mut self) -> bool {
         self.lookahead(|p| {
             p.bump();
@@ -471,7 +480,7 @@ impl<'a> Parser<'a> {
             }
             p.bump();
             match p.kind() {
-                T::Comma => true,
+                T::Comma | T::Eq => true,
                 T::Extends => {
                     p.bump();
                     !matches!(p.kind(), T::Eq | T::Gt | T::Slash)
@@ -662,11 +671,16 @@ impl<'a> Parser<'a> {
         let cons = self.with_ctx(Ctx::IN_CONDITIONAL_TRUE, Ctx::DISALLOW_IN, |p| {
             p.parse_assignment()
         });
-        self.expect(T::Colon);
-        // The false branch keeps the enclosing context: in an outer true branch, `(d): e =>
-        // f` is still not an arrow unless a `:` follows (`a ? b ? c : (d) : e => f`,
-        // parserArrowFunctionExpression11).
-        let alt = self.parse_assignment();
+        // Without the `:` there is no false branch to parse (tsc): a missing node stands in,
+        // and no second error is reported (`a ? b` at the end of the file).
+        let alt = if self.expect(T::Colon) {
+            // The false branch keeps the enclosing context: in an outer true branch, `(d): e
+            // => f` is still not an arrow unless a `:` follows (`a ? b ? c : (d) : e => f`,
+            // parserArrowFunctionExpression11).
+            self.parse_assignment()
+        } else {
+            self.missing()
+        };
         self.finish_node(start, Node::Conditional { test, cons, alt })
     }
 

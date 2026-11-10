@@ -593,6 +593,9 @@ impl<'a> Parser<'a> {
                 && js_ts(a) == js_ts(b)
                 && (clean || a.code >= 2000 || b.code >= 2000)
         });
+        // tsc's sorted output drops a repeated diagnostic (every unclosed JSX element at the
+        // end of the file reports `'</' expected.` there).
+        diags.dedup_by(|a, b| a.span == b.span && a.code == b.code && a.message == b.message);
         let mut kept = diags.iter().peekable();
         grammar.retain(|d| {
             while kept.peek().is_some_and(|k| k.span.start < d.span.start) {
@@ -897,17 +900,22 @@ impl<'a> Parser<'a> {
         }
         // tsc drops a parse error at the position of the previous error, which may be the
         // scanner's: a stray backslash is TS1127 only, not also TS1128.
+        if self.last_error_start() == Some(d.span.start) {
+            return;
+        }
+        self.lex_diags_seen = self.lx.diagnostics.len() as u32;
+        self.diags.push(d);
+    }
+
+    /// Start of the previous error, which may be the scanner's.
+    fn last_error_start(&self) -> Option<u32> {
         let lex = &self.lx.diagnostics;
         let last = if lex.len() as u32 > self.lex_diags_seen {
             lex.last()
         } else {
             self.diags.last()
         };
-        if last.is_some_and(|l| l.span.start == d.span.start) {
-            return;
-        }
-        self.lex_diags_seen = lex.len() as u32;
-        self.diags.push(d);
+        last.map(|l| l.span.start)
     }
 
     /// Reports an error that is about grammar rather than token structure: it does not
