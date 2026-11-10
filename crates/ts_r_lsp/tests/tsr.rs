@@ -296,14 +296,14 @@ fn type_aware_lint_runs_on_our_checker() {
 
 /// An ESLint flat config that leaves marks when Node evaluates it: `started` at once, `done`
 /// after spinning for `spin_ms`. Tells a test whether (and how long) the config was read.
-fn marking_eslint_config(env: &Env, spin_ms: u64) -> (PathBuf, PathBuf) {
+fn marking_eslint_config(env: &Env, spin_ms: u64, rules: &str) -> (PathBuf, PathBuf) {
     let started = env.dir.join("config-started");
     let done = env.dir.join("config-done");
     let js = format!(
         "import fs from 'node:fs';\nfs.writeFileSync({started:?}, '1');\n\
          const t = Date.now();\nwhile (Date.now() - t < {spin_ms}) {{}}\n\
          fs.writeFileSync({done:?}, '1');\n\
-         export default [{{ files: ['**/*.ts'], rules: {{ 'no-var': 'error' }} }}];\n",
+         export default [{{ files: ['**/*.ts'], rules: {rules} }}];\n",
         started = started.to_string_lossy(),
         done = done.to_string_lossy(),
     );
@@ -335,7 +335,7 @@ fn lint_off_never_evaluates_the_eslint_config() {
         "lintoff",
         &[("tsconfig.json", TSCONFIG), ("src/a.ts", TYPE_ERROR)],
     );
-    let (started, _done) = marking_eslint_config(&env, 0);
+    let (started, _done) = marking_eslint_config(&env, 0, "{ 'no-var': 'error' }");
     let mut c = env.lsp_lint("w1", "off");
     let ua = env.uri("src/a.ts");
     env.open(&mut c, "src/a.ts");
@@ -364,7 +364,7 @@ fn slow_eslint_config_does_not_block_types_or_hover() {
         "lintslow",
         &[("tsconfig.json", TSCONFIG), ("src/a.ts", TYPE_ERROR)],
     );
-    let (started, done) = marking_eslint_config(&env, 6000);
+    let (started, done) = marking_eslint_config(&env, 6000, "{ 'no-var': 'error' }");
     let mut c = env.lsp_lint("w1", "on");
     let ua = env.uri("src/a.ts");
     env.open(&mut c, "src/a.ts");
@@ -394,14 +394,22 @@ fn slow_eslint_config_does_not_block_types_or_hover() {
 /// published spans are moved, but a fix's edits would still point at the old offsets.
 #[test]
 fn type_aware_fixes_wait_for_the_current_text() {
-    if !libs_present() {
+    if !libs_present()
+        || ts_r_testing::limited("node", 256, 10)
+            .arg("--version")
+            .output()
+            .is_err()
+    {
         return;
     }
     let oxlint = r#"{"categories": {"correctness": "off"}, "rules": {"typescript/no-unnecessary-type-assertion": "error"}}"#;
     let env = Env::new(
         "typedfix",
         &[
-            ("tsconfig.json", TSCONFIG),
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions": {"strict": true, "module": "nodenext", "target": "es2022", "lib": ["es2022"], "noLib": false, "noEmit": true}, "include": ["src"]}"#,
+            ),
             (".oxlintrc.json", oxlint),
             ("src/a.ts", "const x: number = 1;\nx!;\nexport { x };\n"),
         ],
@@ -434,14 +442,26 @@ fn type_aware_fixes_wait_for_the_current_text() {
             json!({"textDocument": {"uri": ua}, "range": range(1, 0, 1, 3), "context": {"diagnostics": []}}),
         )
     };
-    // An edit on the line above (byte offsets move, line 1 does not), and a request before
-    // the file is checked again.
+    // Reload a slow config: type checking can finish while the old lint results remain.
+    let (started, done) = marking_eslint_config(
+        &env,
+        6000,
+        "{ '@typescript-eslint/no-unnecessary-type-assertion': 'error' }",
+    );
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": [{"uri": env.uri("eslint.config.mjs"), "type": 1}]}),
+    )
+    .unwrap();
+    assert!(wait_for_file(&started, Duration::from_secs(10)));
+    assert!(!done.exists(), "config finished before the edit");
+    // An edit on the line above moves byte offsets, but line 1 does not move.
     change(&mut c, &ua, 2, range(0, 0, 0, 0), "/* c */ ");
     let stale = actions(&mut c);
     for r in fix_ranges(&stale) {
         assert_eq!(r, range(1, 1, 1, 2), "{stale}");
     }
-    // Once checked again, the fix is offered at the current offsets.
+    // Only after linting the current text is the fix offered at the current offsets.
     let deadline = Instant::now() + T;
     loop {
         let fresh = actions(&mut c);

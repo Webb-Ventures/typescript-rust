@@ -167,7 +167,7 @@ impl Project {
     /// Quick fixes of the file's type-aware lint diagnostics for `textDocument/codeAction`
     /// (fix, suggestions, disable comments). `source.fixAll.ts-r` stays with the daemon's
     /// lint worker, so one fix-all action is offered, without the type-aware fixes. None
-    /// until the file is checked after an edit: `publish_syntax` moves the published spans,
+    /// until the file is linted after an edit: `publish_syntax` moves the published spans,
     /// not the edits of their fixes and suggestions.
     pub(super) fn lint_code_actions(
         &self,
@@ -180,7 +180,7 @@ impl Project {
         else {
             return Vec::new();
         };
-        if pb.lint.is_empty() || !pb.fresh {
+        if pb.lint.is_empty() || !pb.lint_fresh {
             return Vec::new();
         }
         let (Some(uri), Some((start, end))) = (

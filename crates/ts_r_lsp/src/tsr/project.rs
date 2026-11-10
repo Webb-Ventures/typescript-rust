@@ -112,8 +112,8 @@ struct Published {
     semantic: Vec<Diagnostic>,
     /// Type-aware lint diagnostics (`project/lint.rs`), kept with the semantic ones.
     lint: Vec<ts_r_lint::Diagnostic>,
-    /// The semantic diagnostics are from the current text.
-    fresh: bool,
+    /// The lint diagnostics and their fixes are from the current text.
+    lint_fresh: bool,
 }
 
 /// A project thread's state (persists across sessions).
@@ -665,12 +665,12 @@ impl Project {
         for p in changed_owned {
             deps.remove(p);
             if let Some(pb) = self.published.get_mut(p) {
-                pb.fresh = false;
+                pb.lint_fresh = false;
             }
         }
         for d in &deps {
             if let Some(pb) = self.published.get_mut(d) {
-                pb.fresh = false;
+                pb.lint_fresh = false;
             }
         }
         // Keep earlier unfinished work, after the new.
@@ -1028,10 +1028,10 @@ impl Project {
         let pb = self.published.entry(path.to_string()).or_default();
         pb.syntax = syntax;
         pb.semantic = semantic;
+        pb.lint_fresh = lint.is_some();
         if let Some(lint) = lint {
             pb.lint = lint;
         }
-        pb.fresh = true;
         self.publish(path);
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ms > 50.0 {
@@ -1073,7 +1073,7 @@ impl Project {
                 }
                 _ => false,
             });
-        pb.fresh = false;
+        pb.lint_fresh = false;
         if had || !pb.syntax.is_empty() {
             self.publish(path);
         }
