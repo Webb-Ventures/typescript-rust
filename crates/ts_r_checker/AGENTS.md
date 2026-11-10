@@ -535,7 +535,10 @@ Files, by layer:
   return v; }` with `for (var v of new It())`): tsc finds it too, and reports the variable
   (TS7022) and each method at its name (TS7023, `report_circular_return` reading the
   method symbol's own signature; `is_class_method_sig`). A cycle through a method with no
-  variable step is still not reported.
+  variable step is still not reported. A variable met inside a cycle that closed at another
+  entry and went through a checked node (`node_cycle_types`: a `for`-`of` variable whose
+  loop narrows `controlBlock.terminal`) has no cycle of its own and is not reported
+  (`parity/for_of_var_mid_cycle.ts`).
 - TS7039 (`noImplicitAny`): a mapped type without a template (`{ [P in "bar"] }`), at the
   mapped type (tsc: checker.go, checkMappedType, reportImplicitAny).
 - TS7023 for getters (`report_circular_getter` in `check.rs`, `noImplicitAny`): a getter
@@ -1690,7 +1693,14 @@ Files, by layer:
   of a generic interface: `Array<J>`, `Iterable<J>`, `Box<J>`) a plain reference to a
   non-generic type alias that is being resolved, or not yet resolved while another alias
   is, is a store forward reference (`deferred_alias_ref`, `pending_forwards` in
-  `declared.rs`); the alias's resolution links it (without this, react18's `ReactNode =
+  `declared.rs`). "Not yet resolved while another alias is"
+  holds only while no value type, return type or checked node has been entered since that
+  alias (`in_alias_declaration_resolution`): `type C = z.infer<typeof Schema>` checks the
+  schema's initializer and the library signatures it calls, where an unknown alias (zod's
+  `$strip`) is resolved on the spot as tsc does outside type alias declarations; a forward
+  read there before the outer alias finished read as `any` and stuck in cached types
+  (the React Compiler's 65 TS4111, `parity/alias_forward_through_value_check.ts`). The
+  alias's resolution links the forward (without this, react18's `ReactNode =
   ... | Iterable<ReactNode>` read as `Iterable<any>` and accepted anything). A union or
   intersection there with such a member (through parentheses and nested unions:
   `type V = (string | V)[]`, `Array<string | V>`, `type Box2 = Box<Box2 | number>`),
