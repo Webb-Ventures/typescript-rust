@@ -129,9 +129,9 @@ laptop, crates as of 2026-10-18):
 Both report 0 problems from those rules. Most of ts-r-lint's uncached time is Node evaluating
 `eslint.config.js`. With the 32 type-aware rules as well the runs aren't comparable yet: on tRPC
 the parity gate turns them off, and with the gate off ts-r-lint reports 11 problems ESLint
-doesn't. On four dedicated Linux cores (the review box's bench of pull request #42 on
-2026-10-24) the same runs took 2,850.7 ms with the config evaluated every run and 30.6 ms with
-it cached, against ESLint's 4,005.4 ms.
+doesn't. On a shared GitHub-hosted ubuntu-24.04 runner (the bench of pull request #133 on
+2026-11-10, median of 5) the same runs took 1,495.1 ms with the config evaluated every run and
+23.3 ms with it cached, against ESLint's 2,266.6 ms.
 
 Apple M-series Mac (a shared laptop), 4 threads, each project's own lint config, on public
 projects pinned in `bench/repos.toml` (`cargo xtask bench --repos`, median of 3 to 5 runs):

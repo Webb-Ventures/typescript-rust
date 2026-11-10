@@ -4,7 +4,7 @@ description: Six separate Rust tools for TypeScript, each usable on its own next
 nav: Overview
 section: Start
 order: 0
-badges: ["warn:Alpha: npm install @ts-r.dev/cli@next"]
+badges: ["warn:Alpha: npm install @ts-r.dev/cli@0.1.0-alpha.6"]
 ---
 
 ts-r is a family of command-line tools for TypeScript, written from scratch in Rust. Each tool is

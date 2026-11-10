@@ -3,7 +3,7 @@
 Fast TypeScript tooling written in Rust. This package is the `ts-r` launcher with every tool:
 
 ```sh
-npm install --save-dev @ts-r.dev/cli@next
+npm install --save-dev @ts-r.dev/cli@0.1.0-alpha.6
 npx ts-r run server.ts   # run TypeScript (replaces tsx / ts-node)
 npx ts-r dev             # dev server with HMR
 npx ts-r build           # production bundle

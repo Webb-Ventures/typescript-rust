@@ -113,18 +113,20 @@ Against tsc 7.0.2:
 Some of the 220 conformance extras are runner artefacts, such as tests for module
 kinds tsc 7 removed, which have no baseline.
 
-Speed on four dedicated Linux cores (the review box's bench of pull request #42 on
-2026-10-24, `cargo xtask bench --repos`, cold check, no history, median of 5; peak memory not
-measured):
+Speed on a shared GitHub-hosted ubuntu-24.04 runner (4 vCPU, 4 threads; the bench of pull
+request #133 on 2026-11-10, at `63756ad`, merged as `b748322`; `cargo xtask bench --repos`, cold
+check, no history, median of 5; peak memory not measured):
 
 | Project | ts-r-check | tsc 7.0.2 |
 |---|---|---|
-| tRPC `packages/server` | 474.4 ms | 979.0 ms |
-| date-fns `pkgs/core` | 998.4 ms | 1,980.1 ms |
-| RxJS `packages/rxjs` | 1,202.1 ms | 6,513.9 ms |
+| tRPC `packages/server` | 269.8 ms | 589.9 ms |
+| date-fns `pkgs/core` | 598.7 ms | 1,154.3 ms |
+| RxJS `packages/rxjs` | 3,458.3 ms | 3,645.7 ms |
 
-With its saved history and nothing changed, ts-r-check took 140.9 ms on RxJS, 401.0 ms on tRPC
-and 1,020.4 ms on date-fns in that run.
+On RxJS the two are close (about 1.05×, within this runner's spread inside one run), and on the
+same run's Linux arm64 runner tsc 7 was faster there (3,392.1 ms against 4,031.2 ms). With its
+saved history and nothing changed, ts-r-check took 31.7 ms on tRPC, 81.8 ms on date-fns and
+62.7 ms on RxJS in that run.
 
 An older run with two more projects and peak memory (Apple M-series shared laptop, 2026-10-16
 at commit 9c3a371, median of 5, peak memory of one run):

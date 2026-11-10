@@ -82,7 +82,10 @@ publishes under `next`, except for a package with no stable version on npm yet (
 during the alpha): that one publishes under `latest` and then gets `next` too
 (`npm dist-tag add`, which npm 11.21+ does with trusted publishing), so both tags name the
 newest release and its readme is the one shown. A failed `dist-tag add` is a warning naming the
-command to run by hand; a re-run retries it.
+command to run by hand; a re-run retries it. The `dist-tag add` needs the trusted publisher's
+"Allow npm dist-tag" permission (package Settings on npmjs.com; `npm trust` can't set it). Without
+it every package's `add` fails (alpha.4 to alpha.6 did), and `scripts/npm-next-tag.sh --apply`,
+run with a maintainer's npm login, points each package's `next` at its `latest`.
 
 The workflow publishes with npm trusted publishing (OIDC): no long-lived token. The npm job
 needs `id-token: write`, npm 11.21 or newer (installed explicitly; 11.5.1 for publishing, 11.21 for `npm dist-tag add`) and a GitHub-hosted runner

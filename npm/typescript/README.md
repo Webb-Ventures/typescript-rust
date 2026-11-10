@@ -11,8 +11,8 @@ alias), and the fallback for every flag, project and API ts-r doesn't cover.
 ## Install
 
 Either way works; undo it by deleting the line(s). While ts-r is in alpha, name an exact
-version (below, `7.0.1000-alpha.3`; `npm view @ts-r.dev/typescript dist-tags` lists the
-current ones) or the `next` dist-tag, not a range like `^7`: see [Versions](#versions).
+version (below, `7.0.1000-alpha.6`; `npm view @ts-r.dev/typescript version` prints the newest), not
+the `next` dist-tag (it still names `7.0.1000-alpha.3`) or a range like `^7`: see [Versions](#versions).
 
 **Next to TypeScript** (point `typescript.tsdk`, scripts or tools at this package):
 
@@ -20,11 +20,11 @@ current ones) or the `next` dist-tag, not a range like `^7`: see [Versions](#ver
 // package.json
 "devDependencies": {
   "typescript": "^7.0.0",
-  "@ts-r.dev/typescript": "7.0.1000-alpha.3"
+  "@ts-r.dev/typescript": "7.0.1000-alpha.6"
 }
 ```
 
-or `npm install --save-dev typescript@7 @ts-r.dev/typescript@next`. Run it as
+or `npm install --save-dev typescript@7 @ts-r.dev/typescript@7.0.1000-alpha.6`. Run it as
 `npx -p @ts-r.dev/typescript tsc` or `node_modules/@ts-r.dev/typescript/bin/tsc`, or set
 `"typescript.tsdk": "node_modules/@ts-r.dev/typescript/lib"`.
 
@@ -32,7 +32,7 @@ or `npm install --save-dev typescript@7 @ts-r.dev/typescript@next`. Run it as
 
 ```jsonc
 "devDependencies": {
-  "typescript": "npm:@ts-r.dev/typescript@next",
+  "typescript": "npm:@ts-r.dev/typescript@7.0.1000-alpha.6",
   "typescript-real": "npm:typescript@^7.0.0"
 }
 ```

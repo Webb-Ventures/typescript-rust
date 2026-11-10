@@ -70,7 +70,7 @@ export default function Home() {
           <div className="cta">
             {launched ? (
               <>
-                <pre className="cmd"><code>npx @ts-r.dev/cli@next dev</code></pre>
+                <pre className="cmd"><code>npx @ts-r.dev/cli@0.1.0-alpha.6 dev</code></pre>
                 <a className="btn primary" href="/docs/getting-started/">Get started</a>
               </>
             ) : (

@@ -14,8 +14,8 @@ macOS (arm64, x64), Linux (arm64, x64; glibc and musl) and Windows (arm64, x64).
 `ts-r` launcher (`@ts-r.dev/cli`) with every tool, or one tool on its own:
 
 ```sh
-npm install --save-dev @ts-r.dev/cli@next      # every tool and the ts-r launcher
-npm install --save-dev @ts-r.dev/check@next    # just ts-r-check (or run, dev, build, lint, lsp)
+npm install --save-dev @ts-r.dev/cli@0.1.0-alpha.6      # every tool and the ts-r launcher
+npm install --save-dev @ts-r.dev/check@0.1.0-alpha.6    # just ts-r-check (or run, dev, build, lint, lsp)
 ```
 
 npm installs only the binary for your platform. `@ts-r.dev/check` and `@ts-r.dev/lsp` carry
