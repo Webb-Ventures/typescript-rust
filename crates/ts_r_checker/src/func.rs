@@ -810,7 +810,16 @@ impl<'c, 'a> Ck<'c, 'a> {
         key: TypeId,
         is_symbol: bool,
     ) -> Option<Option<TypeId>> {
-        let parts = self.store().members_of_union(t).to_vec();
+        let mut parts = self.store().members_of_union(t).to_vec();
+        // Beside a generic mapped type, an unconstrained type parameter says nothing about
+        // the property (`T & { [P in keyof T]: F }` reads `F`; tsc skips constituents that
+        // are not object types).
+        if parts.iter().any(|&p| self.is_generic_mapped_type(p)) {
+            parts.retain(|&p| {
+                !self.store().flags(p).intersects(TypeFlags::TYPE_PARAMETER)
+                    || self.type_param_constraint(p).is_some()
+            });
+        }
         if parts
             .iter()
             .any(|&p| !self.store().flags(p).contains(TypeFlags::OBJECT))
@@ -823,7 +832,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut has_property = false;
         for p in parts {
             if self.is_generic_mapped_type(p) {
-                if let Some(t) = self.generic_mapped_template_for(p, key) {
+                // Only for a key its constraint can hold; the others' index signatures
+                // still apply.
+                if self.mapped_constraint_may_hold(p, key)
+                    && let Some(t) = self.generic_mapped_template_for(p, key)
+                {
                     types.push(t);
                 }
                 continue;
@@ -879,6 +892,20 @@ impl<'c, 'a> Ck<'c, 'a> {
         })
     }
 
+    /// Whether the key type `key` is assignable to the base constraint of the constraint of
+    /// the mapped type `t` (tsc: `getTypeOfConcretePropertyOfContextualType`).
+    fn mapped_constraint_may_hold(&mut self, t: TypeId, key: TypeId) -> bool {
+        let Some(info) = self.mapped_info(t) else {
+            return false;
+        };
+        let c = self.mapped_constraint(&info);
+        let bc = self.base_constraint(c);
+        if bc == TypeId::UNRESOLVED || self.store().is_error(bc) {
+            return true;
+        }
+        self.is_assignable(key, bc)
+    }
+
     /// The union of per-member contextual types. An `any` member does not absorb the others
     /// (tsc keeps such a union unreduced): `"a"` stays a literal against `["a"] | { [i:
     /// number]: any }`. Nor does an `unknown` member, which adds nothing to the context: `K
@@ -916,6 +943,16 @@ impl<'c, 'a> Ck<'c, 'a> {
                     out.push(t);
                     continue;
                 }
+            }
+            // An element of a generic mapped type is typed by its index as a property name
+            // (`T["0"]` for `{ [K in keyof T]: T[K] }`, whose constraint may take literals;
+            // tsc: `getTypeOfPropertyOfContextualType`).
+            if !after_spread
+                && self.is_generic_mapped_type(m)
+                && let Some(t) = self.contextual_property_type(m, &idx.to_string())
+            {
+                out.push(t);
+                continue;
             }
             let am = if mf.intersects(TypeFlags::INSTANTIABLE) {
                 let c = self.base_constraint(m);

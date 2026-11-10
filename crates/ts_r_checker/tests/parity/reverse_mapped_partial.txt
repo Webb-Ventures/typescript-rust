@@ -1,0 +1,16 @@
+a.ts(12,45): error TS18046: 'k' is of type 'unknown'.
+a.ts(13,7): error TS2322: Type 'Mapped<{ foo: string; }>' is not assignable to type 'number'.
+a.ts(14,7): error TS2322: Type 'Mapped<unknown>' is not assignable to type 'number'.
+a.ts(18,7): error TS2322: Type '{ a: unknown; b: number; }' is not assignable to type 'number'.
+a.ts(21,7): error TS2322: Type '{ a: number; b: unknown; }' is not assignable to type 'number'.
+a.ts(24,7): error TS2322: Type '{ a: number; b: string; }' is not assignable to type 'number'.
+a.ts(26,27): error TS7006: Parameter 'v' implicitly has an 'any' type.
+a.ts(27,7): error TS2322: Type '{ a: number; b: (v: any) => any; }' is not assignable to type 'number'.
+a.ts(29,45): error TS2741: Property 'v' is missing in type '{ f: (x: unknown) => void; }' but required in type '{ v: unknown; f: (x: unknown) => void; }'.
+a.ts(30,7): error TS2322: Type '{ a: number; b: unknown; }' is not assignable to type 'number'.
+a.ts(32,43): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(33,7): error TS2322: Type '[number, string]' is not assignable to type 'number'.
+a.ts(37,7): error TS2322: Type '["a", "b"]' is not assignable to type 'number'.
+a.ts(40,7): error TS2322: Type '["a", "b"]' is not assignable to type 'number'.
+a.ts(45,67): error TS2322: Type 'number' is not assignable to type 'string'.
+a.ts(46,7): error TS2322: Type '["onclick", "onkey"]' is not assignable to type 'number'.

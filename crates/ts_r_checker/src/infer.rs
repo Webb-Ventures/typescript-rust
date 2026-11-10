@@ -167,7 +167,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         if depth > MAX_INFERENCE_DEPTH || !self.could_contain_type_params(target) {
             return;
         }
-        if source == TypeId::WILDCARD || source == TypeId::SILENT_NEVER {
+        if source == TypeId::WILDCARD
+            || source == TypeId::SILENT_NEVER
+            || Some(source) == self.non_inferrable_fn
+        {
             return;
         }
         if let Some(i) = ctx.index_of(target) {

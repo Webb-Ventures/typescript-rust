@@ -1459,6 +1459,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         // number of arguments: the first such instance that does not fit is the arity error
         // reported if no candidate fits otherwise.
         let mut arity_failure: Option<SigId> = None;
+        let overloaded = candidates.len() > 1;
+        if overloaded {
+            self.overloaded_calls.push(e);
+        }
         for &rel in relations {
             last_failures.clear();
             for &cand in &candidates {
@@ -1487,10 +1491,27 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.check_candidate_args(e, inst, &eff, rel)
                 };
                 match failure {
-                    None => return Some(inst),
+                    None => {
+                        if overloaded {
+                            self.overloaded_calls.pop();
+                            // The chosen candidate's literal arguments keep the contexts its
+                            // inference typed their functions in.
+                            for a in eff.iter() {
+                                let Arg::Expr(n) = *a else { continue };
+                                let l = Loc::new(e.file, n);
+                                if let Some(&fct) = self.deferred_fn_contexts.get(&(l, cand)) {
+                                    self.fix_sensitive_fn_contexts(l, fct);
+                                }
+                            }
+                        }
+                        return Some(inst);
+                    }
                     Some(f) => last_failures.push((inst, f)),
                 }
             }
+        }
+        if overloaded {
+            self.overloaded_calls.pop();
         }
         // Report.
         self.overload_failed = true;
@@ -2894,6 +2915,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut generic_args: Vec<(TypeId, TypeId)> = Vec::new();
         let mut inferred_tps: Vec<TypeId> = Vec::new();
         let mut late: Vec<(usize, TypeId, TypeId, TypeId)> = Vec::new();
+        let mut partials: Vec<(usize, crate::partial_infer::PartialInference)> = Vec::new();
         for (i, &a) in eff.iter().enumerate() {
             if i >= rest_from {
                 break;
@@ -2923,6 +2945,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.context_free_object_properties(l, pt, 0, &mut pairs);
                         for (at, tt) in pairs {
                             self.infer_types(&mut ctx, at, tt, 0);
+                        }
+                        // A literal whose parameter type reverse-maps to `T` infers `T` from
+                        // its members that are not context sensitive.
+                        if let Some(p) = self.infer_partial_literal(&mut ctx, l, pt) {
+                            partials.push((i, p));
                         }
                         deferred.push(i);
                         continue;
@@ -3080,6 +3107,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             // inference so far, `unknown` without candidates); the others map to what is
             // known so far without fixing.
             let tps = ctx.params.clone();
+            let partial = partials
+                .iter()
+                .find(|(k, _)| *k == i)
+                .map(|(_, p)| p.clone());
             let mut mentioned = vec![false; tps.len()];
             let ptn = self.non_nullable(pt);
             let mut pt_calls = self.signatures_of(ptn, SigKind::Call);
@@ -3099,7 +3130,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // (A homomorphic mapped type infers by reversing it: nothing to fix.)
                 // (Only when every element or property is such a function: the others would
                 // infer first.)
-                if self.is_generic_mapped_type(ptn)
+                // After a partial inference (a reverse mapped type), every context-sensitive
+                // function inside fixes what its contextual parameters read.
+                if partial.is_some() {
+                    self.sensitive_fn_sigs(Loc::new(e.file, n), ptn, 0, &mut pt_calls);
+                } else if self.is_generic_mapped_type(ptn)
                     || !self.nested_context_sigs(Loc::new(e.file, n), pt, 0, &mut pt_calls)
                 {
                     pt_calls.clear();
@@ -3319,9 +3354,60 @@ impl<'c, 'a> Ck<'c, 'a> {
                     }
                 })
                 .collect();
+            // A reverse-mapped `T` fixed to `unknown` gives each member of the literal an
+            // `unknown` context (`T["foo"]` reads `unknown`, where `Mapped<unknown>` has no
+            // members), also for the final check of the argument.
+            let mut cur = cur;
+            if let Some(p) = &partial
+                && let Some(jt) = tps.iter().position(|&t| t == p.tv)
+                && ctx.fixed[jt] == Some(TypeId::UNKNOWN)
+                && let Some(keys) = self.unknown_keys_of_partial(p)
+            {
+                cur[jt] = keys;
+            }
             let m = self.store().mapper(&tps, &cur);
             let ct = self.instantiate(pt, m);
+            // (tsc types the literal's functions once, in this context, where a parameter
+            // with nothing inferred reads as its constraint once anything is inferred.)
+            // (While overloads are tried, only for the candidate whose other arguments fit:
+            // the context waits for it, `deferred_fn_contexts`.)
+            if (partial.is_some() || self.has_generic_mapped_part(ptn))
+                && nested
+                && self.speculative == 0
+            {
+                let any_inferred = (0..tps.len()).any(|j| {
+                    ctx.fixed[j].is_some()
+                        || !ctx.candidates[j].is_empty()
+                        || !ctx.contra[j].is_empty()
+                        || !ctx.weak[j].is_empty()
+                });
+                let mut cur2 = cur.clone();
+                if any_inferred {
+                    for j in 0..tps.len() {
+                        if cur[j] == tps[j]
+                            && let Some(c) = self.type_param_constraint(tps[j])
+                        {
+                            cur2[j] = self.instantiate(c, m);
+                        }
+                    }
+                }
+                let fct = if cur2 == cur {
+                    ct
+                } else {
+                    let m2 = self.store().mapper(&tps, &cur2);
+                    self.instantiate(pt, m2)
+                };
+                let al = Loc::new(e.file, n);
+                if self.overloaded_calls.last() == Some(&e) {
+                    self.deferred_fn_contexts.entry((al, sig)).or_insert(fct);
+                } else {
+                    self.fix_sensitive_fn_contexts(al, fct);
+                }
+            }
             let at = self.speculative_arg_type(Loc::new(e.file, n), ct);
+            if let Some(p) = &partial {
+                self.undo_partial_inference(&mut ctx, p);
+            }
             self.infer_types(&mut ctx, at, pt, 0);
         }
         // With a generic context, only inferences that don't mention type parameters count
@@ -3774,7 +3860,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         self.first_arg_context.get(&(l, target)).copied()
     }
 
-    fn speculative_arg_type(&mut self, l: Loc, ctx: TypeId) -> TypeId {
+    pub(crate) fn speculative_arg_type(&mut self, l: Loc, ctx: TypeId) -> TypeId {
         // A function argument fixed by an earlier overload keeps that context (`None`: no
         // context, so no memo either).
         let (ctx, memo) = match self.fixed_arg_contexts.get(&l) {
@@ -3984,6 +4070,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         self.fixed_arg_contexts.insert(l, Some(ctx));
                     }
                     if !sensitive && matches!(pass, ArgPass::Fix(_)) {
+                        // The context the candidate's inference typed the functions in.
+                        if let Some((target, _)) = self.store().sig(sig).target
+                            && let Some(&fct) = self.deferred_fn_contexts.get(&(l, target))
+                        {
+                            self.fix_sensitive_fn_contexts(l, fct);
+                        }
                         self.fix_nested_contexts(l, ctx);
                     }
                     self.speculative_arg_type(l, ctx)
