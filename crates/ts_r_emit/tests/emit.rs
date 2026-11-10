@@ -805,7 +805,7 @@ fn dropped_aliases_release_their_imports() {
 /// JavaScript declarations are refused (TSR2006, the file's `.js` still written) when the
 /// file uses a pattern tsc declares from that the emitter does not write: CommonJS
 /// exports, a dotted `@typedef` name, a `@callback` rest parameter, `@type` on a function
-/// declaration, a `this` property a base class declares, a class's statics.
+/// declaration, a class's statics.
 #[test]
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
@@ -817,7 +817,6 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
         "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
         "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
-        "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
         "class A {}\nexport class C extends A {}\nC.count = 1;\n",
         "export class C {}\nfunction f() { C.count = 1; }\nf();\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
@@ -880,6 +879,46 @@ fn javascript_overloads_are_written() {
             .unwrap();
         assert_eq!(d.text, want, "{src}");
     }
+}
+
+/// `this.x = v` next to a base class's member (tsc 7.0.2,
+/// jsDeclarationEmitThisAssignmentWithBaseProperty): left out when the base has an accessor
+/// or a method `x`, or a property `x` of the same type; written with its own type when the
+/// constructor assigns another. Refused while the checker's type of the class's own `x`
+/// differs from the base's and another member reads it (thisPropertyAssignmentInherited).
+#[test]
+fn javascript_this_properties_next_to_base_members() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
+            "export declare class A {\n    x: number;\n}\nexport declare class B extends A {\n    constructor();\n}\n",
+        ),
+        (
+            "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = \"s\"; } }\n",
+            "export declare class A {\n    x: number;\n}\nexport declare class B extends A {\n    x: string;\n    constructor();\n}\n",
+        ),
+        (
+            "export class A { m() {} }\nexport class B extends A { constructor() { super(); this.m = this.m.bind(this); } }\n",
+            "export declare class A {\n    m(): void;\n}\nexport declare class B extends A {\n    constructor();\n}\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .expect("a.d.ts");
+        assert_eq!(d.text, want, "{src}");
+    }
+    let src = "export class A { get t() { return \"\"; } set t(v) {} }\nexport class B extends A { get u() { return this.t; } set u(v) { this.t = v; } }\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert_eq!(codes(&r), vec![ts_r_emit::dts::TSR_JS_DECLARATIONS]);
 }
 
 /// A CommonJS file whose only export is `module.exports = v;` is `export = v;` first, then
