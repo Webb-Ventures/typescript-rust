@@ -7,6 +7,29 @@ pull requests merged since the previous release (also on the
 
 <!-- releases -->
 
+## [v0.1.0-alpha.6](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.6) - 2026-11-10
+
+### From the core team
+
+- Checker parity round 3: conformance 12,463 exact, RxJS matches tsc in #112
+- Checker gap 1: reverse mapped type inference (12,466 exact) in #113
+- Checker gap 2: generic mapped types in relations (12,469 exact) in #114
+- Checker gap 3: alias preservation in printing (12,473 exact) in #115
+- Checker gap 4: variance measurement (12,480 exact) in #116
+- Checker: fix gap-2 regressions on TypeORM and tRPC (back to 0/0) in #117
+- Checker gap 5: tagged-template tag rules in #118
+- Checker gap 6: heritage checks (12,489 exact, 98.0%) in #119
+- Checker gap 7: JSX generics and type arguments (12,501 exact) in #120
+- Checker gap 8: unused checks (12,502 exact, 98.1%) in #121
+- Emit parity round 3: JSDoc declarations, TS2209/TS2210 (.d.ts 2,462 exact) in #122
+- ts-r-lsp parity round 1: fourslash 2,234 / 2,505, faster first errors in #123
+- Docs: public repo is the development repo; compat.json and emit numbers in #125
+- Checker: React Compiler matches tsc; tRPC packages 1,194 -> 80 extra in #126
+- Parser recovery round 3: JSX, parameters, conditionals; binder (Missing) name in #127
+- Emit: declaration diagnostics under --noEmit via history; scenarios 339 / 377 in #128
+- ts-r-lsp: no ESLint config wait on the project thread (hover 1,479 -> 1 ms) in #129
+- Emit-repos: minimatch memory and time, tRPC and RxJS 7 extras; 13/13 diagnostics identical in #133
+
 ## [v0.1.0-alpha.5](https://github.com/Webb-Ventures/typescript-rust/releases/tag/v0.1.0-alpha.5) - 2026-10-29
 
 ### From the core team
