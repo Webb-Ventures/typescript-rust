@@ -43,6 +43,11 @@ pub struct BuildInfo {
     /// A `noCheck` build left files unchecked: a checking build must run (and report).
     #[serde(default, skip_serializing_if = "is_false")]
     pub check_pending: bool,
+    /// The last build of an incremental project reported declaration diagnostics under
+    /// `noEmit`: reported again only while declarations are asked for (tsc keeps them as
+    /// emit diagnostics; a non-incremental build counts them in `errors`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dts_errors: bool,
     /// Program state of `incremental` / `composite` projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<ProgramState>,
@@ -93,6 +98,13 @@ pub struct OptionHashes {
     /// The same for declarations (`declarationMap`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dts_maps: Option<u8>,
+    /// What the last build's options asked of declarations, emitting or not
+    /// ([`crate::incremental::declaration_bits`]: 1 declarations, 2 `declarationMap`).
+    /// Under `noEmit`, declarations turned on since are pending declaration diagnostics:
+    /// "change in compilerOptions" (tsc's `DtsErrors` emit kind; observed:
+    /// `tsbuild/noEmit/dts-errors-with-declaration-enable-changes-with-incremental`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declarations: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +127,10 @@ pub struct FileState {
     /// The file affects the global scope (a script, or `declare global`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub global: bool,
+    /// Its declarations reported errors (TS4094, ...) when last computed: kept while the
+    /// file is unchanged and later builds do not compute them ([`BuildInfo::dts_errors`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dts_errors: bool,
     /// Indices of the program files it depends on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deps: Vec<u32>,
@@ -256,6 +272,7 @@ mod tests {
             errors: true,
             semantic_errors: false,
             check_pending: true,
+            dts_errors: true,
             program: Some(ProgramState {
                 options: OptionHashes {
                     check: "c".into(),
@@ -263,6 +280,7 @@ mod tests {
                     dts: None,
                     js_maps: Some(1),
                     dts_maps: None,
+                    declarations: Some(3),
                 },
                 files: vec![FileState {
                     path: "./a.ts".into(),
@@ -270,6 +288,7 @@ mod tests {
                     signature: "s".into(),
                     api: "a".into(),
                     global: true,
+                    dts_errors: true,
                     deps: vec![],
                 }],
                 pending: vec![(0, pending::JS)],

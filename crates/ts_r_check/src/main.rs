@@ -487,6 +487,49 @@ fn rebase_diagnostics(
     Some(diags)
 }
 
+/// Whether declaration diagnostics are reported (record 0012, invariant 5): under `noEmit`
+/// with declarations asked for, when the program has no other diagnostic; config parse
+/// errors do not count (tsc: tsc/internal/compiler/program.go, `GetDiagnosticsOfAnyProgram`).
+/// With emit they come with the emit's diagnostics.
+pub(crate) fn reports_declaration_diagnostics(
+    parsed: &ts_r_config::ParsedConfig,
+    diags: &[Diagnostic],
+    config_diags: &[ts_r_config::ConfigDiagnostic],
+) -> bool {
+    parsed.options.effective().no_emit()
+        && ts_r_emit::emits_declarations(&parsed.options)
+        && diags.is_empty()
+        && config_diags.iter().all(|c| parsed.diagnostics.contains(c))
+}
+
+/// The errors an emit's declarations reported with a tsc code (TS4094, TS2883, TS9xxx: the
+/// JavaScript emit reports only TSR codes, and TS5055/TS5056 are global): an incremental
+/// program keeps them apart, as tsc keeps emit diagnostics.
+pub(crate) fn declaration_error_count(r: &ts_r_emit::EmitResult) -> usize {
+    r.diagnostics
+        .iter()
+        .filter(|d| {
+            d.is_error() && d.file.0 != u32::MAX && d.code < ts_r_diagnostics::SOUND_CODE_BASE
+        })
+        .count()
+}
+
+/// The program files with declaration errors among `diags` (sorted, once each).
+pub(crate) fn declaration_error_files<'d>(
+    diags: impl IntoIterator<Item = &'d Diagnostic>,
+) -> Vec<u32> {
+    let mut files: Vec<u32> = diags
+        .into_iter()
+        .filter(|d| {
+            d.is_error() && d.file.0 != u32::MAX && d.code < ts_r_diagnostics::SOUND_CODE_BASE
+        })
+        .map(|d| d.file.0)
+        .collect();
+    files.sort_unstable();
+    files.dedup();
+    files
+}
+
 fn sources_of(program: &ProgramFiles, diags: &[Diagnostic]) -> Vec<Option<(String, String)>> {
     let mut shown: Vec<bool> = program.files.iter().map(|f| !f.is_lib).collect();
     for d in diags {
@@ -965,6 +1008,8 @@ fn main() -> ExitCode {
     // (a pragma may turn a file on), then check fully. A warm run never misses sound results.
     let mut early = None;
     let mut package_jsons = None;
+    // The declaration diagnostics a history run kept (it loaded no program).
+    let mut history_declarations: Option<Vec<Diagnostic>> = None;
     let (program, sources, mut diags) = if needs_program {
         let (program, mut diags, s, e, p) = full_check(!options_failed, overlap);
         early = e;
@@ -990,8 +1035,24 @@ fn main() -> ExitCode {
         } else {
             None
         };
-        let outcome =
-            ts_r_history::persist::check(&fs, cache.as_ref(), &parsed, libs.as_ref(), args.threads);
+        // Declaration diagnostics are computed with the check and kept in the history
+        // (record 0012, "Declaration diagnostics under `--noEmit`").
+        let decl_host = ts_r_checker::typenode::specifier_host_with_references(
+            &fs,
+            &parsed.options,
+            refs.clone(),
+        );
+        let hook = |c: &ts_r_checker::Checker<'_>, f: ts_r_diagnostics::FileId| {
+            ts_r_emit::declaration_diagnostics_of(c, f, &parsed.options, Some(&decl_host))
+        };
+        let outcome = ts_r_history::persist::check_with(
+            &fs,
+            cache.as_ref(),
+            &parsed,
+            libs.as_ref(),
+            args.threads,
+            ts_r_emit::emits_declarations(&parsed.options).then_some(&hook as _),
+        );
         if std::env::var_os("TS_R_CHECK_STATS").is_some() {
             eprintln!(
                 "ts-r-check: {:?}, {} changed, {} checked, {} reused, {:.1} ms ({}; shapes {:.1}, plan {:.1}, link+check {:.1})",
@@ -1064,6 +1125,7 @@ fn main() -> ExitCode {
                 }
             }
         } else {
+            history_declarations = Some(outcome.declarations);
             (None, outcome.sources, outcome.diagnostics)
         }
     };
@@ -1107,6 +1169,11 @@ fn main() -> ExitCode {
     }
     let mut emitted = None;
     let mut early_writes = None;
+    // Declaration diagnostics reported under `noEmit` (incremental: kept apart in the
+    // buildinfo).
+    let mut dts_errors = 0usize;
+    let mut dts_error_files = Vec::new();
+    let mut dts_computed = false;
     if let Some(program) = &program {
         let host = ts_r_checker::typenode::specifier_host_with_references(
             &fs,
@@ -1143,7 +1210,16 @@ fn main() -> ExitCode {
                 e
             };
             emitted = Some(e);
+        } else if reports_declaration_diagnostics(&parsed, &diags, &config_diags) {
+            diags = ts_r_emit::declaration_diagnostics(program, &cfg);
+            dts_errors = diags.iter().filter(|d| d.is_error()).count();
+            dts_error_files = declaration_error_files(&diags);
+            dts_computed = true;
         }
+    } else if let Some(decls) = history_declarations
+        && reports_declaration_diagnostics(&parsed, &diags, &config_diags)
+    {
+        diags = decls;
     }
     let mut sources = sources;
     let diags = merge_config_diagnostics(diags, &config_diags, &mut sources, &fs);
@@ -1199,9 +1275,20 @@ fn main() -> ExitCode {
             emitted.as_ref(),
             blocked,
             build::Reported {
-                errors: error_count > semantic,
+                errors: error_count
+                    > semantic
+                        + dts_errors
+                        + emitted
+                            .as_ref()
+                            .map_or(0, |(r, _)| declaration_error_count(r)),
                 semantic_errors: semantic > 0,
                 no_check,
+                dts_computed: dts_computed
+                    || (emitted.is_some() && ts_r_emit::emits_declarations(&parsed.options)),
+                dts_error_files: match &emitted {
+                    Some((r, _)) => declaration_error_files(&r.diagnostics),
+                    None => dts_error_files,
+                },
             },
             false,
             false,

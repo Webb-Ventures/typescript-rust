@@ -53,9 +53,21 @@ The compile pipeline (load, check, emit, render) stays in ts-r-check behind
   a build that emitted something is forgotten, so producing it again re-emits every file.
   The `package.json` paths resolution read or looked for are recorded too, by `tsc -p` as
   by `-b` (a later `-b` then rewrites nothing).
+  `OptionHashes::declarations` stores whether declarations (bit 1) and declaration maps
+  (bit 2) were asked for; under `noEmit` turning declarations on is "change in
+  compilerOptions" (they must be computed), while a change that leaves no work pending keeps
+  the stored bits when the buildinfo would otherwise be unchanged (tsc does not rewrite it).
   Options equal to tsc 7's default are left out, as tsc leaves them out of its buildinfo:
   so far `strict: true` (observed: `tsbuildWatch/programUpdates/works-with-extended-source-
   files`).
+- **Declaration errors.** `FileState::dts_errors` flags a file whose declarations reported
+  errors (TS4094, ...) when last computed; a build that does not compute them keeps the flag
+  while the file's hash is unchanged. `BuildInfo::dts_errors` (any flag, incremental
+  projects only) makes a later build that asks for declarations report "program needs to
+  report errors" (status.rs, after the `errors` check, as tsc orders it). A
+  non-incremental build records them as `errors`. Non-incremental status checks each
+  expected output in order: the first missing one, else the first older than the newest
+  input (tsc's order).
 - **Signatures.** A file's signature is the hash of its declaration output when the emit has
   one (E2's `.d.ts`, `FileState::signature`), else of its declared API
   (`ts_r_decls::index(..).api_hash`, `FileState::api`; text hash for `.d.ts` inputs). The

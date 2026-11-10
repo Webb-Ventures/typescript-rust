@@ -763,8 +763,17 @@ impl Emitter<'_, '_> {
 
     /// `(a: T, b?: U, ...c: V[])` for a declaration's parameters. Missing types are
     /// inferred; initializers make a parameter optional.
+    /// `f` is the signature of a JSDoc `@callback` alias (a JSDoc function type directly
+    /// under a JSDoc type alias).
+    fn is_callback_signature(&self, f: NodeId) -> bool {
+        matches!(self.ast.node(f), Node::FunctionType { .. })
+            && self.ast.is_jsdoc(f)
+            && self.parents.parent(f).is_some_and(|a| {
+                matches!(self.ast.node(a), Node::TypeAlias { .. }) && self.ast.is_jsdoc(a)
+            })
+    }
+
     pub(super) fn params(&mut self, params: NodeList, owner: NodeId) {
-        let _ = owner;
         let rebuilt = u32::from(std::mem::take(&mut self.rebuilt_params));
         let ps = self.ast.list(params).to_vec();
         // A parameter with an initializer is optional unless a required one follows.
@@ -817,6 +826,15 @@ impl Emitter<'_, '_> {
             // A defaulted parameter before a required one: `T | undefined`.
             let add_undefined =
                 init.is_some() && !opt_by_init && !optional && self.c.opts.strict_null_checks;
+            // A JSDoc `@callback`'s `@param {...T} a` is written `...a: T` (no array;
+            // tsc 7.0.2, callbackTagVariadicType).
+            let type_ann = match type_ann {
+                Some(t) if rest && self.is_callback_signature(owner) => match *self.ast.node(t) {
+                    Node::ArrayType { elem } if self.ast.is_jsdoc(t) => Some(elem),
+                    _ => Some(t),
+                },
+                other => other,
+            };
             match type_ann {
                 Some(t) => {
                     self.w(": ");

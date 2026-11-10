@@ -1619,3 +1619,119 @@ with a base class whose static is assigned from outside, `this.x` a base class d
 read in its own value, a `@callback` rest parameter. jsDeclarationsCrossfileMerge is
 written but differs: the checker's type printer writes `typeof import("./exporter").default`
 where tsc reaches the value through the local `require` alias (`typeof m.default`).
+
+## Declaration diagnostics under `--noEmit` (design, `parity/emit-4`, 2026-11-10)
+
+Invariant 5 asks for declaration diagnostics (TS4094, TS4023, TS2883, TS7056, TS9xxx, ...)
+whenever `declaration` is on, `--noEmit` included. A check-only run goes through
+`ts_r_history`, which never loads the whole program, so the declaration emitter cannot run
+there at report time. The owner's decision: compute them while checking and keep them in the
+history, so a warm check-only run stays as fast and still prints what tsc prints.
+
+**When they are reported (tsc 7.0.2).** tsc adds declaration diagnostics under `noEmit`
+only when the program has no other diagnostic: no syntactic, program (option checks, `rootDir`,
+missing roots), global or semantic diagnostic; config parse errors do not count (tsc:
+tsc/internal/compiler/program.go, `GetDiagnosticsOfAnyProgram`). They are asked of every
+file declarations would be written for: not a declaration file, not found through
+`node_modules`, not JSON; JavaScript inputs too, checked or not
+(tsc/internal/compiler/emitter.go, `getDeclarationDiagnostics`). ts-r-check applies the same
+rule on every path: the history path, a loaded program (`-p` with `incremental` or
+references, `-b`, `--watch`).
+
+**What they are.** The diagnostics `ts_r_emit::declaration_diagnostics_of` returns for one
+file: the declaration emitter's refusals with a tsc code. ts-r's own TSR2001 / TSR2006 say an
+output was not written; under `noEmit` nothing is, so they are dropped. A JavaScript file the
+emitter refuses (TSR2006) therefore reports no declaration diagnostics: a known gap, shrinking
+with the JavaScript declaration work.
+
+**When they are computed.** In `History::check` and the fast path (`lazy.rs`), right after
+`check_files`, on the same checker (the full program or the sub-program), for the same
+targets, by a hook ts-r-check passes in (`ts_r_history` does not depend on `ts_r_emit`).
+Only when the hook is given: ts-r-check gives it when the options emit declarations. Files
+that get declaration diagnostics but no check (JavaScript without `checkJs`) become targets
+for the hook alone. They are computed whether or not the run has errors: a later run that
+fixes the errors elsewhere reuses them without re-checking the file.
+
+**Keying and format.** Per file, next to its check diagnostics: `FileState::decls`
+(`None`: not computed). Everything else is keyed as before: the manifest key covers every
+option, so turning `declaration` (or `isolatedDeclarations`, `stripInternal`) on or off is a
+cold run. `persist::FORMAT_VERSION` 13 -> 14: each state's encoding gains the optional list
+after its diagnostics, and the manifest keeps the run's declaration diagnostics as a second
+output list, so a run with no change decodes them like the output and parses nothing.
+
+**Invalidation.** A file's declaration diagnostics depend on its own text and on the types
+it reaches in other files, which is what decides its re-check: the `used` deep hashes of its
+shape (per export, transitively through every signature on the way, the propagation
+described in record 0005). So they are recomputed exactly when its check diagnostics are:
+new or edited text, changed resolutions, a changed deep hash, or a stored diagnostic
+(either kind) pointing into a file whose text changed. A state wanting them but holding
+`None` (the hook was missing last time) is a target too. A differential test in
+`ts_r_history` (`tests/declarations.rs`) checks the carried and the persisted declaration
+diagnostics against a fresh computation over the whole program after every edit, including
+an edit that changes only the types an unchanged file's declarations use.
+
+## Implementation notes (declaration diagnostics under `--noEmit`, `parity/emit-4`, 2026-11-10)
+
+As designed above, with these details:
+
+- **Buildinfo.** tsc keeps declaration errors apart from the program's errors
+  (`FileEmitKind` `DtsErrors`): an incremental build whose only errors are declaration
+  diagnostics is "out of date ... program needs to report errors" for a later build that asks
+  for declarations, not for one that does not. ts-r flags each file whose declarations
+  reported errors (`FileState::dts_errors`) and keeps the flag while the file is unchanged
+  and later builds do not compute them: after a fix in `a.ts` with `--noEmit` alone, `c.ts`
+  and `d.ts` still owe TS4094 (`tsbuild/noEmit/dts-errors-with-declaration-enable-changes-
+  with-multiple-files`, step 7). A non-incremental build records them as errors. Turning
+  `declaration` on under `noEmit` is "change in compilerOptions"; a change that leaves no work
+  pending does not rewrite the buildinfo (`OptionHashes::declarations`).
+- **Non-incremental status** checks each expected output in order and stops at the first
+  missing one or the first older than the newest input, as tsc does (it named a later output
+  before).
+- **Without history** (`--no-history`) the declaration pass runs first and the check reuses
+  its checker. Run after the check on a second checker it made trpc's `packages/server`
+  cold check (clean, `declaration: true`) 19% slower (130 -> 155 ms); with one checker it is
+  within noise (A/B/A 116.4 / 119.4 / 120.5 ms). The warm no-change run is unchanged (A/B/A
+  23.1 / 23.0 / 23.1 ms): it decodes one more list.
+
+| Measure | Before | After |
+|---|---|---|
+| Scenarios (tsc/ + tsbuild/) | 328 / 377 | 339 / 377 (`noEmit` 70 / 70; none lost) |
+| Watch scenarios | 91 / 106 | 95 / 106 |
+
+Emit (11,253 tests bytes-exact, `.d.ts` 2,467 / 2,640) and trace (142 / 146) are unchanged.
+TSR2006-refused JavaScript files still report no declaration diagnostics.
+
+## Implementation notes (JavaScript declarations, third part, `parity/emit-4`, 2026-11-10)
+
+The 27 refused JavaScript inputs fell into nine buckets: CommonJS forms 12 (nine different
+shapes), dotted `@typedef` names 4, `@enum` 2, `@type` on a function declaration 2, `this.x`
+next to a base class's member 2, `this["x"]` 2, a class's statics, a `@callback` rest
+parameter and `this.x = this.x...` one each. Five are now written:
+
+- **`this.x` next to a base member.** tsc leaves it out when an `extends` base has an
+  accessor or method `x`, or a property `x` of the same readonly-ness, optionality and type;
+  the class's own `x` has the base's type unless the constructor assigns it (tsc:
+  tsc/internal/checker/emitresolver.go, `IsThisPropertyAssignmentDeclarationRedundant`). Still
+  refused where the checker types the own `x` from its assignments and another member reads
+  it (thisPropertyAssignmentInherited: a getter returning `this.textContent`).
+- **`@type` on a function declaration** applies when no `@param`, `@returns` or `@template`
+  comes first and no parameter has its own `@type` (jsdocTypeParameterTagConflict); the
+  declaration is the type's one call signature under the function's parameter names.
+- **`@enum`** was already written as tsc writes it (the value's type; the name stays a type
+  reference). Probed against tsc 7.0.2; one difference remains outside the refusal: a file
+  importing an `@enum` keeps the import where tsc drops it.
+- **`this["x"] = v`** with a JSDoc `@type` is `"x": T`; the checker declares no member for
+  an element assignment, so the tag (recorded on the target) gives the type.
+- **A `@callback`'s `@param {...T} a`** is `...a: T`, without the array.
+
+| Measure | Before | After |
+|---|---|---|
+| Emit tests bytes-exact | 11,253 / 11,925 | 11,261 / 11,925 |
+| `.d.ts` bytes-exact | 2,467 / 2,640 | 2,475 / 2,640 |
+| TSR2006 refusals | 27 | 19 |
+
+Left: the CommonJS shapes (the named-export path refuses any `require` call, which blocks
+`module.exports.ns = ns` of a required `ns` and `exports.x = require(...)`; the others are
+single tests), dotted `@typedef` names (the parser does not model them, so this needs the
+parser and the checker), a class's statics with a base class, and the two `this.x` cases
+that need the checker's typing of inherited this-properties.

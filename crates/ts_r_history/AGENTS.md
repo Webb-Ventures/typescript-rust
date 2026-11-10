@@ -92,6 +92,18 @@ encoding), `lib.rs`. `TS_R_HISTORY_DEBUG=1` prints the fast path's plan to stder
   lib files that were missing and whether a lib store was found: a missing lib that appears
   means a real check. Bump `persist::FORMAT_VERSION` when the manifest layout, a hash rule
   or shape rule changes. Decoding never panics; anything unreadable is a cold run.
+- **Declaration diagnostics** (record 0012, "Declaration diagnostics under `--noEmit`";
+  `FORMAT_VERSION` 14): with a `DeclarationHook` (ts-r-check passes `ts_r_emit`'s, when the
+  options ask for declarations), every file a declaration would be written for
+  (`has_declarations`: not external, not `.d.ts`, not JSON; JS without `checkJs` included)
+  gets the hook's diagnostics in `FileState::decls`, computed right after the check on the
+  same checker, and invalidated exactly like `FileState::diags` (deep hashes, positions).
+  The manifest keeps the sorted result (`Manifest::declarations`) for the unchanged path;
+  `Outcome::declarations` carries it. Without history the hook runs first and the check
+  reuses its checker (one checker, not two). They are computed even when the run has
+  errors; ts-r-check decides whether to report them. `tests/declarations.rs` compares
+  fresh, carried and persisted ones across an edit that changes only an import's types.
+  `ts_r_emit` is a dev-dependency for that test only.
   Each saved request keeps its separate resolution mode (when different from the
   specifier's first unattributed mode) and result; lazy replay restores both resolution
   maps. Shapes conservatively include alternate targets in exported dependencies because

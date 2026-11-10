@@ -25,13 +25,16 @@ use ts_r_diagnostics::Diagnostic;
 use ts_r_resolver::{Extension, ResolutionMode, Resolver, ResolverOptions};
 
 use crate::codec::{Reader, Writer};
-use crate::incremental::{CheckStats, FileState, History, PathDiag, text_hash};
+use crate::incremental::{
+    CheckStats, DeclarationHook, FileState, History, PathDiag, declaration_results,
+    has_declarations, text_hash,
+};
 use crate::shape::{Hash, PathKey};
 
 /// Cache namespace of persisted histories.
 pub const NAMESPACE: &str = "check";
 /// Bump when the manifest layout or anything hashed into it changes.
-pub const FORMAT_VERSION: u32 = 13;
+pub const FORMAT_VERSION: u32 = 14;
 const MAGIC: &[u8; 4] = b"TSRH";
 
 /// Where a module request led (paths relative to the config directory).
@@ -86,6 +89,9 @@ pub(crate) struct Manifest {
     /// Non-lib files in program order.
     pub files: Vec<SavedFile>,
     pub output: Vec<PathDiag>,
+    /// The declaration diagnostics of every file, sorted as `output` (empty without a
+    /// [`DeclarationHook`]): a run with no change answers from it.
+    pub declarations: Vec<PathDiag>,
     /// Sorted by path.
     pub states: Vec<(String, FileState)>,
     pub link: Option<Vec<PathDiag>>,
@@ -111,6 +117,10 @@ pub struct Outcome {
     pub sources: Vec<Option<(String, String)>>,
     /// Sorted diagnostics with file ids into `sources`.
     pub diagnostics: Vec<Diagnostic>,
+    /// Sorted declaration diagnostics with file ids into `sources` (computed only with a
+    /// [`DeclarationHook`]; tsc reports them under `noEmit` when there is no other
+    /// diagnostic, which is the caller's rule). `sources` holds the texts they point into.
+    pub declarations: Vec<Diagnostic>,
     pub mode: Mode,
     pub stats: CheckStats,
     /// Wall time per phase (ms), for `TS_R_CHECK_STATS`.
@@ -227,6 +237,10 @@ impl Paths<'_> {
                 .map(|ds| ds.iter().map(|d| self.diag(d, f)).collect()),
             syntax: s.syntax.iter().map(|d| self.diag(d, f)).collect(),
             references: s.references.iter().map(|d| self.diag(d, f)).collect(),
+            decls: s
+                .decls
+                .as_ref()
+                .map(|ds| ds.iter().map(|d| self.diag(d, f)).collect()),
         }
     }
 
@@ -299,6 +313,19 @@ pub fn check<F: FileSystem>(
     libs: Option<&LibStore>,
     threads: usize,
 ) -> Outcome {
+    check_with(fs, cache, config, libs, threads, None)
+}
+
+/// [`check`] that also computes and keeps declaration diagnostics with `decl`
+/// ([`Outcome::declarations`]; record 0012, "Declaration diagnostics under `--noEmit`").
+pub fn check_with<F: FileSystem>(
+    fs: &F,
+    cache: Option<&Cache>,
+    config: &ParsedConfig,
+    libs: Option<&LibStore>,
+    threads: usize,
+    decl: Option<DeclarationHook<'_>>,
+) -> Outcome {
     let roots = &config.file_names;
     let options = &config.options;
     let paths = Paths {
@@ -334,6 +361,7 @@ pub fn check<F: FileSystem>(
             config,
             libs,
             threads,
+            decl,
         };
         if let Some(mut out) = run.check(m, sidecar.unwrap_or_default(), &mut phases) {
             out.phases = phases.done;
@@ -347,6 +375,7 @@ pub fn check<F: FileSystem>(
     // a lib file's diagnostics with its path).
     let sources = |program: &ProgramFiles, diags: &[ts_r_diagnostics::Diagnostic]| {
         let mut shown: Vec<bool> = program.files.iter().map(|f| !f.is_lib).collect();
+        // (Declaration diagnostics point into non-lib files only: shown already.)
         for d in diags {
             for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
                 if let Some(s) = shown.get_mut(f.0 as usize) {
@@ -373,12 +402,32 @@ pub fn check<F: FileSystem>(
         .iter()
         .any(|f| !f.is_lib && has_pragma(&f.text));
     let Some(cache) = cache else {
-        // No history: a plain check.
-        let result = ts_r_checker::check_program(&program, CheckRun { threads });
+        // No history: a plain check. Declarations go first, on the checker the check then
+        // uses: it finds their types made. With a second checker trpc's `packages/server`
+        // cold check was 19% slower; with one it is within noise (record 0012 notes).
+        let run = CheckRun { threads };
+        let (result, declarations) = match decl {
+            Some(hook) => {
+                let checker = Checker::new(&program);
+                let todo: Vec<usize> = (0..program.files.len())
+                    .filter(|&i| {
+                        let f = &program.files[i];
+                        !f.is_lib && has_declarations(&f.path, f.is_external)
+                    })
+                    .collect();
+                let found = declaration_results(&checker, &todo, threads, hook);
+                let declarations =
+                    ts_r_checker::sort_and_dedup(&program, found.into_iter().flatten().collect());
+                let result = ts_r_checker::check_program_with(&program, run, move |_| checker);
+                (result, declarations)
+            }
+            None => (ts_r_checker::check_program(&program, run), Vec::new()),
+        };
         phases.lap("check");
         return Outcome {
             sources: sources(&program, &result.diagnostics),
             diagnostics: result.diagnostics,
+            declarations,
             mode: Mode::Cold,
             stats: CheckStats::default(),
             phases: phases.done,
@@ -408,9 +457,21 @@ pub fn check<F: FileSystem>(
         None => Mode::Cold,
     };
     phases.lap("restore");
-    let (diagnostics, stats) = history.check(&program, CheckRun { threads }, Checker::new);
+    let (diagnostics, stats) =
+        history.check_with(&program, CheckRun { threads }, Checker::new, decl);
     phases.lap("check");
+    // Blocking syntax errors left the history as it was: no declaration diagnostics then
+    // (they are reported only without other diagnostics anyway).
+    let declarations = if stats.blocked {
+        Vec::new()
+    } else {
+        history.declaration_diagnostics(&program)
+    };
     let mut m = manifest_of(fs, &program, &history, &diagnostics, &paths, roots, options);
+    m.declarations = declarations
+        .iter()
+        .map(|d| paths.diag(&PathDiag::from_diag(&program, d), &|p| paths.rel(p)))
+        .collect();
     m.consistent = !stats.blocked;
     m.lib_store = libs.is_some();
     // No fingerprints: the next run hashes every file once and records them.
@@ -420,6 +481,7 @@ pub fn check<F: FileSystem>(
     Outcome {
         sources: sources(&program, &diagnostics),
         diagnostics,
+        declarations,
         mode,
         stats,
         phases: phases.done,
@@ -551,6 +613,7 @@ fn manifest_of<F: FileSystem>(
             .iter()
             .map(|d| paths.diag(&PathDiag::from_diag(program, d), &rel))
             .collect(),
+        declarations: Vec::new(),
         states,
         link: history
             .link
@@ -620,6 +683,7 @@ pub(crate) fn encode(m: &Manifest) -> Vec<u8> {
         }
     }
     w.diags(&m.output);
+    w.diags(&m.declarations);
     w.count(m.states.len());
     for (p, s) in &m.states {
         w.str(p);
@@ -627,12 +691,14 @@ pub(crate) fn encode(m: &Manifest) -> Vec<u8> {
         w.hash(&s.resolved);
         w.shape(&s.shape);
         w.hashes(&s.used);
-        match &s.diags {
-            Some(ds) => {
-                w.u8(1);
-                w.diags(ds);
+        for list in [&s.diags, &s.decls] {
+            match list {
+                Some(ds) => {
+                    w.u8(1);
+                    w.diags(ds);
+                }
+                None => w.u8(0),
             }
-            None => w.u8(0),
         }
         w.diags(&s.syntax);
         w.diags(&s.references);
@@ -721,6 +787,7 @@ pub(crate) fn decode(data: &[u8]) -> Option<Manifest> {
         });
     }
     m.output = r.diags()?;
+    m.declarations = r.diags()?;
     for _ in 0..r.count()? {
         let p = r.str()?;
         let text = r.hash()?;
@@ -728,6 +795,11 @@ pub(crate) fn decode(data: &[u8]) -> Option<Manifest> {
         let shape = r.shape()?;
         let used = r.hashes()?;
         let diags = match r.u8()? {
+            0 => None,
+            1 => Some(r.diags()?),
+            _ => return None,
+        };
+        let decls = match r.u8()? {
             0 => None,
             1 => Some(r.diags()?),
             _ => return None,
@@ -744,6 +816,7 @@ pub(crate) fn decode(data: &[u8]) -> Option<Manifest> {
                 diags,
                 syntax,
                 references,
+                decls,
             },
         ));
     }
@@ -842,6 +915,7 @@ mod tests {
                 references: vec![("path".to_owned(), "./g.d.ts".to_owned(), None)],
             }],
             output: vec![diag.clone()],
+            declarations: vec![diag.clone()],
             states: vec![(
                 "src/a.ts".to_owned(),
                 FileState {
@@ -852,6 +926,7 @@ mod tests {
                     diags: Some(vec![diag.clone()]),
                     syntax: vec![diag.clone()],
                     references: vec![diag.clone()],
+                    decls: Some(vec![diag.clone()]),
                 },
             )],
             link: Some(vec![diag]),

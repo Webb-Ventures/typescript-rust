@@ -268,6 +268,11 @@ pub fn check(i: &Inputs) -> Status {
     if info.errors || (!no_check && (info.semantic_errors || info.check_pending)) {
         return Status::ReportErrors { buildinfo: bi_path };
     }
+    // An incremental program's declaration diagnostics matter only while declarations are
+    // asked for (tsc 7.0.2 keeps them as emit diagnostics).
+    if incremental && info.dts_errors && crate::incremental::declaration_bits(&c.options) & 1 != 0 {
+        return Status::ReportErrors { buildinfo: bi_path };
+    }
     // Output kinds asked for now that the last build did not produce (JavaScript after
     // `emitDeclarationOnly`, declarations turned on, source maps toggled): reported before
     // a newer config file (observed). Pending emit is reported below instead.
@@ -285,6 +290,17 @@ pub fn check(i: &Inputs) -> Status {
         if js || dts {
             return Status::OptionsChanged { buildinfo: bi_path };
         }
+    }
+    // Under `noEmit`, declarations asked for now and not by the last build: their
+    // diagnostics are pending (tsc 7.0.2: the `DtsErrors` emit kind), whatever output
+    // waits otherwise.
+    if incremental
+        && c.options.effective().no_emit()
+        && crate::incremental::declaration_bits(&c.options) & 1 != 0
+        && let Some(state) = info.program.as_ref()
+        && state.options.declarations.is_some_and(|b| b & 1 == 0)
+    {
+        return Status::OptionsChanged { buildinfo: bi_path };
     }
     // A root the buildinfo lists that is no longer one: before a missing output (observed:
     // a referenced project's buildinfo at the same path, TS6377).
@@ -310,15 +326,6 @@ pub fn check(i: &Inputs) -> Status {
             .iter()
             .any(|f| mtime(f).is_none_or(|t| t > bi_time))
     {
-        let mut oldest: Option<(String, SystemTime)> = None;
-        for out in expected_outputs(c) {
-            let Some(t) = mtime(&out) else {
-                return Status::OutputMissing { output: out };
-            };
-            if oldest.as_ref().is_none_or(|(_, o)| t < *o) {
-                oldest = Some((out, t));
-            }
-        }
         // Config files are inputs too when the buildinfo holds program state, written while
         // the project was incremental (observed: `tsbuildWatch/programUpdates/works-with-
         // extended-source-files`, a project that stopped being composite); otherwise a newer
@@ -340,13 +347,22 @@ pub fn check(i: &Inputs) -> Status {
             .chain(extended)
             .filter_map(|f| Some((f, mtime(f)?)))
             .max_by_key(|(_, t)| *t);
-        if let (Some((input, nt)), Some((output, ot))) = (newest, oldest)
-            && nt > ot
-        {
-            return Status::OlderThanInput {
-                output,
-                input: input.clone(),
+        // Outputs in order: the first missing one, or the first older than the newest input
+        // (tsc 7.0.2 stops there: `--noEmit --declaration --declarationMap` after a build
+        // whose declarations failed reports the older `a.js`, not the missing `a.d.ts`;
+        // `tsbuild/noEmit/dts-errors-with-declaration-enable-changes`).
+        for out in expected_outputs(c) {
+            let Some(t) = mtime(&out) else {
+                return Status::OutputMissing { output: out };
             };
+            if let Some((input, nt)) = newest
+                && nt > t
+            {
+                return Status::OlderThanInput {
+                    output: out,
+                    input: input.clone(),
+                };
+            }
         }
     }
     if incremental

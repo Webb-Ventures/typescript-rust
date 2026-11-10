@@ -38,8 +38,8 @@ use ts_r_diagnostics::{Diagnostic, FileId};
 use ts_r_resolver::{ResolutionMode, Resolver, ResolverOptions};
 
 use crate::incremental::{
-    CheckStats, FileState, PathDiag, global_diagnostics, program_key_from, resolved_hash_of,
-    syntax_only,
+    CheckStats, DeclarationHook, FileState, PathDiag, declaration_results, global_diagnostics,
+    has_declarations, program_key_from, resolved_hash_of, syntax_only,
 };
 use crate::libinfo::{self, DOM_GROUP};
 use crate::persist::{
@@ -61,6 +61,8 @@ pub(crate) struct Run<'a, F: FileSystem> {
     pub config: &'a ParsedConfig,
     pub libs: Option<&'a LibStore>,
     pub threads: usize,
+    /// Computes declaration diagnostics with the check (`None`: none are kept).
+    pub decl: Option<DeclarationHook<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -998,24 +1000,31 @@ impl<'a, F: FileSystem> Run<'a, F> {
         let removed_set: FxHashSet<&str> = removed.iter().copied().collect();
         let mut targets: Vec<usize> = Vec::new();
         let mut used_now: FxHashMap<usize, Vec<Hash>> = FxHashMap::default();
+        let declares =
+            |i: usize| self.decl.is_some() && has_declarations(rels[i], sks[order[i]].external);
         for (i, &rel) in rels.iter().enumerate() {
-            if !checks(options, rel) {
+            let check = checks(options, rel);
+            let decl = declares(i);
+            if !check && !decl {
                 continue;
             }
             let used: Vec<Hash> = shape_at(i).uses.iter().map(|u| deep.of(u)).collect();
+            // Stored diagnostics stay valid while every file they point into is unchanged.
+            let still = |ds: &Option<Vec<PathDiag>>| {
+                ds.as_ref().is_some_and(|ds| {
+                    ds.iter().all(|d| {
+                        d.paths().all(|p| {
+                            (present_set.contains(p) || lib_set.contains(p))
+                                && !changed.contains(p)
+                                && !removed_set.contains(p)
+                        })
+                    })
+                })
+            };
             let reuse = !fresh_set.contains(&i)
                 && state_idx.get(rel).is_some_and(|&s| {
                     let st = &m.states[s].1;
-                    st.used == used
-                        && st.diags.as_ref().is_some_and(|ds| {
-                            ds.iter().all(|d| {
-                                d.paths().all(|p| {
-                                    (present_set.contains(p) || lib_set.contains(p))
-                                        && !changed.contains(p)
-                                        && !removed_set.contains(p)
-                                })
-                            })
-                        })
+                    st.used == used && (!check || still(&st.diags)) && (!decl || still(&st.decls))
                 });
             if !reuse {
                 targets.push(i);
@@ -1175,6 +1184,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             &resolver,
         );
         let mut new_diags: FxHashMap<usize, Vec<PathDiag>> = FxHashMap::default();
+        let mut new_decls: FxHashMap<usize, Vec<PathDiag>> = FxHashMap::default();
         let mut new_link: Vec<PathDiag> = Vec::new();
         let relink_rels: FxHashSet<&str> = relink.iter().map(|&i| rels[i]).collect();
         // A stored link diagnostic in a lib file can't be tied to the project file that
@@ -1270,7 +1280,12 @@ impl<'a, F: FileSystem> Run<'a, F> {
                 .enumerate()
                 .map(|(k, &i)| (i, lib_files.len() + k))
                 .collect();
-            let tids: Vec<usize> = targets.iter().map(|i| sub_pos[i]).collect();
+            let checked: Vec<usize> = targets
+                .iter()
+                .copied()
+                .filter(|&i| checks(options, rels[i]))
+                .collect();
+            let tids: Vec<usize> = checked.iter().map(|i| sub_pos[i]).collect();
             let results = check_files(
                 &checker,
                 &tids,
@@ -1278,8 +1293,17 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     threads: self.threads,
                 },
             );
-            for (&i, ds) in targets.iter().zip(results) {
+            for (&i, ds) in checked.iter().zip(results) {
                 new_diags.insert(i, ds.iter().map(&to_path).collect());
+            }
+            if let Some(hook) = self.decl {
+                let declaring: Vec<usize> =
+                    targets.iter().copied().filter(|&i| declares(i)).collect();
+                let dids: Vec<usize> = declaring.iter().map(|i| sub_pos[i]).collect();
+                let found = declaration_results(&checker, &dids, self.threads, hook);
+                for (&i, ds) in declaring.iter().zip(found) {
+                    new_decls.insert(i, ds.iter().map(&to_path).collect());
+                }
             }
         }
         drop(sub);
@@ -1322,6 +1346,11 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     stats.reused += 1;
                     old.and_then(|s| s.diags.clone())
                 }
+                None => None,
+            };
+            let decls = match new_decls.remove(&i) {
+                Some(ds) => Some(ds),
+                None if declares(i) => old.and_then(|s| s.decls.clone()),
                 None => None,
             };
             let syntax = match (&parsed[i], fresh_set.contains(&i)) {
@@ -1380,6 +1409,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
                     diags,
                     syntax,
                     references,
+                    decls,
                 },
             ));
         }
@@ -1427,10 +1457,29 @@ impl<'a, F: FileSystem> Run<'a, F> {
                 }
             })
             .collect();
+        let declarations = sort_and_dedup(
+            &id_paths,
+            states
+                .iter()
+                .flat_map(|(_, st)| st.decls.iter().flatten())
+                .filter_map(|d| d.to_diag(&index))
+                .collect(),
+        );
+        let saved_declarations: Vec<PathDiag> = declarations
+            .iter()
+            .map(|d| {
+                let p = |f: FileId| rel_ids.get(f.0 as usize).map(|s| (*s).to_owned());
+                PathDiag {
+                    file: p(d.file),
+                    related: d.related.iter().map(|r| p(r.file)).collect(),
+                    diag: d.clone(),
+                }
+            })
+            .collect();
         // Sources: text for the files diagnostics point into.
         let mut shown: FxHashSet<usize> = FxHashSet::default();
         let mut shown_libs: FxHashSet<usize> = FxHashSet::default();
-        for d in &out {
+        for d in out.iter().chain(&declarations) {
             for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
                 let f = f.0 as usize;
                 if f < nl {
@@ -1506,6 +1555,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
             types: rel_types,
             files,
             output,
+            declarations: saved_declarations,
             states,
             link: Some(link),
         };
@@ -1523,6 +1573,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
         Some(Outcome {
             sources,
             diagnostics: out,
+            declarations,
             mode: Mode::Incremental,
             stats,
             phases: Vec::new(),
@@ -1657,9 +1708,15 @@ impl<'a, F: FileSystem> Run<'a, F> {
         }
         let diagnostics: Vec<Diagnostic> =
             m.output.iter().filter_map(|d| d.to_diag(&index)).collect();
+        // Kept by a run with the same options, so with the same hook (or none).
+        let declarations: Vec<Diagnostic> = m
+            .declarations
+            .iter()
+            .filter_map(|d| d.to_diag(&index))
+            .collect();
         let mut shown: FxHashSet<usize> = FxHashSet::default();
         let mut shown_libs: FxHashSet<usize> = FxHashSet::default();
-        for d in &diagnostics {
+        for d in diagnostics.iter().chain(&declarations) {
             for f in std::iter::once(d.file).chain(d.related.iter().map(|r| r.file)) {
                 let f = f.0 as usize;
                 if f < nl {
@@ -1696,6 +1753,7 @@ impl<'a, F: FileSystem> Run<'a, F> {
         Outcome {
             sources,
             diagnostics,
+            declarations,
             mode: Mode::Unchanged,
             stats: CheckStats {
                 reused: m.states.iter().filter(|(_, s)| s.diags.is_some()).count(),
