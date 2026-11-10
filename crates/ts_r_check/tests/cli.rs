@@ -1087,6 +1087,61 @@ fn ambiguous_project_root_hides_semantic_diagnostics() {
     }
 }
 
+/// tsc 7.0.2 reports TS6053 and TS4094 together with `-p`, but only TS6053 with `-b`.
+#[test]
+fn regression_missing_roots_suppress_declaration_diagnostics_in_build_mode() {
+    if ts_r_checker::LibStore::locate().is_none() {
+        eprintln!("lib files missing: skipped");
+        return;
+    }
+    let dir = temp_project(
+        "ts-r-check-missing-roots-declarations",
+        &[
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"target":"es2022","lib":["es2022"],"types":[],"declaration":true,"noEmit":true},"files":["a.ts","missing.ts"]}"#,
+            ),
+            (
+                "a.ts",
+                "export function f() { return class { private p = 1; }; }\n",
+            ),
+        ],
+    );
+    let check = |args: &[&str]| {
+        let out = ts_r_testing::limited(env!("CARGO_BIN_EXE_ts-r-check"), 4096, 60)
+            .current_dir(&dir)
+            .env("TS_R_CACHE_DIR", dir.join(".cache"))
+            .args(args)
+            .args(["--sound=off", "--pretty", "false"])
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .replace('\\', "/");
+        (text, out.status.code().unwrap_or(-1))
+    };
+    let root = dir.to_string_lossy().replace('\\', "/");
+    let missing = format!(
+        "error TS6053: File '{root}/missing.ts' not found.\n  The file is in the program because:\n    Part of 'files' list in tsconfig.json\n"
+    );
+    let declaration = "a.ts(1,17): error TS4094: Property 'p' of exported anonymous class type may not be private or protected.\n";
+    let both = format!("{missing}{declaration}");
+    for args in [
+        &["-p", "."][..],
+        &["-p", "."][..],
+        &["-p", ".", "--no-history"][..],
+    ] {
+        assert_eq!(check(args), (both.clone(), 1), "{args:?}");
+    }
+    assert_eq!(check(&["-b", "."]), (missing, 1));
+    std::fs::write(dir.join("missing.ts"), "export {};\n").unwrap();
+    assert_eq!(check(&["-b", ".", "--force"]), (declaration.to_owned(), 1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `--watch` (record 0012, E4): tsc's status lines, the screen cleared before each build
 /// only with pretty output and without `--preserveWatchOutput`; the session's exit status is
 /// 0 for `-p` and the first build's for `-b`; a look that finds no change prints nothing.

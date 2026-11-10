@@ -102,6 +102,8 @@ diagnostics in tsc's format. Root rules:
 - **Declaration diagnostics under `noEmit`** (record 0012, invariant 5): with `declaration`
   (or `emitDeclarationOnly`) and `noEmit`, TS4094 and the rest are reported when nothing
   else was (`reports_declaration_diagnostics`: no diagnostics beyond the config parse's).
+  Missing roots suppress them in `--build` / `--watch`; `-p` reports both the missing root
+  and declaration diagnostics (tsc 7.0.2, observed).
   `-p`/`--no-history` takes them from `ts_r_history` (computed with the check through a
   hook); the program path (`-b`, incremental, `--listFiles`, ...) computes them with
   `ts_r_emit::declaration_diagnostics`. They are not "errors" for the buildinfo: each file

@@ -1629,14 +1629,18 @@ there at report time. The owner's decision: compute them while checking and keep
 history, so a warm check-only run stays as fast and still prints what tsc prints.
 
 **When they are reported (tsc 7.0.2).** tsc adds declaration diagnostics under `noEmit`
-only when the program has no other diagnostic: no syntactic, program (option checks, `rootDir`,
-missing roots), global or semantic diagnostic; config parse errors do not count (tsc:
+only when the program has no other diagnostic: no syntactic, program (option checks, `rootDir`),
+global or semantic diagnostic; config parse errors do not count (tsc:
 tsc/internal/compiler/program.go, `GetDiagnosticsOfAnyProgram`). They are asked of every
 file declarations would be written for: not a declaration file, not found through
 `node_modules`, not JSON; JavaScript inputs too, checked or not
 (tsc/internal/compiler/emitter.go, `getDeclarationDiagnostics`). ts-r-check applies the same
 rule on every path: the history path, a loaded program (`-p` with `incremental` or
-references, `-b`, `--watch`).
+references, `-b`, `--watch`). Missing roots are an exception: observed with `files` naming
+`a.ts` and `missing.ts`, and `a.ts` exporting a function that returns a class with a private
+property, `-p` reports both TS6053 and TS4094; `-b` and both watch modes report only TS6053.
+The shared build/watch pipeline therefore checks for missing roots before asking for
+declaration diagnostics.
 
 **What they are.** The diagnostics `ts_r_emit::declaration_diagnostics_of` returns for one
 file: the declaration emitter's refusals with a tsc code. ts-r's own TSR2001 / TSR2006 say an

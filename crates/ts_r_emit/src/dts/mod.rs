@@ -2822,12 +2822,36 @@ impl<'c, 'a> Emitter<'c, 'a> {
         let refs = std::mem::take(&mut cx.refs);
         drop(cx);
         let n = built.ok()?;
-        let Node::FunctionType { params: sp, .. } = *self.ast.node(n) else {
+        let Node::FunctionType {
+            params: sp,
+            return_type,
+            ..
+        } = *self.ast.node(n)
+        else {
             return None;
         };
         let sp: Vec<NodeId> = self.ast.list(sp).to_vec();
         if sp.len() != own.len() {
             return None;
+        }
+        if let Node::TypePredicate { asserts, param, ty } = *self.ast.node(return_type)
+            && !matches!(self.ast.node(param), Node::ThisType {})
+        {
+            let pred = self.ck.predicate_of(sig)?;
+            let &p = own.get(pred.param_index as usize)?;
+            let Node::Param { pattern, .. } = *self.ast.node(p) else {
+                return None;
+            };
+            let Node::Ident { name } = *self.ast.node(pattern) else {
+                return None;
+            };
+            let param = self.ast.add(Node::Ident { name }, Span::EMPTY);
+            let pred = self
+                .ast
+                .add(Node::TypePredicate { asserts, param, ty }, Span::EMPTY);
+            if let Node::FunctionType { return_type, .. } = self.ast.node_mut(n) {
+                *return_type = pred;
+            }
         }
         for (&s, &o) in sp.iter().zip(&own) {
             let Node::Param { pattern, .. } = *self.ast.node(o) else {

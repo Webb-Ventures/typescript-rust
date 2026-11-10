@@ -960,6 +960,40 @@ fn javascript_type_tag_on_a_function_declaration() {
     }
 }
 
+/// A predicate in a function's JSDoc `@type` uses the implementation parameter at
+/// the predicate's index, even when the names have been swapped (tsc 7.0.2, probed).
+#[test]
+fn javascript_type_tag_predicate_uses_function_parameter() {
+    let config = r#"{ "compilerOptions": { "target": "es2022", "lib": ["es2022"], "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "/** @type {(value: unknown) => value is string} */\nexport function f(a) { return typeof a === \"string\"; }\n",
+            "/** @type {(value: unknown) => value is string} */\nexport declare function f(a: unknown): a is string;\n",
+        ),
+        (
+            "/** @type {(value: unknown, other: unknown) => other is string} */\nexport function g(other, value) { return typeof value === \"string\"; }\n",
+            "/** @type {(value: unknown, other: unknown) => other is string} */\nexport declare function g(other: unknown, value: unknown): value is string;\n",
+        ),
+        (
+            "/** @typedef {(value: unknown) => value is string} Pred */\n/** @type {Pred} */\nexport function f(a) { return typeof a === \"string\"; }\n/** @type {Pred} */\nexport function g(b) { return typeof b === \"string\"; }\n",
+            "export type Pred = (value: unknown) => value is string;\n/** @typedef {(value: unknown) => value is string} Pred */\n/** @type {Pred} */\nexport declare function f(a: unknown): a is string;\n/** @type {Pred} */\nexport declare function g(b: unknown): b is string;\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .expect("a.d.ts");
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
 /// `this.x = v` next to a base class's member (tsc 7.0.2,
 /// jsDeclarationEmitThisAssignmentWithBaseProperty): left out when the base has an accessor
 /// or a method `x`, or a property `x` of the same type; written with its own type when the
