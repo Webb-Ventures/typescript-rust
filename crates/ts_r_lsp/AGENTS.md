@@ -851,7 +851,9 @@ placeholder for the reason); `ts-r/fileDiagnostics` (pull) has no sound diagnost
   `PMsg::LintConfig`, stale ones after a reload are dropped by generation): the project
   thread never waits for it, so type diagnostics, hover and completion are never delayed by
   Node. The file publishes its types at once and is checked again, with lint results, when
-  its config arrives.
+  its config arrives. One loader survives reloads: evaluations stay serial, queued paths
+  from obsolete generations are skipped, and its engine resets before loading a newer
+  generation. Dropping the project invalidates queued work too.
 - Lint off reads no config: the daemon tells the ts-r backend `ts-r/lintWanted {on}` (true when
   some non-lint-only LSP client has `ts-r.lint.enable` on; sent before the first document,
   and on every change: client hello, `workspace/didChangeConfiguration`, client leaving).
@@ -865,8 +867,9 @@ placeholder for the reason); `ts-r/fileDiagnostics` (pull) has no sound diagnost
   diagnostics and code actions from the backend. The "rules not run" note leaves out the
   type-aware rules when the ts-r backend is the type backend.
 - Code actions: the backend answers `textDocument/codeAction` with the type-aware rules'
-  fixes, suggestions and disable comments, only once the file is checked after its last
-  edit (an edit moves the published spans, not the fixes' edits); `source.fixAll.ts-r` stays
+  fixes, suggestions and disable comments, only once the file is linted after its last
+  edit (an edit moves the published spans, not the fixes' edits). A type check while a
+  config is loading leaves retained lint fixes stale; `source.fixAll.ts-r` stays
   with the lint worker (it does not include type-aware fixes yet).
 - `TS_R_LSP_TYPED_LINT=0` turns it off. The first run per file is logged with its rule
   count, problems and time.

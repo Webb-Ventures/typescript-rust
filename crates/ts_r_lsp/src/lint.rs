@@ -25,6 +25,7 @@ use crate::text::{Pos, TextDoc, to_lsp_range};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -448,10 +449,10 @@ pub struct TypedConfigs {
     files: BTreeMap<String, Option<Arc<FileConfig>>>,
     /// Paths handed to the loader thread, not answered yet.
     asked: std::collections::HashSet<String>,
-    /// Bumped by [`TypedConfigs::reload`]: answers of an older loader are dropped.
-    generation: u64,
+    /// Bumped by [`TypedConfigs::reload`]: obsolete loads are skipped and answers dropped.
+    generation: Arc<AtomicU64>,
     /// The loader thread's inbox (started by the first request).
-    loader: Option<std::sync::mpsc::Sender<String>>,
+    loader: Option<std::sync::mpsc::Sender<(u64, String)>>,
 }
 
 /// Where the loader thread reports `(generation, path, config)`.
@@ -466,11 +467,10 @@ impl std::fmt::Debug for TypedConfigs {
 }
 
 impl TypedConfigs {
-    /// Forgets loaded configs (a lint config changed). A load still running is abandoned:
-    /// its answer is dropped.
+    /// Forgets loaded configs (a lint config changed). A load still running finishes before
+    /// the next generation starts; its answer and queued obsolete requests are dropped.
     pub fn reload(&mut self) {
-        self.generation += 1;
-        self.loader = None;
+        self.generation.fetch_add(1, Ordering::Relaxed);
         self.asked.clear();
         self.files.clear();
     }
@@ -494,23 +494,31 @@ impl TypedConfigs {
             return;
         }
         if self.loader.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let (tx, rx) = std::sync::mpsc::channel::<(u64, String)>();
             let root = root.to_path_buf();
             let sink = sink.clone();
-            let generation = self.generation;
+            let generation = self.generation.clone();
             let spawned = std::thread::Builder::new()
                 .name("tsr-lint-config".into())
                 .stack_size(WORKER_STACK)
                 .spawn(move || {
                     let mut engine = Engine::new(root);
                     engine.opts.resolve.types_available = true;
-                    while let Ok(path) = rx.recv() {
+                    let mut loaded_generation = None;
+                    while let Ok((requested, path)) = rx.recv() {
+                        if generation.load(Ordering::Relaxed) != requested {
+                            continue;
+                        }
+                        if loaded_generation != Some(requested) {
+                            engine.reload();
+                            loaded_generation = Some(requested);
+                        }
                         let (_, _, fc) = engine.config_for(Path::new(&path));
                         let typed = fc
                             .ok()
                             .filter(|fc| fc.rules.has_typed())
                             .map(|fc| Arc::new(fc.typed_only()));
-                        sink(generation, path, typed);
+                        sink(requested, path, typed);
                     }
                 });
             if spawned.is_err() {
@@ -521,18 +529,24 @@ impl TypedConfigs {
             self.loader = Some(tx);
         }
         if let Some(tx) = &self.loader {
-            let _ = tx.send(path.to_string());
+            let _ = tx.send((self.generation.load(Ordering::Relaxed), path.to_string()));
         }
     }
 
     /// Stores the loader's answer; false when it is from before the last reload.
     pub fn deliver(&mut self, generation: u64, path: String, cfg: Option<Arc<FileConfig>>) -> bool {
-        if generation != self.generation {
+        if generation != self.generation.load(Ordering::Relaxed) {
             return false;
         }
         self.asked.remove(&path);
         self.files.insert(path, cfg);
         true
+    }
+}
+
+impl Drop for TypedConfigs {
+    fn drop(&mut self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
     }
 }
 

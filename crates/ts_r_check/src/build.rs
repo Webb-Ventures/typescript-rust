@@ -259,6 +259,10 @@ pub fn compile(
     if !emitting
         && !options_failed
         && crate::reports_declaration_diagnostics(parsed, &diags, &config_diags)
+        && ts_r_projects::roots::missing_root_diagnostics(parsed, fs, &mut |_| {
+            ts_r_diagnostics::FileId(u32::MAX)
+        })
+        .is_empty()
     {
         diags = ts_r_emit::declaration_diagnostics(&program, &cfg);
         dts_errors = diags.iter().filter(|d| d.is_error()).count();

@@ -190,7 +190,9 @@ Files, by layer:
     (`fixed_arg_contexts`, kept in the resolution cache so a cache hit sets them again).
     Only then do the full attributes get checked. When every candidate fails, the
     functions are fixed to the last candidate's props. The call path's skip pass also
-    compares a fresh object argument as regular (`regular_object_literal`).
+    compares a fresh object argument as regular (`regular_object_literal`). Ordinary-call
+    probes save and restore the placeholder type along with the function set, using `any`
+    for their own functions even when nested inside a JSX probe.
   - Generic components infer from the attributes typed in the context of the generic
     props. Suppose the remaining type parameters are only ones the props are made of
     (naked) and only the context-sensitive attributes infer them. A lone candidate then
@@ -645,9 +647,12 @@ Files, by layer:
   declarations whose `extends` names a class: `interface K extends J<K["x"]>`,
   `class Foo extends Next<Foo>` where `Next`'s default reads `C["p"]` (tsc: checker.go,
   getBaseTypes). The outer resolution keeps the bases it found (they are cached, as tsc
-  keeps `resolvedBaseTypes`); only the inner request sees none. The type of a class's
-  `extends` expression is resolved under its own key, `Resolving::BaseConstructor` (tsc's
-  base constructor type), so a cycle through a mixin call's argument alone
+  keeps `resolvedBaseTypes`); only the inner request sees none. The shared bases slot
+  publishes the circularity flag together with the types, and cache hits restore that
+  flag in the reading worker so TS2310 does not depend on which worker resolved first.
+  The type of a class's `extends` expression is resolved under its own key,
+  `Resolving::BaseConstructor` (tsc's base constructor type), so a cycle through a mixin
+  call's argument alone
   (`mixinWithBaseDependingOnSelfNoCrash1`) is not TS2310; classes extending an expression
   never get it here, since our order of resolution there differs from tsc's. A class `extends` naming an interface with no value
   (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
@@ -891,7 +896,8 @@ Files, by layer:
   `namespace` and `interface`/`type` + `const` each give one report per declaration;
   private members are walked one by one too, so method overloads report every signature.
   `merged_ok` admits only conflict-free merges whose declarations are all in the file
-  (overloads with one body, one value kind, no decorated class), and a merge with an
+  (overloads with one body, one value kind, no decorated class). Eligibility is cached by
+  `SymbolId` for this pass, so repeated declarations do not rescan the merge. A merge with an
   enum or namespace keeps counting its self reads, so a doubt stays silent. A report is
   dropped when its declaration node holds a parse error: tsc checks the node flag
   that marks a subtree with a parse error before reporting, and a binding element reports
@@ -1921,6 +1927,8 @@ Files, by layer:
   `type D = Box<D>` (an alias), `type E = [...E]`, `type F = typeof v; var v: F[]` are
   not. A circular alias is not generic for its references (tsc never records its type
   parameters): arguments give TS2315, a bare reference nothing.
+  Reference arity checks only probe circularity when local type parameters exist;
+  non-generic aliases already have the same arity either way.
   `circular_annotations.rs` walks the syntax for this; not yet followed: a
   conditional's branches when its check type is not generic, mapped type constraints,
   unannotated variables, functions' return types and interface members.
@@ -2761,7 +2769,9 @@ Files, by layer:
   typed by one marker object (`Ck::non_inferrable_fn`) that `infer_from` skips, and infers it
   against the parameter's generic mapped type (`infer_partial_literal`). Candidates that
   still hold the marker are dropped, except for `T` itself, where the members holding it
-  become `unknown`. The deferred pass fixes what the context-sensitive functions'
+  become `unknown`. Exhausting the marker search's depth or node budget counts as a possible
+  marker, so an unchecked candidate cannot retain the internal placeholder.
+  The deferred pass fixes what the context-sensitive functions'
   contextual signatures read (`sensitive_fn_sigs`, every function, not only literals made of
   functions), types the literal once in that context (`fixed_arg_contexts`; with `T` fixed
   to `unknown`, the context maps `T` to the literal's keys typed `unknown`, so `Box<T["k"]>`
@@ -2819,6 +2829,8 @@ Files, by layer:
      known to have no member at all is its own apparent type (`apparent_type`), so
      `pick.foo` on `Pick<T, K>` and `rec.foo` on `Record<K, V>` are TS2339 (with members
      known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
+     During one excess-property check, interned-name sets are reused per mapped target,
+     including union/intersection members; this cache ends with the check.
   5. *Same alias first* (`alias_args_related_by_variance`): before rule 1, two
      instantiations of one alias whose arguments relate by its measured variances are
      related, as tsc probes alias variance before the mapped target case
