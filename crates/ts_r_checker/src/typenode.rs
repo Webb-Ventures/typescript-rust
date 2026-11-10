@@ -2962,7 +2962,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // `| undefined`, with or without `strictNullChecks` (observed:
                 // `(compareFn?: ((a: number, b: number) => number) | undefined)` for
                 // `number[]#sort`).
-                None if optional && question => {
+                // Not when the annotation is this very type, only not reusable for a name
+                // it uses: tsc rewrites the annotation, spelling that name out, and writes
+                // no `undefined` it lacks (trpc's `opts?: Options<.., TError>`, `TError` a
+                // type alias of the enclosing function's body).
+                None if optional
+                    && question
+                    && !(annotated_without_undefined
+                        && ann.is_some_and(|a| self.type_from_node(a) == ty)) =>
+                {
                     let n = self.tn(ty, cx)?;
                     with_undefined_node(cx, n)
                 }

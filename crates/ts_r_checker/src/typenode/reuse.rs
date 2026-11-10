@@ -733,9 +733,51 @@ impl<'c, 'a> Ck<'c, 'a> {
             if self.resolve_name_at(cx.enclosing, name, m) != Some(s) {
                 return false;
             }
+            if decl.is_some_and(|d| !self.declared_around(d, cx.enclosing)) {
+                return false;
+            }
             refs.push(s);
         }
         cx.refs.extend(refs);
+        true
+    }
+
+    /// Whether declaration `d` is in a scope around `at`: a declaration in a block or a
+    /// function body is not, for a node outside it. A function's annotations naming a
+    /// type alias of the body around it (trpc's `type TError = ...` in `createRootHooks`)
+    /// are not reused for the outer function's inferred type, which spells the alias out
+    /// (tsc: the alias is not accessible from the enclosing declaration).
+    fn declared_around(&self, d: Loc, at: Loc) -> bool {
+        if d.file != at.file {
+            return true;
+        }
+        let ast = self.ast(d.file);
+        let parents = self.c.file(d.file).parents();
+        let mut container = None;
+        let mut cur = parents.parent(d.node);
+        for _ in 0..4096 {
+            let Some(p) = cur else { break };
+            match ast.node(p) {
+                Node::Block { .. } => {
+                    container = Some(p);
+                    break;
+                }
+                Node::Program { .. } | Node::ModuleBlock { .. } => return true,
+                _ => {}
+            }
+            cur = parents.parent(p);
+        }
+        let Some(container) = container else {
+            return true;
+        };
+        let mut x = Some(at.node);
+        for _ in 0..4096 {
+            match x {
+                Some(n) if n == container => return true,
+                Some(n) => x = parents.parent(n),
+                None => return false,
+            }
+        }
         true
     }
 
