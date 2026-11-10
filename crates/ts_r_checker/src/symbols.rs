@@ -28,13 +28,19 @@ use crate::program::SourceFile;
 /// An enum member and its constant value.
 pub(crate) type EnumMemberValue = (SymId, Option<TypeId>);
 
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedBases {
+    pub types: Box<[TypeId]>,
+    pub circular: bool,
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct SymLinks {
     pub declared: OnceLock<TypeId>,
     pub ty: OnceLock<TypeId>,
     /// Resolved alias target (`SymId::NONE` when unresolvable).
     pub alias: OnceLock<SymId>,
-    pub bases: OnceLock<Box<[TypeId]>>,
+    pub bases: OnceLock<ResolvedBases>,
     /// Enum members with their constant values.
     pub enum_members: OnceLock<Box<[EnumMemberValue]>>,
     /// Members of a class/interface/literal declared type before instantiation.
