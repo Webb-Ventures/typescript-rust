@@ -2594,6 +2594,8 @@ Files, by layer:
      known to have no member at all is its own apparent type (`apparent_type`), so
      `pick.foo` on `Pick<T, K>` and `rec.foo` on `Record<K, V>` are TS2339 (with members
      known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
+     During one excess-property check, interned-name sets are reused per mapped target,
+     including union/intersection members; this cache ends with the check.
   A `?` generic mapped type prints its template with `| undefined` (`print_mapped`), as tsc
   prints the template type it relates.
   What stays silent (related, never a new error): templates other than `X[P]` when the keys
