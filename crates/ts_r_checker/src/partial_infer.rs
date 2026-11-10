@@ -465,13 +465,13 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `t` contains the marker: through unions, intersections, array and tuple
     /// elements and the properties of object literal types (what partial and reverse
-    /// mapped types are built from).
+    /// mapped types are built from). Hitting either limit conservatively counts as containing it.
     fn mentions_marker(&mut self, t: TypeId, marker: TypeId, depth: u32, budget: &mut u32) -> bool {
         if t == marker {
             return true;
         }
         if depth > 10 || *budget == 0 {
-            return false;
+            return true;
         }
         *budget -= 1;
         let s = self.store();
