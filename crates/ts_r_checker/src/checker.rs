@@ -683,6 +683,10 @@ pub struct Ck<'c, 'a> {
     /// last): a contextual return type that is one of their type parameters reads as what
     /// the call's contextual type implies for it.
     pub(crate) ret_ctx_mappers: Vec<ts_r_types::MapperId>,
+    /// What the calls whose literal or function arguments are being inferred have inferred
+    /// so far (innermost last, nothing fixed): a call nested in such an argument reads its
+    /// contextual type through them (tsc: the outer inference context's mapper).
+    pub(crate) outer_inference_mappers: Vec<ts_r_types::MapperId>,
     /// Set while resolving a type node in a deferred position (an array or tuple element,
     /// a type argument of a class or interface): a reference there to a non-generic type
     /// alias that is being resolved reads as a forward reference to it.
@@ -948,6 +952,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             alias_roots: FxHashMap::default(),
             cond_alias_depth: 0,
             ret_ctx_mappers: Vec::new(),
+            outer_inference_mappers: Vec::new(),
             deferred_alias_ref: false,
             pending_forwards: Vec::new(),
             pending_node_forwards: Vec::new(),

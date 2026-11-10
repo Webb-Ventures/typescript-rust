@@ -2531,6 +2531,15 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// `t` with the type parameters that have inferences so far replaced by them (without
     /// fixing); the others stay.
     fn instantiate_with_inferred_so_far(&mut self, ctx: &InferenceContext, t: TypeId) -> TypeId {
+        match self.inferred_so_far_mapper(ctx) {
+            Some(m) => self.instantiate(t, m),
+            None => t,
+        }
+    }
+
+    /// The type parameters of `ctx` that have inferences so far, mapped to them (nothing
+    /// fixed); `None` without any.
+    fn inferred_so_far_mapper(&mut self, ctx: &InferenceContext) -> Option<ts_r_types::MapperId> {
         let mut src = Vec::new();
         let mut dst = Vec::new();
         for (j, &p) in ctx.params.iter().enumerate() {
@@ -2549,10 +2558,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             dst.push(it);
         }
         if src.is_empty() {
-            return t;
+            return None;
         }
-        let m = self.store().mapper(&src, &dst);
-        self.instantiate(t, m)
+        Some(self.store().mapper(&src, &dst))
     }
 
     /// A parameter type as an argument's contextual type, given the return context mapper.
@@ -2615,7 +2623,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         // contextual type implies for it (`const n: number = f({ x: absorb() })`: `absorb`
         // infers `number`; tsc: checker.go inferTypeArguments instantiates the contextual
         // type with the outer context's mapper).
-        let c = self.instantiate_with_return_context(c);
+        let mut c = self.instantiate_with_return_context(c);
+        // Inside a literal or function argument of an outer call, the context reads what
+        // that call inferred so far (`res(router, { links: [link()] })` gives `link` the
+        // context `Link<Built>` once `router` inferred `R = Built`; tsc: checker.go
+        // inferTypeArguments instantiates the contextual type with the outer context).
+        for m in self.outer_inference_mappers.clone().into_iter().rev() {
+            if !self.could_contain_type_params(c) {
+                break;
+            }
+            c = self.instantiate(c, m);
+        }
         if self
             .store()
             .flags(c)
@@ -2710,16 +2728,93 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
         }
-        if outer.is_empty() {
-            return true;
-        }
         let (count, overflow) = (self.inst_count, self.inst_overflow);
-        let fill = vec![TypeId::UNKNOWN; outer.len()];
-        let m = self.store().mapper(&outer, &fill);
-        let r = self.instantiate(t, m);
+        let r = if outer.is_empty() {
+            t
+        } else {
+            let fill = vec![TypeId::UNKNOWN; outer.len()];
+            let m = self.store().mapper(&outer, &fill);
+            self.instantiate(t, m)
+        };
+        // The summary bit is conservative (a router type full of deferred conditional
+        // types has it): with outer calls inferring, only their type parameters count
+        // (`one(router, mk())` gives `mk` the context `Err<BuiltRouter<..>>` once `router`
+        // inferred).
+        let mut seen = rustc_hash::FxHashSet::default();
+        let generic = self.has_type_params_inside(r, 0, &mut seen);
         self.inst_count = count;
         self.inst_overflow = overflow;
-        self.could_contain_type_params(r)
+        generic
+    }
+
+    /// Whether `t` has type parameters inside, looking through what the summary bit is
+    /// conservative about: references, unions and intersections, object literal members,
+    /// anonymous and mapped types instantiated with mappers to types without any. Other
+    /// types answer with the bit.
+    fn has_type_params_inside(
+        &mut self,
+        t: TypeId,
+        depth: u32,
+        seen: &mut rustc_hash::FxHashSet<TypeId>,
+    ) -> bool {
+        let s = self.store();
+        if s.flags(t).contains(TypeFlags::TYPE_PARAMETER) {
+            return true;
+        }
+        if !s.traits(t).contains(TypeTraits::CONTAINS_TYPE_PARAMETER) || !seen.insert(t) {
+            return false;
+        }
+        if depth > 8 {
+            return true;
+        }
+        let f = s.flags(t);
+        let parts: Vec<TypeId> = if f.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION) {
+            s.members_of_union(t).to_vec()
+        } else if let Some(o) = s.object_of(t) {
+            match o.kind {
+                // (Not the trailing `this` argument, which is the reference itself.)
+                ts_r_types::ObjectKind::Reference { target, args } => {
+                    let mut v = s.list_items(args).to_vec();
+                    if let Some(ts_r_types::ObjectKind::Declared { type_params, .. }) =
+                        s.object_of(target).map(|d| d.kind)
+                    {
+                        v.truncate(s.list_items(type_params).len());
+                    }
+                    v
+                }
+                ts_r_types::ObjectKind::Anonymous { mapper, .. }
+                | ts_r_types::ObjectKind::Mapped { mapper, .. }
+                    if mapper != ts_r_types::MapperId::IDENTITY && !mapper.is_special() =>
+                {
+                    // (An enclosing interface's `this`, mapped to itself, is no free type
+                    // parameter.)
+                    s.mapper_lists(mapper)
+                        .1
+                        .iter()
+                        .copied()
+                        .filter(|&x| !s.type_param_data(x).is_some_and(|d| d.is_this))
+                        .collect()
+                }
+                ts_r_types::ObjectKind::Literal { .. } => {
+                    let Some(m) = o.members() else { return true };
+                    if !m.call.is_empty() || !m.construct.is_empty() {
+                        return true;
+                    }
+                    let props = m.props.to_vec();
+                    let mut v: Vec<TypeId> = m.index.iter().map(|i| i.value).collect();
+                    for p in props {
+                        v.push(self.type_of_symbol(p));
+                    }
+                    v
+                }
+                _ => return true,
+            }
+        } else {
+            return true;
+        };
+        parts
+            .into_iter()
+            .any(|x| self.has_type_params_inside(x, depth + 1, seen))
     }
 
     /// The function and arrow expressions enclosing `e`, innermost first.
@@ -3110,7 +3205,20 @@ impl<'c, 'a> Ck<'c, 'a> {
                     {
                         self.first_arg_context.entry((l, sig)).or_insert(cty);
                     }
-                    let mut at = self.speculative_arg_type(l, cty); // A literal of a literal contextual type is not widened later
+                    // A literal or function argument with calls inside: they read their
+                    // contextual types through what this call inferred so far.
+                    let outer = if self.has_nested_call(l) {
+                        self.inferred_so_far_mapper(&ctx)
+                    } else {
+                        None
+                    };
+                    if let Some(m) = outer {
+                        self.outer_inference_mappers.push(m);
+                    }
+                    let mut at = self.speculative_arg_type(l, cty);
+                    if outer.is_some() {
+                        self.outer_inference_mappers.pop();
+                    } // A literal of a literal contextual type is not widened later
                     // (`const w: Wrap<"foo"> = wrap("foo")` infers `"foo"`).
                     if self
                         .store()
@@ -3693,6 +3801,35 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 _ => {}
             }
+        }
+        false
+    }
+
+    /// Whether an object or array literal or function argument has a call or `new`
+    /// expression inside.
+    fn has_nested_call(&self, l: Loc) -> bool {
+        let ast = self.ast(l.file);
+        let n = crate::nodes::skip_parens(ast, l.node);
+        if !matches!(
+            ast.node(n),
+            Node::ObjectLit { .. }
+                | Node::ArrayLit { .. }
+                | Node::Arrow { .. }
+                | Node::FunctionExpr { .. }
+        ) {
+            return false;
+        }
+        let mut stack = ast.children(n);
+        let mut steps = 0;
+        while let Some(c) = stack.pop() {
+            steps += 1;
+            if steps > 10_000 {
+                return false;
+            }
+            if matches!(ast.node(c), Node::Call { .. } | Node::New { .. }) {
+                return true;
+            }
+            ast.for_each_child(c, |x| stack.push(x));
         }
         false
     }
