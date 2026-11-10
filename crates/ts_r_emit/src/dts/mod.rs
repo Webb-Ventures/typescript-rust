@@ -87,6 +87,7 @@ pub fn declaration_file(
         && let Some((st, value)) = js::commonjs_export_assignment(checker, file)
     {
         e.cjs_export = Some((st, value));
+        e.cjs_members = js::export_members(checker, file, st, value).unwrap_or_default();
         e.is_module = true;
         order.retain(|&s| s != st);
         order.insert(0, st);
@@ -205,6 +206,9 @@ pub(crate) struct Emitter<'c, 'a> {
     /// A CommonJS file's `module.exports = v;` statement, written as `export = v` first
     /// (`js::commonjs_export_assignment`).
     cjs_export: Option<(NodeId, NodeId)>,
+    /// The members later `module.exports.x = v;` statements add to that export
+    /// (`js::export_members`).
+    cjs_members: Vec<js::ExportMember>,
     /// A CommonJS file's `exports.x = v` exports, written first
     /// (`js::commonjs_named_exports`).
     cjs_named: Vec<js::NamedExport>,
@@ -273,6 +277,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
             host,
             is_module: f.bound.is_module,
             cjs_export: None,
+            cjs_members: Vec::new(),
             cjs_named: Vec::new(),
             out: String::new(),
             indent: 0,
@@ -1563,7 +1568,13 @@ impl<'c, 'a> Emitter<'c, 'a> {
             if self.cjs_export_declaration(s, value, scope, prev_end) {
                 return true;
             }
-            return self.export_value_named(s, value, "export = ", "_exports");
+            if self.cjs_members.is_empty() {
+                if !is_entity_expr(&self.ast, skip_parens(&self.ast, value)) {
+                    self.cjs_leading_comment(s, prev_end);
+                }
+                return self.export_value_named(s, value, "export = ", "_exports");
+            }
+            return self.cjs_export_with_members(s, value);
         }
         match node {
             Node::ImportDecl { .. } => self.import_decl(s, scope, prev_end),
@@ -1744,9 +1755,27 @@ impl<'c, 'a> Emitter<'c, 'a> {
                 } else {
                     None
                 };
-                self.leading_jsdoc(s, prev_end);
+                // JSDoc `@overload`s: one declaration each, without the comments (observed:
+                // `overloadTag1`, `jsFileFunctionOverloads`).
+                let overloads = js::jsdoc_overloads(&self.ast, s);
+                if overloads.is_empty() {
+                    self.leading_jsdoc(s, prev_end);
+                } else {
+                    self.last_written_end = Some(self.ast.span(s).end);
+                    self.start(s);
+                }
                 let default = self.ast.node(s).modifiers().contains(Modifiers::DEFAULT);
-                if expando.is_some() && default {
+                if !overloads.is_empty() {
+                    for ty in overloads {
+                        self.decl_prefix(s, scope, keep_export, true);
+                        self.w("function ");
+                        if let Some(n) = name {
+                            self.name_text(n);
+                        }
+                        self.overload_signature(ty, false);
+                        self.semi_end(s);
+                    }
+                } else if expando.is_some() && default {
                     // `declare function f(): T; export default f;` and the namespace.
                     if scope.top() {
                         self.w("declare ");
@@ -1771,6 +1800,16 @@ impl<'c, 'a> Emitter<'c, 'a> {
                     return false;
                 }
                 self.class_decl(s, scope, keep_export, prev_end, None);
+                // A JavaScript class's statics assigned from outside (`C.x = v`) are a
+                // namespace merged with it (jsDeclarationsClassStatic).
+                if !self.ast.source_kind.is_typescript()
+                    && let Node::ClassDecl { name: Some(n), .. } = *self.ast.node(s)
+                    && let Some(sym) = self.c.sym_of_decl(self.loc(s))
+                {
+                    let prefix = self.expando_prefix(s, scope, keep_export);
+                    let name = self.raw(n).to_owned();
+                    self.expando_namespace(s, sym, &name, &prefix);
+                }
                 true
             }
             Node::Interface {
@@ -2209,22 +2248,66 @@ impl<'c, 'a> Emitter<'c, 'a> {
             let rename = name.is_none().then_some(text.as_str());
             self.class_decl(inner, scope, false, prev_end, rename);
         } else {
-            // The statement is written first without comments (`prev_end` is its start):
-            // the function takes the JSDoc comment right before it.
-            let start = self.ast.span(s).start;
-            let from = self
-                .ast
-                .comments_between(0, start)
-                .last()
-                .filter(|c| {
-                    self.src
-                        .get(c.span.end as usize..start as usize)
-                        .is_some_and(|t| t.trim().is_empty())
-                })
-                .map_or(prev_end, |c| c.span.start);
-            self.leading_comments(s, from);
+            self.cjs_leading_comment(s, prev_end);
             self.w("declare ");
             self.function_from_expr(&text, inner);
+        }
+        true
+    }
+
+    /// The comment right before `module.exports = v;` statement `s`: the statement is
+    /// written first without comments (`prev_end` is its start), so the declaration written
+    /// for it takes that comment (observed with tsc 7.0.2: a function expression's
+    /// declaration, an `_exports` constant).
+    fn cjs_leading_comment(&mut self, s: NodeId, prev_end: u32) {
+        let start = self.ast.span(s).start;
+        let from = self
+            .ast
+            .comments_between(0, start)
+            .last()
+            .filter(|c| {
+                self.src
+                    .get(c.span.end as usize..start as usize)
+                    .is_some_and(|t| t.trim().is_empty())
+            })
+            .map_or(prev_end, |c| c.span.start);
+        self.leading_comments(s, from);
+    }
+
+    /// `module.exports = v;` followed by `module.exports.name = value;` members
+    /// (`js::export_members`): `export = v; export { name };` for a local `v`, else an
+    /// `_exports` constant merged with a `declare namespace _exports` holding the members.
+    fn cjs_export_with_members(&mut self, s: NodeId, value: NodeId) -> bool {
+        let members = self.cjs_members.clone();
+        let inner = skip_parens(&self.ast, value);
+        let local = js::is_local_name(self.c, self.file, inner);
+        let name = if local {
+            self.export_value_named(s, value, "export = ", "_exports");
+            None
+        } else {
+            Some(self.export_value_const(s, value, "export = ", "_exports"))
+        };
+        if let Some(name) = &name {
+            self.w(&format!("declare namespace {name} {{"));
+            self.nl();
+            self.indent += 1;
+        }
+        for m in &members {
+            if matches!(self.ast.node(m.value), Node::Ident { .. }) {
+                self.reference_ident(m.value, meaning::VALUE);
+                self.w(&format!("export {{ {} }};", m.name));
+            } else {
+                let lit = self.src
+                    [self.ast.span(m.value).start as usize..self.ast.span(m.value).end as usize]
+                    .to_owned();
+                self.w(&format!("export var {}: {lit};", m.name));
+            }
+            self.nl();
+        }
+        if !local {
+            self.indent -= 1;
+            self.w("}");
+            self.nl();
         }
         true
     }
@@ -2250,6 +2333,12 @@ impl<'c, 'a> Emitter<'c, 'a> {
         if prefix.starts_with("export default") {
             self.iso_default(expr);
         }
+        self.export_value_const(s, expr, prefix, base);
+        true
+    }
+
+    /// `declare const _exports: T;` (`base`, made unique) then `{prefix}_exports;`.
+    fn export_value_const(&mut self, s: NodeId, expr: NodeId, prefix: &str, base: &str) -> String {
         let name = self.unique_name(base);
         self.w("declare const ");
         self.w(&name);
@@ -2270,7 +2359,7 @@ impl<'c, 'a> Emitter<'c, 'a> {
         self.w(&name);
         self.w(";");
         self.nl();
-        true
+        name
     }
 
     fn var_statement(&mut self, s: NodeId, scope: Scope, keep_export: bool, prev_end: u32) -> bool {
@@ -2683,6 +2772,28 @@ impl<'c, 'a> Emitter<'c, 'a> {
             }
         }
         self.semi_end(s);
+    }
+
+    /// One JSDoc `@overload` signature (`ty`, the function type it desugared into): type
+    /// parameters, parameters and `: ` with the return type; a constructor's has only its
+    /// parameters.
+    fn overload_signature(&mut self, ty: NodeId, constructor: bool) {
+        let Node::FunctionType {
+            type_params,
+            params,
+            return_type,
+        } = *self.ast.node(ty)
+        else {
+            return;
+        };
+        if !constructor {
+            self.type_params(type_params);
+        }
+        self.params(params, ty);
+        if !constructor {
+            self.w(": ");
+            self.type_node(return_type);
+        }
     }
 
     /// The inferred return type of a function-like declaration.
@@ -3299,6 +3410,38 @@ impl<'c, 'a> Emitter<'c, 'a> {
                         continue;
                     }
                     let private = modifiers.contains(Modifiers::PRIVATE);
+                    // JSDoc `@overload`s: one member each. A method's carries every comment
+                    // of the implementation, a constructor's none (observed:
+                    // `jsFileMethodOverloads`, `jsdocVariadicInOverload`, `overloadTag2`).
+                    let overloads = match kind {
+                        MethodKind::Method | MethodKind::Constructor if !private => {
+                            js::jsdoc_overloads(&self.ast, value)
+                        }
+                        _ => Vec::new(),
+                    };
+                    if !overloads.is_empty() {
+                        let constructor = kind == MethodKind::Constructor;
+                        for ty in overloads {
+                            if constructor {
+                                self.last_written_end = Some(self.ast.span(m).end);
+                                self.start(m);
+                            } else {
+                                self.leading_jsdoc(m, pe);
+                            }
+                            self.member_modifiers(m, modifiers);
+                            if constructor {
+                                self.w("constructor");
+                            } else {
+                                self.property_key(key);
+                                if optional {
+                                    self.question(key);
+                                }
+                            }
+                            self.overload_signature(ty, constructor);
+                            self.semi_end(m);
+                        }
+                        continue;
+                    }
                     if private && kind == MethodKind::Method {
                         // `private m;` once for an overloaded method.
                         let k = self.raw(key).to_owned();

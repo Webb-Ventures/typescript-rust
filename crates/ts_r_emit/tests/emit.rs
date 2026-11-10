@@ -810,14 +810,16 @@ fn dropped_aliases_release_their_imports() {
 fn javascript_declarations_refused_for_unwritten_patterns() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for src in [
-        "module.exports = { a: 1 };\nmodule.exports.b = 2;\n",
+        "module.exports = { a: 1 };\nmodule.exports.b = [2];\n",
+        "class K {}\nmodule.exports = class {};\nmodule.exports.K = K;\n",
         "const { y } = require(\"./y\");\nmodule.exports = y;\n",
         "exports.a = require(\"./y\");\n",
         "/** @typedef {number} ns.T */\nexport const x = 1;\n",
         "/**\n * @callback F\n * @param {...string} args\n */\nexport const x = 1;\n",
         "/** @type {(a: number) => number} */\nexport function f(a) { return a; }\n",
         "export class A { x = 1; }\nexport class B extends A { constructor() { super(); this.x = 2; } }\n",
-        "export class C {}\nC.count = 1;\n",
+        "class A {}\nexport class C extends A {}\nC.count = 1;\n",
+        "export class C {}\nfunction f() { C.count = 1; }\nf();\n",
         "export class D { m() { this.v = this.v + 1; } }\n",
         "export class E { constructor() { this[\"k\"] = 1; } }\n",
     ] {
@@ -836,6 +838,8 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
         "export class F { constructor() { this.constructor = 1; } }\n",
         "const k = \"k\";\nexport class G { constructor() { this[k] = 1; } }\n",
         "export class H { static m() {} }\nH.m.x = 1;\n",
+        // An ES module's `module.exports` declares nothing (nodeModulesAllowJsExportAssignment).
+        "import \"fs\";\nconst a = {};\nmodule.exports = a;\n",
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
         assert!(
@@ -847,25 +851,20 @@ fn javascript_declarations_refused_for_unwritten_patterns() {
     }
 }
 
-/// A CommonJS file whose only export is `module.exports = v;` is `export = v;` first, then
-/// its declarations (tsc 7.0.2, jsDeclarationsExportAssignedClassInstance1); a value that
-/// is no entity name goes through `declare const _exports`.
+/// JSDoc `@overload`s are one declaration each (tsc 7.0.2, overloadTag1, overloadTag2,
+/// jsFileMethodOverloads): a function's without comments, a method's with every comment of
+/// the implementation, a constructor's with only its parameters.
 #[test]
-fn javascript_commonjs_export_assignment_is_written() {
+fn javascript_overloads_are_written() {
     let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
     for (src, want) in [
         (
-            "class Foo {}\nmodule.exports = new Foo();\n",
-            "declare const _exports: Foo;\nexport = _exports;\ndeclare class Foo {\n}\n",
+            "/**\n * @overload\n * @param {number} a\n * @returns {number}\n *\n * @overload\n * @param {string} a\n * @returns {string}\n *\n * @param {string | number} a\n */\nexport function f(a) { return a; }\n",
+            "export declare function f(a: number): number;\nexport declare function f(a: string): string;\n",
         ),
         (
-            "/** @typedef {number} N */\nfunction foo() {}\nmodule.exports = foo;\n",
-            "export = foo;\nexport type N = number;\n/** @typedef {number} N */\ndeclare function foo(): void;\n",
-        ),
-        // A local `module` does not stop it: tsc 7.0.2 writes the same `export =`.
-        (
-            "const module = { exports: 0 };\nmodule.exports = 1;\n",
-            "declare const _exports = 1;\nexport = _exports;\n",
+            "export class C {\n  /**\n   * @overload\n   * @param {number} a\n   */\n  /**\n   * @param {number | string} a\n   */\n  constructor(a) {}\n  /**\n   * @overload\n   * @returns {void}\n   */\n  m() {}\n}\n",
+            "export declare class C {\n    constructor(a: number);\n    /**\n     * @overload\n     * @returns {void}\n     */\n    m(): void;\n}\n",
         ),
     ] {
         let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
@@ -880,6 +879,99 @@ fn javascript_commonjs_export_assignment_is_written() {
             .find(|o| o.path == "/p/out/a.d.ts")
             .unwrap();
         assert_eq!(d.text, want, "{src}");
+    }
+}
+
+/// A CommonJS file whose only export is `module.exports = v;` is `export = v;` first, then
+/// its declarations (tsc 7.0.2, jsDeclarationsExportAssignedClassInstance1); a value that
+/// is no entity name goes through `declare const _exports`.
+#[test]
+fn javascript_commonjs_export_assignment_is_written() {
+    let config = r#"{ "compilerOptions": { "target": "es2022", "lib": ["es2022"], "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    for (src, want) in [
+        (
+            "class Foo {}\nmodule.exports = new Foo();\n",
+            "declare const _exports: Foo;\nexport = _exports;\ndeclare class Foo {\n}\n",
+        ),
+        (
+            "/** @typedef {number} N */\nfunction foo() {}\nmodule.exports = foo;\n",
+            "export = foo;\nexport type N = number;\n/** @typedef {number} N */\ndeclare function foo(): void;\n",
+        ),
+        // The `_exports` constant takes the comment before the statement (tsbuild
+        // javascriptProjectEmit scenario).
+        (
+            "/** @typedef {number} N */\nmodule.exports = {};\n",
+            "/** @typedef {number} N */\ndeclare const _exports: {};\nexport = _exports;\nexport type N = number;\n",
+        ),
+        // A local `module` does not stop it: tsc 7.0.2 writes the same `export =`.
+        (
+            "const module = { exports: 0 };\nmodule.exports = 1;\n",
+            "declare const _exports = 1;\nexport = _exports;\n",
+        ),
+        // Later `module.exports.x = v;` members (jsDeclarationsExportSubAssignments,
+        // jsDeclarationsExportAssignedClassInstance3).
+        (
+            "const S = 1;\nclass Foo {}\nmodule.exports = Foo;\nmodule.exports.S = S;\n",
+            "export = Foo;\nexport { S };\ndeclare const S = 1;\ndeclare class Foo {\n}\n",
+        ),
+        (
+            "class Foo {}\nmodule.exports = new Foo();\nmodule.exports.n = 20;\n",
+            "declare const _exports: Foo;\nexport = _exports;\ndeclare namespace _exports {\n    export var n: 20;\n}\ndeclare class Foo {\n}\n",
+        ),
+        (
+            "const _exports = 0; module.exports = {}; module.exports.n = 20;",
+            "declare const _exports_1: {};\nexport = _exports_1;\ndeclare namespace _exports_1 {\n    export var n: 20;\n}\n",
+        ),
+        // A class's statics assigned from outside are a namespace merged with it, a static
+        // block's `this.x` a static member (jsDeclarationsClassStatic,
+        // jsDeclarationEmitThisAssignment).
+        (
+            "class H {\n  static {\n    this.a = 1;\n  }\n}\nH.f = function () {};\nmodule.exports = H;\n",
+            "export = H;\ndeclare class H {\n    static a: number | undefined;\n}\ndeclare namespace H {\n    var f: () => void;\n}\n",
+        ),
+    ] {
+        let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+        assert!(
+            r.diagnostics.is_empty() && !r.skipped,
+            "{src}: {:?}",
+            codes(&r)
+        );
+        let d = r
+            .outputs
+            .iter()
+            .find(|o| o.path == "/p/out/a.d.ts")
+            .unwrap();
+        assert_eq!(d.text, want, "{src}");
+    }
+}
+
+#[test]
+fn javascript_commonjs_many_members_preflight() {
+    let config = r#"{"compilerOptions":{"target":"es2022","noLib":true,"allowJs":true,"declaration":true,"types":[]},"files":["a.js"]}"#;
+    let mut src = String::from("module.exports = {};\n");
+    for i in 0..50_000 {
+        use std::fmt::Write;
+        writeln!(src, "module.exports.p{i} = {i};").unwrap();
+    }
+    for (text, refused) in [
+        (src.as_str(), false),
+        (
+            "module.exports = {}; module.exports.p = 1; module.exports.p = 2;",
+            true,
+        ),
+        (
+            "module.exports = {}; module.exports.p = 1; const other = module.exports;",
+            true,
+        ),
+    ] {
+        let (fs, parsed) = project(&[("tsconfig.json", config), ("a.js", text)]);
+        let program = load_program(&fs, &parsed.file_names, &parsed.options, None, 1);
+        let checker = Checker::new(&program);
+        let file = ts_r_diagnostics::FileId(program.file_index("/p/a.js").unwrap() as u32);
+        assert_eq!(
+            ts_r_emit::dts::js::unsupported(&checker, file).is_some(),
+            refused
+        );
     }
 }
 
@@ -1029,7 +1121,19 @@ fn javascript_property_names_module_and_exports_are_not_commonjs() {
          export declare class K {\n    module(): void;\n    exports: number;\n}\n\
          export declare function f({ module: m }: {\n    module: any;\n}): any;\n"
     );
-    // A shorthand property or a computed key reads the name: CommonJS.
+    // In an ES module CommonJS assignments declare nothing (tsc 7.0.2, probed).
+    let src = "export const o = 1;\nmodule.exports.z = 1;\nexports.w = 2;\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .unwrap();
+    assert_eq!(d.text, "export declare const o = 1;\n");
+    // A shorthand property or a computed key reads the name: refused, also in an ES module
+    // (tsc writes `{ [x: number]: number }` for the computed one; the checker's index
+    // signature is `string`).
     for src in [
         "export const o = { module };\n",
         "export const o = { [exports.k]: 1 };\n",

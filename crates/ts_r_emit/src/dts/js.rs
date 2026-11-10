@@ -20,10 +20,12 @@
 //! - `this["x"] = v` in a class, and `this.x = v` where the checker's type is not yet tsc's
 //!   (a property a base class declares, a value that reads the property itself);
 //! - `C.x = v` on a class (tsc adds a static);
-//! - `@enum`, `@overload`, `@private` / `@protected` on an assignment, `@this` without a
+//! - `@enum`, `@private` / `@protected` on an assignment, `@this` without a
 //!   type, `@type` on a function declaration, a dotted `@typedef` name (a namespace), a
 //!   `@callback` rest parameter.
 //!
+//! `@overload` is written: one declaration per overload of a function declaration, method
+//! or constructor ([`jsdoc_overloads`]).
 //! `@typedef`, `@callback`, `@template` and `@import` are written: the aliases and imports
 //! JSDoc desugared into are statements of the tree, exported in a module, and print no
 //! comments of their own (the comment holding them stays the comment of the statement it
@@ -47,10 +49,10 @@ use ts_r_types::TypeId;
 pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     let f = c.file(file);
     let ast = &f.ast;
+    let parents = f.parents();
     for t in &ast.jsdoc_tags {
         let why = match t.kind {
             JsDocTagKind::Enum => "a JSDoc @enum",
-            JsDocTagKind::Overload => "a JSDoc @overload",
             JsDocTagKind::Private | JsDocTagKind::Protected => "a JSDoc modifier on an assignment",
             JsDocTagKind::This if t.ty.is_none() => "a JSDoc @this without a type",
             // tsc takes the function's signature from the type (its type parameters too).
@@ -65,21 +67,25 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     if !ast.jsdoc_namespaces.is_empty() {
         return Some((Span::EMPTY, "a JSDoc @typedef with a dotted name"));
     }
-    let parents = f.parents();
     // `module.exports = v` alone is written (`export = v`); its `module` is no refusal.
     let export_assignment = commonjs_export_assignment(c, file);
-    let allowed_module = export_assignment.and_then(|(stmt, _)| match *ast.node(stmt) {
-        Node::ExprStmt { expr } => match *ast.node(expr) {
-            Node::Assign { left, .. } => match *ast.node(left) {
-                Node::Member { obj, .. } => Some(obj),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    });
+    let mut allowed_module: FxHashSet<NodeId> = FxHashSet::default();
+    if let Some((stmt, value)) = export_assignment {
+        if let Node::ExprStmt { expr } = *ast.node(stmt)
+            && let Node::Assign { left, .. } = *ast.node(expr)
+            && let Node::Member { obj, .. } = *ast.node(left)
+        {
+            allowed_module.insert(obj);
+        }
+        // `module.exports.x = v` adding a member to it (`export_members`).
+        let members = export_members(c, file, stmt, value).unwrap_or_default();
+        allowed_module.extend(members.iter().map(|m| m.module));
+    }
     // Named exports alone (`exports.x = v`) are written.
     let named = export_assignment.is_none() && commonjs_named_exports(c, file).is_some();
+    // In a file with ES module syntax assignments through `module.exports` and `exports`
+    // declare nothing (tsc 7.0.2: nodeModulesAllowJsExportAssignment, probed).
+    let esm = has_es_module_syntax(ast);
     // Per class, the member names it declares (`(is static, name)`), built on first use.
     let mut members: FxHashMap<NodeId, FxHashSet<(bool, &str)>> = FxHashMap::default();
     for raw in 1..=ast.node_count() as u32 {
@@ -99,8 +105,9 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
                 // `module.exports` / `exports` read as the module object (no local of
                 // that name): a CommonJS pattern tsc declares.
                 ((text == "exports" || text == "module")
+                    && (!esm || !assigned_through(ast, parents, n))
                     && !named
-                    && allowed_module != Some(n)
+                    && !allowed_module.contains(&n)
                     && !is_property_name(ast, parents, n)
                     && is_module_object(c, file, n))
                 .then_some("a CommonJS module")
@@ -167,11 +174,13 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         },
         _ => return None,
     };
+    let members = export_members(c, file, st, value)?;
+    let member_modules: FxHashSet<NodeId> = members.iter().map(|m| m.module).collect();
     for raw in 1..=ast.node_count() as u32 {
         let Some(n) = NodeId::from_raw(raw) else {
             continue;
         };
-        if n == module || ast.is_jsdoc(n) {
+        if n == module || ast.is_jsdoc(n) || member_modules.contains(&n) {
             continue;
         }
         // `const x = require("m")` is written `import x = require("m")`; the emitter
@@ -187,6 +196,116 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         }
     }
     Some((st, value))
+}
+
+/// Whether `n` is an identifier naming a declaration of `file` itself.
+pub(super) fn is_local_name(c: &Checker, file: FileId, n: NodeId) -> bool {
+    matches!(*c.file(file).ast.node(n), Node::Ident { .. })
+        && c.resolve_ident(Loc { file, node: n }, meaning::VALUE)
+            .and_then(|s| c.decls(s).first().copied())
+            .is_some_and(|d| d.file == file)
+}
+
+/// A member added to a CommonJS `module.exports = v;` export by a later top-level
+/// `module.exports.name = value;` ([`export_members`]).
+#[derive(Clone, Debug)]
+pub(super) struct ExportMember {
+    pub name: String,
+    pub value: NodeId,
+    /// The statement's `module` identifier.
+    pub module: NodeId,
+}
+
+/// The members later top-level `module.exports.name = value;` statements add to the export
+/// `module.exports = v;` (statement `st`), in source order; `None` when one is a form the
+/// emitter does not write. tsc 7.0.2 writes them (observed: jsDeclarationsExportSubAssignments,
+/// jsDeclarationsExportAssignmentExpressionPlusSecondary,
+/// jsDeclarationsExportAssignedClassInstance3, jsDeclarationsCrossfileMerge):
+/// - when `v` is a name declared in the file, `export = v;` then `export { name };` for
+///   each member assigned the local of its own name;
+/// - when `v` is another value but no class or function expression, `declare const
+///   _exports: T; export = _exports;` then `declare namespace _exports { ... }` holding
+///   `export { name };` for such a member and `export var name: L;` for a number or
+///   string literal `L` (its literal type).
+///
+/// Other values, members of a class or function expression export and members before the
+/// export are not written yet.
+pub(super) fn export_members(
+    c: &Checker,
+    file: FileId,
+    st: NodeId,
+    value: NodeId,
+) -> Option<Vec<ExportMember>> {
+    let f = c.file(file);
+    let ast = &f.ast;
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return None;
+    };
+    let is_name = |n: NodeId, text: &str| matches!(*ast.node(n), Node::Ident { name } if ast.atom(name) == text);
+    let local = |n: NodeId| is_local_name(c, file, n);
+    let inner = super::skip_parens(ast, value);
+    let export_is_local = local(inner);
+    let expression_export = matches!(
+        *ast.node(inner),
+        Node::ClassExpr { .. } | Node::FunctionExpr { .. } | Node::Arrow { .. }
+    );
+    let mut out = Vec::new();
+    let mut names = FxHashSet::default();
+    let mut after = false;
+    for &s in ast.list(stmts) {
+        if s == st {
+            after = true;
+            continue;
+        }
+        let Node::ExprStmt { expr } = *ast.node(s) else {
+            continue;
+        };
+        let Node::Assign {
+            op: ts_r_ast::AssignOp::Assign,
+            left,
+            right,
+        } = *ast.node(expr)
+        else {
+            continue;
+        };
+        let Node::Member { obj, prop, .. } = *ast.node(left) else {
+            continue;
+        };
+        let Node::Member {
+            obj: module,
+            prop: exports,
+            ..
+        } = *ast.node(obj)
+        else {
+            continue;
+        };
+        if !is_name(module, "module") || !is_name(exports, "exports") {
+            continue;
+        }
+        let name = ast.name_of(prop)?;
+        let same_local = is_name(right, name) && local(right);
+        let literal = match *ast.node(right) {
+            Node::NumberLit { .. } => true,
+            Node::StringLit { .. } => {
+                f.text.as_bytes().get(ast.span(right).start as usize) == Some(&b'"')
+            }
+            _ => false,
+        };
+        let written = if export_is_local {
+            same_local
+        } else {
+            !expression_export && (same_local || literal)
+        };
+        if !after || !written || !names.insert(name) {
+            return None;
+        }
+        out.push(ExportMember {
+            name: name.to_owned(),
+            value: right,
+            module,
+        });
+    }
+    Some(out)
 }
 
 /// One CommonJS named export: `(name, its first assignment target, the assigned name)`.
@@ -396,6 +515,54 @@ fn callback_has_rest(ast: &Ast, ty: NodeId) -> bool {
 /// renamed binding's key (`{ module: m }`), a label, a specifier's foreign name, an enum
 /// member, an import attribute key, a JSX attribute or a qualified name's right side.
 /// Shorthand properties and computed keys (`{ module }`, `[exports.k]`) are references.
+/// Whether `n` is the root object of an assignment's target (`module` of
+/// `module.exports.x = v`, `exports` of `exports["x"] = v`).
+fn assigned_through(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
+    let mut cur = n;
+    for _ in 0..8 {
+        let Some(p) = parents.parent(cur) else {
+            return false;
+        };
+        match *ast.node(p) {
+            Node::Member { obj, .. } | Node::Index { obj, .. } if obj == cur => cur = p,
+            Node::Assign { left, .. } => return left == cur && cur != n,
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Whether a top-level statement is an ES import or export (the file is then no CommonJS
+/// module).
+fn has_es_module_syntax(ast: &Ast) -> bool {
+    let Node::Program { stmts } = *ast.node(ast.root) else {
+        return false;
+    };
+    ast.list(stmts).iter().any(|&s| match *ast.node(s) {
+        Node::ImportDecl { .. }
+        | Node::ExportNamed { .. }
+        | Node::ExportAll { .. }
+        | Node::ExportDefaultExpr { .. }
+        | Node::ExportAssignment { .. } => true,
+        ref n => n.modifiers().contains(Modifiers::EXPORT),
+    })
+}
+
+/// The signatures (function types) of the JSDoc `@overload` tags of `host` (a function
+/// declaration, or a method's or constructor's function), in source order. tsc 7 writes
+/// one declaration per overload and none for the implementation (observed:
+/// `overloadTag1`, `jsFileMethodOverloads`): an overload's type parameters are the
+/// `@template`s of its comment, a constructor's has no return type. On other hosts (a
+/// function expression, a prototype assignment) tsc declares the implementation's type,
+/// as the emitter does without looking at the tags (`jsFileMethodOverloads5`).
+pub(super) fn jsdoc_overloads(ast: &Ast, host: NodeId) -> Vec<NodeId> {
+    ast.jsdoc_tags_of(host)
+        .iter()
+        .filter(|t| t.kind == JsDocTagKind::Overload)
+        .filter_map(|t| t.ty)
+        .collect()
+}
+
 fn is_property_name(ast: &Ast, parents: &ParentMap, n: NodeId) -> bool {
     let Some(p) = parents.parent(n) else {
         return false;
@@ -504,8 +671,34 @@ fn assignment_target<'a>(
         Node::Ident { .. } => {
             let sym = c.resolve_ident(Loc { file, node: obj }, meaning::VALUE)?;
             let flags = c.sym_flags(sym);
-            (flags.intersects(SymbolFlags::CLASS) && !flags.intersects(SymbolFlags::FUNCTION))
-                .then_some("a property assigned to a class")
+            if !flags.intersects(SymbolFlags::CLASS) || flags.intersects(SymbolFlags::FUNCTION) {
+                return None;
+            }
+            // `C.x = v;` as a top-level statement, for a class declaration of this file
+            // without a base class or a static `x` of its own, is written as a namespace
+            // merged with the class (`Emitter::statement`).
+            let top_level = parents
+                .parent(target)
+                .and_then(|a| parents.parent(a))
+                .filter(|&st| matches!(ast.node(st), Node::ExprStmt { .. }))
+                .and_then(|st| parents.parent(st))
+                == Some(ast.root);
+            let class = c
+                .decls(sym)
+                .into_iter()
+                .filter(|d| d.file == file)
+                .map(|d| d.node)
+                .find(|&d| matches!(ast.node(d), Node::ClassDecl { .. }));
+            let written = top_level
+                && matches!(ast.node(target), Node::Member { .. })
+                && class.is_some_and(|k| {
+                    matches!(*ast.node(k), Node::ClassDecl { heritage, .. } if ast.list(heritage).is_empty())
+                        && !members
+                            .entry(k)
+                            .or_insert_with(|| member_names(ast, k))
+                            .contains(&(true, name))
+                });
+            (!written).then_some("a property assigned to a class")
         }
         _ => None,
     }

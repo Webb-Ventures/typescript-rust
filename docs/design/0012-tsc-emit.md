@@ -1576,3 +1576,46 @@ type narrowed at a `this.x = v`, a function's `typeof f` written instead of its 
 order of a binding pattern's properties) and two layout details (`!T` and `?T` in
 intersections, a property's JSDoc on an object literal's expando).
 
+## Implementation notes (JavaScript declarations, second part, `parity/emit-3`, 2026-11-06)
+
+Approach: each JavaScript pattern tsc 7.0.2 declares from is either written exactly as the
+baselines show or refused with TSR2006; a pattern moves from refused to written only when
+the emit oracle shows no newly differing output. The rules live in
+`crates/ts_r_emit/src/dts/js.rs` (what is refused) and the emitter (how it is written); the
+data model is unchanged: the checker's tree, JSDoc tags by host (`Ast::jsdoc_tags_of`) and
+the checker's symbols (expando exports of a function or class symbol).
+
+- `@overload`: one declaration per `@overload` tag of the host, printed from the tag's
+  function type. A function declaration's overloads carry no comments; a method's repeat
+  every comment of the implementation; a constructor's carry none. The implementation
+  signature is not written. On other hosts the implementation's type is declared.
+- A JavaScript ES module (import or export syntax): `module.exports = ...`,
+  `exports.x = ...` declare nothing (nodeModulesAllowJsExportAssignment). Reads of
+  `module`/`exports` are still refused (a computed key's type is the checker's, not tsc's).
+- `module.exports = v;` with later top-level `module.exports.x = w;` members: for a local
+  `v`, `export = v;` then `export { x };`; otherwise `declare const _exports: T; export =
+  _exports;` and `declare namespace _exports { ... }` holding `export { x };` for a local
+  of the same name and `export var x: L;` for a number or string literal. Members of a
+  class or function expression export and other values stay refused.
+- A class declaration's statics assigned by top-level `C.x = v;` (no base class, no
+  static `x` of its own) are a namespace merged with the class, written like a function's
+  expandos (`var x: T;`). A static block's `this.x = v` stays a static member.
+- The `_exports` constant takes the comment right before the statement.
+
+| Oracle | Before (main `ba8304b1`) | After |
+|---|---|---|
+| Emit oracle, all outputs bytes-exact | 16,574 / 17,352 | 16,599 / 17,352 |
+| `.d.ts` outputs bytes-exact | 2,437 / 2,640 | 2,462 / 2,640 |
+| Baselines with every `.d.ts` bytes-exact | 1,439 / 1,634 | 1,463 / 1,634 |
+| JavaScript inputs' `.d.ts` refused (TSR2006) | 53 | 27 |
+| Scenarios (tsc/ + tsbuild/) | 327 / 377 | 328 / 377 |
+
+JS bytes (13,932), watch (91 / 106), trace (142 / 146) and emit-repos (7,161 / 7,279) did
+not move. Still refused: CommonJS forms (`Object.defineProperty(exports, ...)`, export in
+a closure, an anonymous class expression with members, shadowing, `require` aliases in
+namespaces), `@enum`, `@type` on a function declaration (tsc's applicability rules between
+`@type`, `@param`, `@return` and `@template`, jsdocTypeParameterTagConflict), a class
+with a base class whose static is assigned from outside, `this.x` a base class declares or
+read in its own value, a `@callback` rest parameter. jsDeclarationsCrossfileMerge is
+written but differs: the checker's type printer writes `typeof import("./exporter").default`
+where tsc reaches the value through the local `require` alias (`typeof m.default`).

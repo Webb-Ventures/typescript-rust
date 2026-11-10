@@ -51,16 +51,25 @@ cost both. It never mutates the checker's AST.
   so the local it names is printed too and may be TS9010 itself
   (tsc: tsc/internal/pseudochecker/lookup.go, tsc/internal/ast/utilities.go)),
   declarations of JavaScript inputs that use a pattern tsc declares from and the emitter
-  does not write yet (TSR2006 naming it: CommonJS exports other than one top-level
+  does not write yet (TSR2006 naming it: CommonJS exports (in a file with ES import or
+  export syntax assignments through `module.exports`/`exports` declare nothing) other than one top-level
   `module.exports = v;` (written `export = v;` first, a class or function expression
   then as a declaration named by it or `_exports`, another value
-  that is no entity name through `declare const _exports: T;`) or top-level `exports.x = v;`
+  that is no entity name through `declare const _exports: T;`; later top-level
+  `module.exports.x = v;` members of a local name `v` or a number/string literal are
+  `export { x };` after `export = v;` when `v` is a local, else members of a
+  `declare namespace _exports` with `_exports` a constant) or top-level `exports.x = v;`
   alone (written first: `export { v as x };` for one assignment of a local name, `declare
   const _default: T; export default _default;`, else `export declare var x: T;`), a
-  destructured `require` (`const x = require("m")` is `import x = require("m")`), `@overload`/`@enum`, a dotted
+  destructured `require` (`const x = require("m")` is `import x = require("m")`), `@enum`, a dotted
   `@typedef` name, a `@callback` rest parameter, `@type` on a function declaration, a
-  class's statics assigned from outside, `this["x"] = v`; the list and the observed rules
-  are in `dts/js.rs`). `@typedef`/`@callback`/`@template`/`@import` are written: the
+  class's statics assigned from outside other than top-level `C.x = v;` on a class
+  declaration without a base class (written as a namespace merged with the class, like a
+  function's expandos), `this["x"] = v`; the list and the observed rules
+  are in `dts/js.rs`). `@overload` is written: one declaration per overload of a function
+  declaration (no comments), method (every comment of the implementation, repeated) or
+  constructor (no comments), with the type parameters of the overload's comment; on other
+  hosts the implementation's type is declared, as tsc does. `@typedef`/`@callback`/`@template`/`@import` are written: the
   aliases and imports are exported in a module, print no comments of their own (the
   comment holding them stays the comment of the statement it documents, or an
   end-of-file comment), and a `@property` description is the member's JSDoc. Other JavaScript
@@ -225,17 +234,16 @@ import reference.
 
 ## Measurements
 
-Latest (2026-10-27, v1 emit round 10, `cargo run --release -p ts_r_check --example
+Latest (2026-11-06, `parity/emit-3`, `cargo run --release -p ts_r_check --example
 emit_oracle -- --emitter program`): ES2022+ JS outputs 2,159: bytes 2,101 (97.3%), shape 2,143
 (99.3%; the 16 others are in `emit_known_gaps.txt`), map segments equal on 17 of 18
 bytes-exact outputs with a map baseline (158 of 162 at all targets); all 17,352 outputs:
-16,574 bytes-exact (95.5%; 16,506 at round 9), JS 13,932 / 14,476 (96.2%), below
-ES2022 11,831 / 12,317 (es2015 11,387 / 11,859), `.d.ts` 2,437 / 2,640 (92.3%). Declarations
-(E2): 1,439 / 1,634 baselines have every `.d.ts` bytes-exact (88.1%, gate 85% met); 1,439 of
-1,586 without TSR2006 refusals (90.7%). TSR2006 refuses 53 JavaScript inputs' `.d.ts`.
-Tests with every output bytes-exact: 11,224 of 11,925 (11,161 at round 9). Extra
-outputs: 13 (14 at round 9; checker round 10 reports TS4023 in
-jsDeclarationsTypeReassignmentFromDeclaration2). Measured with checker round 10.
+16,599 bytes-exact (95.7%; 16,574 at round 10), JS 13,932 / 14,476 (96.2%), below
+ES2022 11,831 / 12,317, `.d.ts` 2,462 / 2,640 (93.3%; 2,437 at round 10). Declarations
+(E2): 1,463 / 1,634 baselines have every `.d.ts` bytes-exact (89.5%, gate 85% met); 1,463 of
+1,610 without TSR2006 refusals (90.9%). TSR2006 refuses 27 JavaScript inputs' `.d.ts` (53 at
+round 10), TSR2001 13. Tests with every output bytes-exact: 11,248 of 11,925 (11,224 at
+round 10). Extra outputs: 13.
 The paragraphs below are the milestone measurements.
 
 Emit oracle, `--emitter program` (2026-10-19, ES2022+ JS outputs, 2,159): bytes 1,946

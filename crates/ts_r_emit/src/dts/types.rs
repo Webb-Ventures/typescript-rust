@@ -908,7 +908,13 @@ impl Emitter<'_, '_> {
             return;
         }
         let start = self.ast.span(p).start;
-        self.inline_comments_before(start, &['(', ',', '<', '[']);
+        let after = ['(', ',', '<', '['];
+        // The parameter of `x => x` follows no list token: the comments before it belong
+        // to the statement.
+        if !self.src[..self.before_comments(start)].ends_with(after) {
+            return;
+        }
+        self.inline_comments_before(start, &after);
     }
 
     /// Block comments between the previous list token (one of `after`) and `start`, as
@@ -964,6 +970,15 @@ impl Emitter<'_, '_> {
     /// The end of the list token (one of `after`) before `start`, skipping whitespace and
     /// comments (whose text may itself contain `,` or `(`); `0` when none is found.
     pub(super) fn list_token_end(&self, start: u32, after: &[char]) -> u32 {
+        let pos = self.before_comments(start);
+        match self.src[..pos].chars().next_back() {
+            Some(ch) if after.contains(&ch) => pos as u32,
+            _ => self.src[..pos].rfind(after).map_or(0, |i| i + 1) as u32,
+        }
+    }
+
+    /// The end of the code before `start`, skipping whitespace and comments.
+    fn before_comments(&self, start: u32) -> usize {
         let comments = self.ast.comments_between(0, start);
         let mut ci = comments.len();
         let mut pos = start as usize;
@@ -980,10 +995,7 @@ impl Emitter<'_, '_> {
             }
             break;
         }
-        match self.src[..pos].chars().next_back() {
-            Some(ch) if after.contains(&ch) => pos as u32,
-            _ => self.src[..pos].rfind(after).map_or(0, |i| i + 1) as u32,
-        }
+        pos
     }
 
     /// A parameter's binding name: an identifier, or a pattern without initializers.

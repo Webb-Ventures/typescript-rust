@@ -108,6 +108,11 @@ impl Emitter<'_, '_> {
                 .into_iter()
                 .filter(|d| d.file == self.file)
                 .collect();
+            // A class's `this.x = v` in a static block is a static member of the class
+            // (`Emitter::this_properties`), not a namespace member.
+            if decls.iter().any(|d| self.assigned_to_this(d.node)) {
+                continue;
+            }
             if decls.is_empty() {
                 out.push((u32::MAX, name, p, None));
                 continue;
@@ -122,6 +127,17 @@ impl Emitter<'_, '_> {
             out.into_iter().map(|(_, n, p, d)| (n, p, d)).collect(),
             other_names,
         )
+    }
+
+    /// Declaration `n` is `this.x` / `this["x"]` (or its name).
+    fn assigned_to_this(&self, n: NodeId) -> bool {
+        let is_this_member = |n: NodeId| match *self.ast.node(n) {
+            Node::Member { obj, .. } | Node::Index { obj, .. } => {
+                matches!(self.ast.node(skip_parens(&self.ast, obj)), Node::This {})
+            }
+            _ => false,
+        };
+        is_this_member(n) || self.parents.parent(n).is_some_and(is_this_member)
     }
 
     /// The symbol an assignment `f.x = C` re-exports: `C` names a class, function, enum,
