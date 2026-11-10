@@ -1735,3 +1735,35 @@ Left: the CommonJS shapes (the named-export path refuses any `require` call, whi
 single tests), dotted `@typedef` names (the parser does not model them, so this needs the
 parser and the checker), a class's statics with a base class, and the two `this.x` cases
 that need the checker's typing of inherited this-properties.
+
+## Implementation notes (emit-repos on the merged stack, `parity/emit-repos-1`, 2026-11-10)
+
+`cargo xtask emit-repos` on the merged M8 stack (`parity/lsp-2`) had lost ground on three
+cases, and four cases did not run in a fresh worktree (the bench repos, tsc and the upstream
+libs had not been fetched there; `cargo xtask bench --fetch-repos`, `npm ci` in `bench/` and
+`cargo xtask upstream sync` make them run). The fixes are all in the checker:
+- **minimatch time and memory.** A type literal in a class member captured the class's `this`
+  type parameter, so `{ type: null }` in a method parameter was a new type per receiver and a
+  narrowed call relation spent the whole relation budget each time. The regression from about
+  420 to 680 MB came from cc8fd8fd (`deeply_nested` at two levels), which let that runaway
+  relation intern more types. The `this` parameter now counts only when a `this` type node
+  appears inside (tsc: isTypeParameterPossiblyReferenced).
+- **rxjs `pipe` and `reduce`.** Return-context inference takes the contravariant inference
+  when the covariant one is `never`, `any` or fits no contravariant candidate (tsc:
+  getInferredType), and a conditional expression of callbacks collects both branches'
+  contextual signatures.
+- **trpc local aliases.** A declaration reuses a type node's name only when the name's
+  declaration is in scope where the declaration is written: a `type E` inside a function's
+  block is spelled out, as tsc does (test `tsc_layout/local_type_alias`).
+
+| Measure | Before | After |
+|---|---|---|
+| emit-repos, all files (gated) | not all cases ran | 7,161 / 7,279 (98.4%) |
+| emit-repos cases with identical diagnostics | 6 / 9 that ran | 13 / 13 |
+| trpc-packages ts-r-only diagnostics, exit | 13, exit 1 (tsc 2) | 0, exit 2 |
+| rxjs7-types / rxjs7-esm-es2015 ts-r-only diagnostics | 9 / 9 | 0 / 0 |
+| minimatch-esm time, peak RSS (tsc 0.64 s, 90 MB) | 5.68 s, 707 MB | 0.14 s, 60 MB |
+| Peak RSS at or under tsc 7's | 7 / 9 that ran (both minimatch over) | 13 / 13 |
+
+Left: trpc's `createHooksInternal.d.ts` is written but differs: tsc keeps
+`TRPCClientErrorLike<TRouter>` where we expand the alias to its target.
