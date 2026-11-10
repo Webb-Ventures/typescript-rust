@@ -12,7 +12,7 @@
   },
   "passRates": {
     "conformance": {
-      "passed": 12502,
+      "passed": 12508,
       "total": 12750,
       "rate": 98.1,
       "measure": "tsc 7.0.2 baselines, exact diagnostics and chains, tests/cases/compiler and tests/cases/conformance together",

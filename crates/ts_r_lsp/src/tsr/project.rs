@@ -87,6 +87,14 @@ pub enum PMsg {
     /// The parity check failed (`true`): type diagnostics come from the user's TypeScript,
     /// stop publishing ours. `false`: ours again.
     Fallback(bool),
+    /// Whether any client wants lint results (`false` until told: no lint config is read).
+    LintWanted(bool),
+    /// The lint config loader's answer for a file (`None`: no type-aware rules).
+    LintConfig {
+        generation: u64,
+        path: String,
+        config: Option<Arc<ts_r_lint::FileConfig>>,
+    },
     /// Exit the thread.
     Stop,
 }
@@ -104,8 +112,8 @@ struct Published {
     semantic: Vec<Diagnostic>,
     /// Type-aware lint diagnostics (`project/lint.rs`), kept with the semantic ones.
     lint: Vec<ts_r_lint::Diagnostic>,
-    /// The semantic diagnostics are from the current text.
-    fresh: bool,
+    /// The lint diagnostics and their fixes are from the current text.
+    lint_fresh: bool,
 }
 
 /// A project thread's state (persists across sessions).
@@ -177,6 +185,12 @@ pub struct Stats {
 }
 
 impl Project {
+    /// Gives the project its own inbox, where the lint config loader reports.
+    pub fn with_inbox(mut self, tx: Sender<PMsg>) -> Project {
+        self.lint.inbox = Some(tx);
+        self
+    }
+
     /// A project; the program is loaded on the thread.
     pub fn new(
         key: String,
@@ -409,6 +423,12 @@ impl Project {
                     return Outcome::Rebuild;
                 }
                 Some(PMsg::Fallback(on)) => self.fallback = on,
+                Some(PMsg::LintWanted(on)) => self.on_lint_wanted(on),
+                Some(PMsg::LintConfig {
+                    generation,
+                    path,
+                    config,
+                }) => self.on_lint_config(generation, path, config),
                 Some(PMsg::Request { id, reply, .. }) => match reply {
                     Some(reply) => {
                         let _ = reply.send(Value::Null);
@@ -645,12 +665,12 @@ impl Project {
         for p in changed_owned {
             deps.remove(p);
             if let Some(pb) = self.published.get_mut(p) {
-                pb.fresh = false;
+                pb.lint_fresh = false;
             }
         }
         for d in &deps {
             if let Some(pb) = self.published.get_mut(d) {
-                pb.fresh = false;
+                pb.lint_fresh = false;
             }
         }
         // Keep earlier unfinished work, after the new.
@@ -856,6 +876,12 @@ impl Project {
                     self.lint_config_changed();
                     return Outcome::Rebuild;
                 }
+                Some(PMsg::LintWanted(on)) => self.on_lint_wanted(on),
+                Some(PMsg::LintConfig {
+                    generation,
+                    path,
+                    config,
+                }) => self.on_lint_config(generation, path, config),
                 Some(PMsg::Fallback(on)) => {
                     self.fallback = on;
                     if !on {
@@ -988,10 +1014,10 @@ impl Project {
         let mut semantic = Self::semantic(program, checker, file, &cks[k].diags);
         let sound = self.sound_check(program, file, &semantic);
         semantic.extend(sound);
-        // Lint configs load once (an ESLint config through Node): publish the type
-        // diagnostics first when that is still to come, with the previous lint results.
-        let lint_ready = self.lint_config_ready(path);
-        let lint = if lint_ready {
+        // Lint configs load once (an ESLint config through Node) on their own thread, and
+        // only while some client wants lint: the type diagnostics never wait for it. The
+        // file is checked again when its config arrives (`on_lint_config`).
+        let lint = if self.lint_active() && self.lint_config_ready(path) {
             Some(self.typed_lint(program, cks, k, file, path))
         } else {
             None
@@ -1002,20 +1028,11 @@ impl Project {
         let pb = self.published.entry(path.to_string()).or_default();
         pb.syntax = syntax;
         pb.semantic = semantic;
+        pb.lint_fresh = lint.is_some();
         if let Some(lint) = lint {
             pb.lint = lint;
         }
-        pb.fresh = true;
         self.publish(path);
-        if !lint_ready {
-            let lint = self.typed_lint(program, cks, k, file, path);
-            if let Some(pb) = self.published.get_mut(path)
-                && pb.lint != lint
-            {
-                pb.lint = lint;
-                self.publish(path);
-            }
-        }
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         if ms > 50.0 {
             crate::daemon::log(&format!("ts-r {}: checked {path} in {ms:.1} ms", self.name));
@@ -1056,7 +1073,7 @@ impl Project {
                 }
                 _ => false,
             });
-        pb.fresh = false;
+        pb.lint_fresh = false;
         if had || !pb.syntax.is_empty() {
             self.publish(path);
         }

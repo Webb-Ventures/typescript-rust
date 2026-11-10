@@ -846,16 +846,30 @@ placeholder for the reason); `ts-r/fileDiagnostics` (pull) has no sound diagnost
   lint worker runs the other half without types; the daemon merges both as before.
 - Configs: `lint::TypedConfigs` (an `Engine` with `types_available`, per-path cache), reset
   when a lint config file changes on disk or the project's tsconfig changes, and every open
-  file is re-linted. The first file of a config publishes its type diagnostics before
-  loading the config (an ESLint config is evaluated by Node), then again with lint results.
+  file is re-linted. A config is loaded (an ESLint config is evaluated by Node) on a
+  per-project loader thread (`TypedConfigs::request`, answers come back as
+  `PMsg::LintConfig`, stale ones after a reload are dropped by generation): the project
+  thread never waits for it, so type diagnostics, hover and completion are never delayed by
+  Node. The file publishes its types at once and is checked again, with lint results, when
+  its config arrives. One loader survives reloads: evaluations stay serial, queued paths
+  from obsolete generations are skipped, and its engine resets before loading a newer
+  generation. Dropping the project invalidates queued work too.
+- Lint off reads no config: the daemon tells the ts-r backend `ts-r/lintWanted {on}` (true when
+  some non-lint-only LSP client has `ts-r.lint.enable` on; sent before the first document,
+  and on every change: client hello, `workspace/didChangeConfiguration`, client leaving).
+  The coordinator forwards it as `PMsg::LintWanted`; while it is false `typed_lint` is not
+  called and no config is requested. Turning it on re-checks every open file. Tests:
+  `lint_off_never_evaluates_the_eslint_config`, `slow_eslint_config_does_not_block_types_or_hover`
+  (`tests/tsr.rs`: an `eslint.config.mjs` that writes marker files when Node evaluates it).
 - Projects on the fallback TypeScript (parity mismatch) publish nothing of ours, so no
   type-aware lint either (as `ts-r-lint` skips type-aware rules for such projects).
 - The lint switch: with `ts-r.lint.enable` off the daemon drops `source: "ts-r-lint"`
   diagnostics and code actions from the backend. The "rules not run" note leaves out the
   type-aware rules when the ts-r backend is the type backend.
 - Code actions: the backend answers `textDocument/codeAction` with the type-aware rules'
-  fixes, suggestions and disable comments, only once the file is checked after its last
-  edit (an edit moves the published spans, not the fixes' edits); `source.fixAll.ts-r` stays
+  fixes, suggestions and disable comments, only once the file is linted after its last
+  edit (an edit moves the published spans, not the fixes' edits). A type check while a
+  config is loading leaves retained lint fixes stale; `source.fixAll.ts-r` stays
   with the lint worker (it does not include type-aware fixes yet).
 - `TS_R_LSP_TYPED_LINT=0` turns it off. The first run per file is logged with its rule
   count, problems and time.
@@ -863,12 +877,15 @@ placeholder for the reason); `ts-r/fileDiagnostics` (pull) has no sound diagnost
   configs with 20 type-aware rules, parity off, release, macOS arm64; typed lint off / on):
   `packages/providers/src/payments/stripe.ts` keystroke p50 / p95 6.05 / 7.35 -> 6.78 /
   8.09 ms, one lint 2.4-3.0 ms (13 problems), RSS 31.7 -> 34.4 MB; `card-form.tsx` 2.79 /
-  3.72 -> 3.31 / 4.10 ms, 2.4 ms per lint, RSS 47.6 -> 50.6 MB. Gap: loading the config
-  (~0.3-0.5 s of Node on a cold `lint-config` cache) runs on the project thread, so a
-  request arriving then waits (hover p95 in those runs 325-525 ms). On tRPC
-  (`eslint.config.js`, 2026-11-06) that load takes 0.8-1.4 s right after the first
-  diagnostics, also with the client's lint off (only `TS_R_LSP_TYPED_LINT=0` skips it), and
-  one hover in editor-latency.js waited 4.7 s for it.
+  3.72 -> 3.31 / 4.10 ms, 2.4 ms per lint, RSS 47.6 -> 50.6 MB. Config load (~0.3-0.5 s of
+  Node on a cold `lint-config` cache; tRPC's `eslint.config.js` 0.8-1.5 s) used to run on the
+  project thread, also with the client's lint off, so the first request after the first
+  diagnostics waited for it (hover p95 in those runs 325-525 ms; 4.7 s once). Now it runs on
+  the loader thread and only with lint on (2026-11-10, release, macOS arm64, tRPC `router.ts`,
+  fresh cache, first hover right after the first diagnostics: lint off 1479 -> 1 ms; lint on
+  835 -> 0 ms, with the 22 type-aware rules' results arriving ~1 s later;
+  `editor-latency.js` hover p95 763 -> 0.31 ms; first diagnostics 70-103 ms either way).
+  `TS_R_BENCH_LINT=on` makes `editor-latency.js` open with lint enabled.
 - Project load: up to 4 threads read and parse the files (`load_threads`). tRPC
   `router.ts` cold open to first diagnostics (942 files, busy shared machine,
   interleaved runs): 2 threads median 90 ms (81-199), 4 threads median 70 ms (66-73).

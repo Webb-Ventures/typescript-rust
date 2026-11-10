@@ -25,6 +25,7 @@ use crate::text::{Pos, TextDoc, to_lsp_range};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -445,9 +446,17 @@ impl Engine {
 /// cached until [`TypedConfigs::reload`].
 #[derive(Default)]
 pub struct TypedConfigs {
-    engine: Option<Engine>,
     files: BTreeMap<String, Option<Arc<FileConfig>>>,
+    /// Paths handed to the loader thread, not answered yet.
+    asked: std::collections::HashSet<String>,
+    /// Bumped by [`TypedConfigs::reload`]: obsolete loads are skipped and answers dropped.
+    generation: Arc<AtomicU64>,
+    /// The loader thread's inbox (started by the first request).
+    loader: Option<std::sync::mpsc::Sender<(u64, String)>>,
 }
+
+/// Where the loader thread reports `(generation, path, config)`.
+pub type ConfigSink = Arc<dyn Fn(u64, String, Option<Arc<FileConfig>>) + Send + Sync>;
 
 impl std::fmt::Debug for TypedConfigs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -458,43 +467,86 @@ impl std::fmt::Debug for TypedConfigs {
 }
 
 impl TypedConfigs {
-    /// Forgets loaded configs (a lint config changed).
+    /// Forgets loaded configs (a lint config changed). A load still running finishes before
+    /// the next generation starts; its answer and queued obsolete requests are dropped.
     pub fn reload(&mut self) {
-        self.engine = None;
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.asked.clear();
         self.files.clear();
     }
 
-    /// Whether [`TypedConfigs::config_for`] has answered for `path` (no config to load).
+    /// Whether `path`'s config is answered (or none is needed): no load is due.
     pub fn is_known(&self, path: &str) -> bool {
-        self.files.contains_key(path)
+        self.files.contains_key(path) || !is_lintable(path)
     }
 
-    /// What [`TypedConfigs::config_for`] last answered for `path` (`None` if not asked yet).
+    /// What was answered for `path` (`None` if not answered yet, or no config governs it).
     pub fn cached(&self, path: &str) -> Option<Arc<FileConfig>> {
         self.files.get(path).cloned().flatten()
     }
 
-    /// The type-aware rules for `path` under workspace `root`, or `None` when no config
-    /// governs the file or it enables none.
-    pub fn config_for(&mut self, root: &Path, path: &str) -> Option<Arc<FileConfig>> {
-        if !is_lintable(path) {
-            return None;
+    /// Asks the loader thread for the type-aware rules of `path` under workspace `root`
+    /// (a `None` answer: no config governs the file or it enables none). Never evaluates a
+    /// config on the caller's thread: the answer goes to `sink`, then to
+    /// [`TypedConfigs::deliver`]. One request per path until the next reload.
+    pub fn request(&mut self, root: &Path, path: &str, sink: &ConfigSink) {
+        if self.is_known(path) || !self.asked.insert(path.to_string()) {
+            return;
         }
-        if let Some(c) = self.files.get(path) {
-            return c.clone();
+        if self.loader.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<(u64, String)>();
+            let root = root.to_path_buf();
+            let sink = sink.clone();
+            let generation = self.generation.clone();
+            let spawned = std::thread::Builder::new()
+                .name("tsr-lint-config".into())
+                .stack_size(WORKER_STACK)
+                .spawn(move || {
+                    let mut engine = Engine::new(root);
+                    engine.opts.resolve.types_available = true;
+                    let mut loaded_generation = None;
+                    while let Ok((requested, path)) = rx.recv() {
+                        if generation.load(Ordering::Relaxed) != requested {
+                            continue;
+                        }
+                        if loaded_generation != Some(requested) {
+                            engine.reload();
+                            loaded_generation = Some(requested);
+                        }
+                        let (_, _, fc) = engine.config_for(Path::new(&path));
+                        let typed = fc
+                            .ok()
+                            .filter(|fc| fc.rules.has_typed())
+                            .map(|fc| Arc::new(fc.typed_only()));
+                        sink(requested, path, typed);
+                    }
+                });
+            if spawned.is_err() {
+                self.asked.remove(path);
+                self.files.insert(path.to_string(), None);
+                return;
+            }
+            self.loader = Some(tx);
         }
-        let engine = self.engine.get_or_insert_with(|| {
-            let mut e = Engine::new(root.to_path_buf());
-            e.opts.resolve.types_available = true;
-            e
-        });
-        let (_, _, fc) = engine.config_for(Path::new(path));
-        let typed = fc
-            .ok()
-            .filter(|fc| fc.rules.has_typed())
-            .map(|fc| Arc::new(fc.typed_only()));
-        self.files.insert(path.to_string(), typed.clone());
-        typed
+        if let Some(tx) = &self.loader {
+            let _ = tx.send((self.generation.load(Ordering::Relaxed), path.to_string()));
+        }
+    }
+
+    /// Stores the loader's answer; false when it is from before the last reload.
+    pub fn deliver(&mut self, generation: u64, path: String, cfg: Option<Arc<FileConfig>>) -> bool {
+        if generation != self.generation.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.asked.remove(&path);
+        self.files.insert(path, cfg);
+        true
+    }
+}
+
+impl Drop for TypedConfigs {
+    fn drop(&mut self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
     }
 }
 

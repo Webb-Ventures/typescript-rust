@@ -246,10 +246,11 @@ class TsServer {
 /** @returns {Promise<Driver>} */
 async function lspDriver() {
     const isTsr = kind === 'ts-r';
+    const lintMode = process.env.TS_R_BENCH_LINT || 'off'; // TS_R_BENCH_LINT=on: lint enabled
     const env = { ...process.env };
     if (isTsr) env.TS_R_LSP_TYPE_BACKEND = 'ts-r';
     const c = isTsr
-        ? new LspClient(server, ['--root', root, '--name', 'editor bench', '--lint', 'off'], { cwd: root, env })
+        ? new LspClient(server, ['--root', root, '--name', 'editor bench', '--lint', lintMode], { cwd: root, env })
         : new LspClient(server, ['--lsp', '--stdio'], { cwd: root, env });
     /** @type {Map<string, (d: any[]) => void>} */
     const waiters = new Map();
@@ -275,7 +276,7 @@ async function lspDriver() {
             },
             workspace: { configuration: true, workspaceFolders: true },
         },
-        initializationOptions: isTsr ? { 'ts-r': { lint: { enable: 'off' } } } : {},
+        initializationOptions: isTsr ? { 'ts-r': { lint: { enable: lintMode } } } : {},
     });
     c.notify('initialized', {});
     const pull = !isTsr && !!init?.capabilities?.diagnosticProvider;
