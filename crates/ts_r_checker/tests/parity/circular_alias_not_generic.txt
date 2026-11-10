@@ -1,0 +1,4 @@
+a.ts(1,6): error TS2456: Type alias 'A' circularly references itself.
+a.ts(1,13): error TS2315: Type 'A' is not generic.
+a.ts(2,6): error TS2456: Type alias 'B' circularly references itself.
+a.ts(4,18): error TS2314: Generic type 'D' requires 1 type argument(s).

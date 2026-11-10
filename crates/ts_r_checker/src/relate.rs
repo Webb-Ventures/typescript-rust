@@ -113,6 +113,9 @@ pub struct RelState {
     /// (`None`: unlimited). Declaration checks set it so that pathological recursive
     /// generics can't run away; a spent budget never produces an error.
     pub budget: Option<u32>,
+    /// A pair of conditional alias instantiations being explained without their alias
+    /// variances (an invariant parameter elaborates through the conditional types).
+    pub(crate) skip_alias_variance: Option<(TypeId, TypeId)>,
 }
 
 /// A pending success: source, target, relation, and whether it held under an
@@ -879,7 +882,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 st.flags(obj).contains(TypeFlags::TYPE_PARAMETER)
             }
-            _ => st.flags(t).contains(TypeFlags::TYPE_PARAMETER),
+            // The markers of a variance annotation check say nothing more (tsc 7).
+            _ => {
+                st.flags(t).contains(TypeFlags::TYPE_PARAMETER)
+                    && self.variance_check_marker_name(t).is_none()
+            }
         };
         if rel != RelationKind::Comparable && !type_param {
             self.report_wrapper_hints(s, t);
@@ -1341,7 +1348,6 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         };
         let (rs, rt) = (named(self, pre_s, os), named(self, pre_t, ot));
-        self.note_unmeasurable(s, t);
         let st = self.store();
         let sf = st.flags(s);
         let tf = st.flags(t);
@@ -1550,10 +1556,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         // own successes are kept apart (they skip checks). So are a strict callback's,
         // which skip `method_callback_fails_strictly`.
         let permissive = self.rel.in_target_member || self.rel.in_strict_callback > 0;
-        if let Some(p) = self.rel.probe.as_ref() {
-            if let Some(&r) = p.cache.get(&(s, t, rel))
+        if let Some(p) = self.rel.probe.as_mut() {
+            if let Some(&(r, f)) = p.cache.get(&(s, t, rel))
                 && (r || !permissive)
             {
+                // What the cached comparison noted holds for this one too.
+                p.flags |= f;
                 return r;
             }
         } else if !report {
@@ -1610,7 +1618,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         let saved_assumed = std::mem::take(&mut self.rel.assumed);
         let saved_skipped = std::mem::take(&mut self.rel.deferred_skipped);
         let pending_start = self.rel.pending.len();
+        let saved_flags = self.rel.probe.as_mut().map(|p| std::mem::take(&mut p.flags));
         let r = self.structured_related(s, t, rel, report);
+        // What a measurement noted while comparing this pair is kept with its result.
+        let noted = match (self.rel.probe.as_mut(), saved_flags) {
+            (Some(p), Some(f)) => {
+                let n = p.flags;
+                p.flags |= f;
+                n
+            }
+            _ => 0,
+        };
         self.rel.stack.pop();
         let used = self.rel.maybe_used;
         let mine = std::mem::replace(&mut self.rel.assumed, saved_assumed);
@@ -1637,14 +1655,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         let settled = !used || (mine.lowest >= at && !mine.unknown);
         let outermost = at == 0;
         if (!r || (settled && !mine.nested) || outermost) && keep {
-            self.keep_relation((s, t, rel, permissive), r, skipped);
+            self.keep_relation((s, t, rel, permissive), r, skipped, noted);
         }
         if r && settled && !mine.nested && keep {
             // What held under assumptions about this pair holds for good.
             for i in pending_start..self.rel.pending.len() {
                 let k = self.rel.pending[i];
                 let skipped = self.rel.pending_set.get(&k).is_some_and(|&(_, x)| x);
-                self.keep_relation(k, true, skipped);
+                self.keep_relation(k, true, skipped, noted);
             }
             self.truncate_pending(pending_start);
         } else if r && !settled && !mine.unknown && keep {
@@ -1660,7 +1678,13 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// Records a final relation result: in the measurement's cache while measuring
     /// variances, else in the shared cache; successes under an intersection target's
     /// member in this worker's permissive cache (not while measuring).
-    fn keep_relation(&mut self, (s, t, rel, permissive): PendingKey, r: bool, skipped: bool) {
+    fn keep_relation(
+        &mut self,
+        (s, t, rel, permissive): PendingKey,
+        r: bool,
+        skipped: bool,
+        noted: u8,
+    ) {
         if r && permissive {
             if self.rel.probe.is_none() {
                 if self.rel.permissive_cache.len() >= PERMISSIVE_CACHE_MAX {
@@ -1669,7 +1693,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 self.rel.permissive_cache.insert((s, t, rel), skipped);
             }
         } else if let Some(p) = self.rel.probe.as_mut() {
-            p.cache.insert((s, t, rel), r);
+            p.cache.insert((s, t, rel), (r, noted));
         } else {
             self.store().relation_cache(rel).set(s, t, r);
         }
@@ -1704,7 +1728,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 n += 1;
                 last_a = a.0;
                 last_b = b.0;
-                if n >= 3 && (s.0 >= last_a || t.0 >= last_b) {
+                if n >= 2 && (s.0 >= last_a || t.0 >= last_b) {
                     return true;
                 }
             }
@@ -2558,6 +2582,14 @@ impl<'c, 'a> Ck<'c, 'a> {
         if sc == TypeId::UNRESOLVED || tc == TypeId::UNRESOLVED {
             return true;
         }
+        // A measurement through the keys is unreliable; through a source that removes
+        // `?` unmeasurable (tsc 7: `mappedTypeRelatedTo`).
+        let flag = if self.combined_mapped_optionality(s) < 0 {
+            crate::variance::UNMEASURABLE
+        } else {
+            crate::variance::UNRELIABLE
+        };
+        self.note_markers(sc, flag);
         if !self.related_to(tc, sc, rel, report, None) {
             return false;
         }
@@ -2971,6 +3003,9 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return false;
             }
         }
+        if let Some(r) = self.conditional_alias_related(s, t, rel, report) {
+            return r;
+        }
         // Two template literals are comparable unless their leading or trailing texts
         // disagree over the shorter one's length (`foo-${string}` and `${string}-bar`
         // overlap; tsc: relater.go templateLiteralTypesDefinitelyUnrelated).
@@ -2980,6 +3015,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             && let Some(r) = self.templates_maybe_overlap(s, t)
         {
             return r;
+        }
+        // `foo-${number}` relates to `foo-${string}` though `number` doesn't relate to
+        // `string`: a measurement through a template source is unreliable (tsc 7).
+        if tf.contains(TypeFlags::TEMPLATE_LITERAL) && sf.contains(TypeFlags::TEMPLATE_LITERAL) {
+            self.note_markers(s, crate::variance::UNRELIABLE);
         }
         // Non-generic template literal and string mapping targets match by pattern.
         if tf.intersects(TypeFlags::TEMPLATE_LITERAL | TypeFlags::STRING_MAPPING)
@@ -3777,12 +3817,13 @@ impl<'c, 'a> Ck<'c, 'a> {
         if vs.list.len() != sa.len() || sa.len() != ta.len() {
             return None;
         }
-        if self.type_args_related_by_variance(sa, ta, &vs.list, rel, false) {
+        if self.type_args_related_by_variance(sa, ta, &vs, rel, false) {
             return Some(true);
         }
         // When the measurement is unreliable (or a covariant argument is `void`), structure
         // decides what the arguments reject.
-        if vs.unreliable || self.covariant_void_argument(ta, &vs.list) {
+        let fallback = vs.allows_structural_fallback();
+        if fallback || self.covariant_void_argument(ta, &vs.list) {
             let saved = self.rel.report.take();
             let structural = self.structural_related(s, t, rel, false);
             self.rel.report = saved;
@@ -3792,10 +3833,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             if report {
                 // A reliable measurement still explains the failure by the arguments
                 // (`IteratorReturnResult<State>` to `IteratorReturnResult<void>`).
-                if vs.unreliable {
+                if fallback {
                     self.structural_related(s, t, rel, true);
                 } else {
-                    self.type_args_related_by_variance(sa, ta, &vs.list, rel, true);
+                    self.type_args_related_by_variance(sa, ta, &vs, rel, true);
                 }
             }
             return Some(false);
@@ -3810,8 +3851,74 @@ impl<'c, 'a> Ck<'c, 'a> {
             if invariant && !structural {
                 self.structural_related(s, t, rel, true);
             } else {
-                self.type_args_related_by_variance(sa, ta, &vs.list, rel, true);
+                self.type_args_related_by_variance(sa, ta, &vs, rel, true);
             }
+        }
+        Some(false)
+    }
+
+    /// Two instantiations of one conditional type alias (`__Awaited<T>` to `__Awaited<U>`)
+    /// relate by the alias's measured variances before the conditional types are compared
+    /// (tsc 7 probes alias variance for object and conditional types only). `None`: no
+    /// verdict, the conditional types are compared (no measurement, an unmeasurable or
+    /// unreliable one, a covariant `void` argument, or marker instantiations).
+    fn conditional_alias_related(
+        &mut self,
+        s: TypeId,
+        t: TypeId,
+        rel: RelationKind,
+        report: bool,
+    ) -> Option<bool> {
+        use crate::variance::{Variance, VarianceKey};
+        let st = self.store();
+        if !st.flags(s).contains(TypeFlags::CONDITIONAL)
+            || rel == RelationKind::Identity
+            || self.rel.skip_alias_variance == Some((s, t))
+        {
+            return None;
+        }
+        let (a1, a2) = (st.alias_of(s)?, st.alias_of(t)?);
+        if a1.sym != a2.sym || a1.args == ListId::EMPTY {
+            return None;
+        }
+        if self.is_marker_reference(s) || self.is_marker_reference(t) {
+            return None;
+        }
+        let key = VarianceKey::Alias(a1.sym);
+        if self.variance_in_progress(key) {
+            self.rel.maybe_used = true;
+            self.rel.assumed.unknown = true;
+            return Some(true);
+        }
+        let sa = st.list_items(a1.args).to_vec();
+        let ta = st.list_items(a2.args).to_vec();
+        let vs = self.variances_of(key)?;
+        if vs.list.len() != sa.len() || sa.len() != ta.len() {
+            return None;
+        }
+        if self.type_args_related_by_variance(&sa, &ta, &vs, rel, false) {
+            return Some(true);
+        }
+        if vs.allows_structural_fallback() || self.covariant_void_argument(&ta, &vs.list) {
+            return None;
+        }
+        if report {
+            // An invariant parameter is explained through the conditional types when they
+            // fail too; otherwise by the arguments.
+            let invariant = vs.list.contains(&Variance::Invariant);
+            let saved_skip = self.rel.skip_alias_variance.replace((s, t));
+            let structural = invariant && {
+                let saved = self.rel.report.take();
+                let r = self.structured_related(s, t, rel, false);
+                self.rel.report = saved;
+                r
+            };
+            if invariant && !structural {
+                self.structured_related(s, t, rel, true);
+            } else {
+                self.type_args_related_by_variance(&sa, &ta, &vs, rel, true);
+            }
+            self.rel.skip_alias_variance = saved_skip;
         }
         Some(false)
     }
@@ -3871,12 +3978,34 @@ impl<'c, 'a> Ck<'c, 'a> {
         &mut self,
         sa: &[TypeId],
         ta: &[TypeId],
-        vs: &[crate::variance::Variance],
+        vs: &crate::variance::Variances,
         rel: RelationKind,
         report: bool,
     ) -> bool {
-        use crate::variance::Variance;
-        for ((&a, &b), &v) in sa.iter().zip(ta.iter()).zip(vs) {
+        use crate::variance::{UNMEASURABLE, UNRELIABLE, Variance};
+        for (i, ((&a, &b), &v)) in sa.iter().zip(ta.iter()).zip(vs.list.iter()).enumerate() {
+            let f = vs.flags.get(i).copied().unwrap_or(0);
+            if v == Variance::Independent {
+                continue;
+            }
+            // An unmeasurable parameter's arguments relate only when identical (tsc 7:
+            // `typeArgumentsRelatedTo`); the caller falls back to structure.
+            if f & UNMEASURABLE != 0 {
+                let ok = if rel == RelationKind::Identity {
+                    self.related_to(a, b, rel, false, None)
+                } else {
+                    self.is_type_related(a, b, RelationKind::Identity)
+                };
+                if !ok {
+                    return false;
+                }
+                continue;
+            }
+            // A measurement that relates arguments of an unreliable parameter is
+            // unreliable too.
+            if f & UNRELIABLE != 0 {
+                self.note_markers(a, UNRELIABLE);
+            }
             let ok = match v {
                 Variance::Independent => true,
                 Variance::Covariant => self.related_to(a, b, rel, report, None),
