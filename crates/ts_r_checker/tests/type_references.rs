@@ -63,3 +63,39 @@ fn missing_type_references_are_grouped_by_file() {
     );
     assert_eq!(ts2688[1].1, "Cannot find type definition file for 'other'.");
 }
+
+/// tsc 7 drops the include diagnostics of a file it skips checking: an unresolved
+/// `/// <reference types>` in a declaration file under `skipLibCheck` is no TS2688
+/// (`@testing-library/jest-dom`'s `types/jest.d.ts` without `@types/jest`).
+#[test]
+fn skip_lib_check_drops_declaration_file_type_references() {
+    for (skip, expected) in [
+        (true, vec!["/p/a.ts"]),
+        (false, vec!["/p/a.ts", "/p/lib.d.ts"]),
+    ] {
+        let mut fs = MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file("/p/a.ts", "/// <reference types=\"nope\" />\nexport {};\n");
+        fs.add_file(
+            "/p/lib.d.ts",
+            "/// <reference types=\"jest\" />\nexport {};\n",
+        );
+        fs.add_file(
+            "/p/tsconfig.json",
+            &format!(
+                r#"{{"compilerOptions": {{"noLib": true, "types": [], "skipLibCheck": {skip}}}, "files": ["a.ts", "lib.d.ts"]}}"#
+            ),
+        );
+        let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+        let program = load_program(&fs, &cfg.file_names, &cfg.options, None, 1);
+        let result = check_program(&program, CheckRun { threads: 1 });
+        let mut files: Vec<&str> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == 2688)
+            .map(|d| program.files[d.file.0 as usize].path.as_str())
+            .collect();
+        files.sort_unstable();
+        assert_eq!(files, expected, "skipLibCheck: {skip}");
+    }
+}

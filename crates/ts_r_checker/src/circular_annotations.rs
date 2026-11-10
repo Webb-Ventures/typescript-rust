@@ -173,6 +173,12 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.circular.contains(&Resolving::Type(sym)) {
             return;
         }
+        // Marked inside another symbol's cycle through a checked node (a `for`-`of` variable
+        // whose loop narrows the iterated expression): not a cycle of variables.
+        if implicit && !self.type_cycles.contains_key(&sym) && self.node_cycle_types.contains(&sym)
+        {
+            return;
+        }
         let path = self.type_cycles.get(&sym).cloned().unwrap_or_default();
         if !implicit && path.iter().any(|&r| self.is_excused_cycle_step(r)) {
             return;

@@ -647,6 +647,33 @@ impl<'c, 'a> Ck<'c, 'a> {
         })
     }
 
+    /// Whether a type alias's declared type is being resolved with no value type, return
+    /// type or expression check started since: the type nodes met are the alias's own (or
+    /// those of the declarations they name), where a reference to an alias not yet known can
+    /// be deferred. Below such an entry (`type C = z.infer<typeof schema>` checks the
+    /// schema's initializer and the library signatures it calls) the referenced alias is
+    /// resolved on the spot, as tsc does outside type alias declarations
+    /// (tsc: `isResolvedByTypeAlias` in `tsc/internal/checker/checker.go`): a forward
+    /// reference handed out there would read as `any` to every type computed before the
+    /// outer alias finishes, and those types are cached.
+    pub(crate) fn in_alias_declaration_resolution(&self) -> bool {
+        for (r, _) in self.resolving.iter().rev() {
+            match *r {
+                Resolving::DeclaredType(s)
+                    if self.c.sym_flags(s).intersects(SymbolFlags::TYPE_ALIAS) =>
+                {
+                    return true;
+                }
+                Resolving::Type(_)
+                | Resolving::Node(_)
+                | Resolving::Return(_)
+                | Resolving::WriteType(_) => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// Resolves the aliases and type nodes handed out as forward references and links them.
     fn resolve_pending_forwards(&mut self) {
         let mut guard = 0;
@@ -1972,7 +1999,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .c
                 .sym_links(sym)
                 .is_some_and(|l| l.declared.get().is_some());
-            if !known && self.in_alias_resolution() {
+            if !known && self.in_alias_declaration_resolution() {
                 self.pending_forwards.push(sym);
                 return self.store().forward(sym);
             }
