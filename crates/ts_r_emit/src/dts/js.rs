@@ -69,13 +69,13 @@ pub fn unsupported(c: &Checker, file: FileId) -> Option<(Span, &'static str)> {
     }
     // `module.exports = v` alone is written (`export = v`); its `module` is no refusal.
     let export_assignment = commonjs_export_assignment(c, file);
-    let mut allowed_module: Vec<NodeId> = Vec::new();
+    let mut allowed_module: FxHashSet<NodeId> = FxHashSet::default();
     if let Some((stmt, value)) = export_assignment {
         if let Node::ExprStmt { expr } = *ast.node(stmt)
             && let Node::Assign { left, .. } = *ast.node(expr)
             && let Node::Member { obj, .. } = *ast.node(left)
         {
-            allowed_module.push(obj);
+            allowed_module.insert(obj);
         }
         // `module.exports.x = v` adding a member to it (`export_members`).
         let members = export_members(c, file, stmt, value).unwrap_or_default();
@@ -175,11 +175,12 @@ pub(super) fn commonjs_export_assignment(c: &Checker, file: FileId) -> Option<(N
         _ => return None,
     };
     let members = export_members(c, file, st, value)?;
+    let member_modules: FxHashSet<NodeId> = members.iter().map(|m| m.module).collect();
     for raw in 1..=ast.node_count() as u32 {
         let Some(n) = NodeId::from_raw(raw) else {
             continue;
         };
-        if n == module || ast.is_jsdoc(n) || members.iter().any(|m| m.module == n) {
+        if n == module || ast.is_jsdoc(n) || member_modules.contains(&n) {
             continue;
         }
         // `const x = require("m")` is written `import x = require("m")`; the emitter
@@ -249,6 +250,7 @@ pub(super) fn export_members(
         Node::ClassExpr { .. } | Node::FunctionExpr { .. } | Node::Arrow { .. }
     );
     let mut out = Vec::new();
+    let mut names = FxHashSet::default();
     let mut after = false;
     for &s in ast.list(stmts) {
         if s == st {
@@ -280,8 +282,8 @@ pub(super) fn export_members(
         if !is_name(module, "module") || !is_name(exports, "exports") {
             continue;
         }
-        let name = ast.name_of(prop)?.to_owned();
-        let same_local = is_name(right, &name) && local(right);
+        let name = ast.name_of(prop)?;
+        let same_local = is_name(right, name) && local(right);
         let literal = match *ast.node(right) {
             Node::NumberLit { .. } => true,
             Node::StringLit { .. } => {
@@ -294,11 +296,11 @@ pub(super) fn export_members(
         } else {
             !expression_export && (same_local || literal)
         };
-        if !after || !written || out.iter().any(|m: &ExportMember| m.name == name) {
+        if !after || !written || !names.insert(name) {
             return None;
         }
         out.push(ExportMember {
-            name,
+            name: name.to_owned(),
             value: right,
             module,
         });
