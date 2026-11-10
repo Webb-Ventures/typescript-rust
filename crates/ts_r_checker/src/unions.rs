@@ -329,7 +329,23 @@ impl<'a> Checker<'a> {
                 TypeKind::IndexedAccess { obj: o2, index: i2 },
             ) => self
                 .compare_types(o1, o2, depth + 1)
-                .then_with(|| self.compare_types(i1, i2, depth + 1)),
+                .then_with(|| self.compare_types(i1, i2, depth + 1))
+                .then_with(|| match (s.alias_of(a), s.alias_of(b)) {
+                    (Some(p), Some(q)) => self
+                        .sym_name(p.sym)
+                        .cmp(self.sym_name(q.sym))
+                        .then_with(|| self.decl_position(p.sym).cmp(&self.decl_position(q.sym)))
+                        .then_with(|| {
+                            self.compare_lists(
+                                s.list_items(p.args),
+                                s.list_items(q.args),
+                                depth + 1,
+                            )
+                        }),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }),
             (TypeKind::TemplateLiteral(_), TypeKind::TemplateLiteral(_)) => {
                 match (s.template_parts(a), s.template_parts(b)) {
                     (Some((xt, xs)), Some((yt, ys))) => {
@@ -571,7 +587,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             return s.union_with_origin(&set, &items);
         }
         // Enum unions: when every member of an enum is present, the printer collapses them.
-        s.union_sorted(&set, Some(alias))
+        let u = s.union_sorted(&set, Some(alias));
+        // An aliased union written with other named unions remembers them (tsc keeps an
+        // origin next to the alias): narrowing can come back to one of them.
+        if alias != AliasId::NONE
+            && s.alias_of(u).is_some()
+            && let Some(items) = self.union_origin_items(types, &set)
+            && items.len() > 1
+        {
+            s.set_aliased_union_origin(u, &items);
+        }
+        u
     }
 
     /// How a union of `types` (whose members are `set`) was written, when that is shorter:
@@ -1105,8 +1131,21 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             let u = self.union_with(&parts, Reduction::Literal, alias);
             // A distribution that leaves intersections and more pieces than were written
-            // prints as written: `T & (0 | 1 | 2)`, not `(T & 0) | (T & 1) | (T & 2)`.
-            if unions == 1 && alias == AliasId::NONE && s.flags(u).contains(TypeFlags::UNION) {
+            // prints as written: `T & (0 | 1 | 2)`, not `(T & 0) | (T & 1) | (T & 2)`, and
+            // `(A | B) & (C | D)` (tsc: checker.go, getIntersectionTypeEx, which crosses two
+            // members at once and splits three or more in halves first).
+            // Two unions that both carry `undefined` (or `null`) are intersected without it
+            // and then get it back, with no origin.
+            let nullable_unions = unions > 1
+                && set.iter().all(|&t| {
+                    s.members_of_union(t)
+                        .iter()
+                        .any(|&m| s.flags(m).intersects(TypeFlags::NULLABLE))
+                });
+            if (unions == 1 || set.len() == 2 && !nullable_unions)
+                && alias == AliasId::NONE
+                && s.flags(u).contains(TypeFlags::UNION)
+            {
                 let ms = s.members_of_union(u);
                 if ms
                     .iter()
@@ -1581,8 +1620,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // A union with an origin keeps the aliased unions that map to themselves (not an
         // origin that names no member, such as `keyof A`).
-        if let Some(origin) = self.store().union_origin(t)
-            && origin_items_are_members(self.store(), origin, &members)
+        let st = self.store();
+        if let Some(origin) = st.union_origin(t).or_else(|| st.aliased_union_origin(t))
+            && origin_items_are_members(st, origin, &members)
         {
             let origin = origin.to_vec();
             let mut items = Vec::with_capacity(origin.len());
@@ -1633,7 +1673,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // A union with an origin keeps the aliased unions that survive whole
         // (`A | undefined` without `undefined` is `A`).
-        if let Some(origin) = s.union_origin(t)
+        if let Some(origin) = s.union_origin(t).or_else(|| s.aliased_union_origin(t))
             && origin_items_are_members(s, origin, &members)
         {
             let mut items = Vec::with_capacity(origin.len());

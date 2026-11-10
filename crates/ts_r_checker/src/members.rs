@@ -4345,6 +4345,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             let parts: Vec<TypeId> = ms.iter().map(|&m| self.keyof_type(m)).collect();
             return self.union(&parts);
         }
+        // `keyof (T | U)` is `keyof T & keyof U`, generic or not, unless a member is an
+        // intersection that may reduce away (tsc: checker.go, shouldDeferIndexType and
+        // isGenericReducibleType).
+        if f.contains(TypeFlags::UNION)
+            && self.is_generic_type(t)
+            && !s
+                .members_of_union(t)
+                .iter()
+                .any(|&m| s.flags(m).contains(TypeFlags::INTERSECTION))
+        {
+            let ms = s.members_of_union(t).to_vec();
+            let parts: Vec<TypeId> = ms.iter().map(|&m| self.keyof_type(m)).collect();
+            return self.intersection(&parts);
+        }
         if self.is_generic_type(t) {
             return s.index_type(t);
         }

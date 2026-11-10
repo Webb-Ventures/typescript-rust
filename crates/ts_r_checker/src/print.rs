@@ -584,9 +584,17 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             TypeKind::Intersection { list, .. } => {
                 let members = s.list_items(list).to_vec();
+                // Members print at type-operator precedence: `keyof T & keyof U` needs no
+                // parentheses (tsc: printer.go, emitIntersectionTypeConstituent).
                 let parts: Vec<String> = members
                     .iter()
-                    .map(|&m| self.print_wrapped(m, depth + 1, stack, true))
+                    .map(|&m| {
+                        if self.store().flags(m).contains(TypeFlags::INDEX) {
+                            self.print_type(m, depth + 1, stack)
+                        } else {
+                            self.print_wrapped(m, depth + 1, stack, true)
+                        }
+                    })
                     .collect();
                 parts.join(" & ")
             }
@@ -2356,7 +2364,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             for tp in tps {
                 let name = self.print_type(tp, depth + 1, stack);
                 let c = self.type_param_constraint(tp);
-                match c {
+                let mut part = match c {
                     Some(c) => {
                         let cs = match self.written_constraint_text(tp) {
                             Some(w) => w,
@@ -2367,10 +2375,17 @@ impl<'c, 'a> Ck<'c, 'a> {
                                 None => self.print_type(c, depth + 1, stack),
                             },
                         };
-                        parts.push(format!("{name} extends {cs}"));
+                        format!("{name} extends {cs}")
                     }
-                    None => parts.push(name),
+                    None => name,
+                };
+                // A default prints after the constraint (`<A, D extends number = 1>`; tsc:
+                // nodebuilderimpl.go, typeParameterToDeclarationWithConstraint).
+                if let Some(d) = self.type_param_default(tp) {
+                    part.push_str(" = ");
+                    part.push_str(&self.print_type(d, depth + 1, stack));
                 }
+                parts.push(part);
             }
             out.push('<');
             out.push_str(&parts.join(", "));

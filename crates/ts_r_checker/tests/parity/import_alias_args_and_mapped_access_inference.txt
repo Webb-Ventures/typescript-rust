@@ -1,0 +1,3 @@
+a.ts(4,5): error TS2322: Type 'Component' is not assignable to type 'number'.
+a.ts(6,5): error TS2322: Type 'Component<string>' is not assignable to type 'number'.
+a.ts(13,5): error TS2322: Type '{ readonly name: "click"; readonly value: number; }' is not assignable to type 'number'.

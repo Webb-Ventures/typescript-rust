@@ -479,9 +479,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         false
     }
 
-    /// The alias of the type alias whose body is the mapped type node `l`, with its own type
-    /// parameters as arguments.
-    fn declared_alias_of_node(&mut self, l: Loc) -> AliasId {
+    /// The alias of the type alias whose body is the type node `l` (a mapped or conditional
+    /// type), with its own type parameters as arguments.
+    pub(crate) fn declared_alias_of_node(&mut self, l: Loc) -> AliasId {
         let mut cur = l;
         for _ in 0..64 {
             let Some(p) = self.c.parent(cur) else {

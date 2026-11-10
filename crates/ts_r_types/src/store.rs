@@ -511,7 +511,7 @@ enum Key {
     TypeParam(SymId, bool),
     ClonedParam(TypeId, MapperId),
     Index(TypeId),
-    IndexedAccess(TypeId, TypeId),
+    IndexedAccess(TypeId, TypeId, AliasId),
     Substitution(TypeId, TypeId),
     StringMapping(SymId, TypeId),
     Mapped((u32, u32), MapperId, AliasId),
@@ -728,6 +728,11 @@ pub struct TypeStore {
     shadow_vals: ChunkVec<ResolvedMembers>,
     /// Names of the named error types (root store only): type -> printed name.
     error_names: Sharded<TypeId, StrId>,
+    /// The aliases of aliased indexed access types (see [`TypeStore::indexed_access_aliased`]).
+    indexed_aliases: Sharded<TypeId, AliasId>,
+    /// How aliased unions were written, when that names other aliased unions
+    /// (see [`TypeStore::set_aliased_union_origin`]).
+    aliased_union_origins: Sharded<TypeId, ListId>,
 }
 
 impl std::fmt::Debug for TypeStore {
@@ -792,6 +797,8 @@ impl TypeStore {
             shadow_members: Sharded::new(),
             shadow_vals: ChunkVec::new(),
             error_names: Sharded::new(),
+            indexed_aliases: Sharded::new(),
+            aliased_union_origins: Sharded::new(),
         }
     }
 
@@ -1034,7 +1041,8 @@ impl TypeStore {
             Key::ForwardNode(decl) => self.decl_level(decl),
             Key::ForwardNodeArgs(decl, l) => self.decl_level(decl).max(level_of(l.0)),
             Key::Index(t) => Self::lt(t),
-            Key::IndexedAccess(a, b) | Key::Substitution(a, b) => Self::lt(a).max(Self::lt(b)),
+            Key::IndexedAccess(a, b, al) => Self::lt(a).max(Self::lt(b)).max(level_of(al.0)),
+            Key::Substitution(a, b) => Self::lt(a).max(Self::lt(b)),
             Key::StringMapping(s, t) => level_of(s.0).max(Self::lt(t)),
         }
     }
@@ -1546,6 +1554,28 @@ impl TypeStore {
         self.union_sorted(members, Some(oa))
     }
 
+    /// Records how the aliased union `t` was written (`type K = keyof O | "c"` is `"c"` and
+    /// the union `keyof O`). An aliased union keeps its alias slot for the alias, so its
+    /// origin lives here; the first record wins. Used where tsc reads the origin of a union
+    /// that also has an alias (filtering: `K` without `"c"` is `keyof O`).
+    pub fn set_aliased_union_origin(&self, t: TypeId, origin: &[TypeId]) {
+        let list = self.list(origin);
+        let l = level_of(t.0).max(level_of(list.0));
+        self.at(l)
+            .aliased_union_origins
+            .get_or_insert_with(t, || list);
+    }
+
+    /// The origin recorded by [`Self::set_aliased_union_origin`].
+    pub fn aliased_union_origin(&self, t: TypeId) -> Option<&[TypeId]> {
+        for l in (level_of(t.0)..=self.level).rev() {
+            if let Some(list) = self.at(l).aliased_union_origins.get(&t) {
+                return Some(self.list_items(list));
+            }
+        }
+        None
+    }
+
     /// The origin items of a union created by [`Self::union_with_origin`].
     pub fn union_origin(&self, t: TypeId) -> Option<&[TypeId]> {
         match self.kind(t) {
@@ -1613,6 +1643,11 @@ impl TypeStore {
             TypeKind::Conditional(i) => {
                 self.alias_info(self.at(level_of(i)).conds.get(index_of(i)).alias)
             }
+            TypeKind::IndexedAccess { .. } => self
+                .at(level_of(t.0))
+                .indexed_aliases
+                .get(&t)
+                .and_then(|a| self.alias_info(a)),
             _ => None,
         }
     }
@@ -2160,11 +2195,22 @@ impl TypeStore {
     }
 
     pub fn indexed_access(&self, obj: TypeId, index: TypeId) -> TypeId {
-        self.intern(Key::IndexedAccess(obj, index), || TypeData {
+        self.indexed_access_aliased(obj, index, AliasId::NONE)
+    }
+
+    /// `obj[index]` named by a type alias (`type F<T> = { a: T }[K]`): a distinct type from
+    /// the plain access, as tsc keys its indexed access types by alias too. The alias is kept
+    /// in a side table, so [`TypeKind::IndexedAccess`] stays two ids wide.
+    pub fn indexed_access_aliased(&self, obj: TypeId, index: TypeId, alias: AliasId) -> TypeId {
+        let t = self.intern(Key::IndexedAccess(obj, index, alias), || TypeData {
             flags: TypeFlags::INDEXED_ACCESS,
             traits: self.combined_traits(&[obj, index]),
             kind: TypeKind::IndexedAccess { obj, index },
-        })
+        });
+        if alias != AliasId::NONE {
+            self.at(level_of(t.0)).indexed_aliases.insert(t, alias);
+        }
+        t
     }
 
     pub fn substitution(&self, base: TypeId, constraint: TypeId) -> TypeId {

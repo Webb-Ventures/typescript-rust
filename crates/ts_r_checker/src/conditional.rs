@@ -390,10 +390,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let members = s.members_of_union(dist).to_vec();
                 let mut parts = Vec::with_capacity(members.len());
                 let mut a2 = args.clone();
+                // A piece left deferred is named by the alias declared with the conditional,
+                // its arguments instantiated for that piece (`ChannelOfType<T, EmailChannel>`;
+                // tsc: checker.go, getConditionalType names a deferred result by the root's
+                // alias when none is given).
+                let root_alias = match Loc::unpack(root.decl) {
+                    Some(l) => self.declared_alias_of_node(l),
+                    None => AliasId::NONE,
+                };
                 for mem in members {
                     a2[i] = mem;
                     let mm = self.canonical_mapper(&outer, &a2);
-                    parts.push(self.get_conditional_type(d.root, mm, AliasId::NONE));
+                    let piece_alias = self.instantiate_alias(root_alias, mm);
+                    parts.push(self.get_conditional_type(d.root, mm, piece_alias));
                 }
                 // The union of the distributed results carries no alias (tsc prints
                 // `"b" | "c"` for `Exclude<"a" | "b" | "c", "a">`).

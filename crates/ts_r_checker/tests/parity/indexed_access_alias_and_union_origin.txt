@@ -1,0 +1,7 @@
+a.ts(5,1): error TS2322: Type '"z"' is not assignable to type 'Fields<{ a: "x"; b: "y"; }>'.
+a.ts(8,1): error TS2322: Type '"z"' is not assignable to type 'G<{ a: "x"; b: "y"; }>'.
+a.ts(11,1): error TS2322: Type '"z"' is not assignable to type '"w" | "x"'.
+a.ts(15,5): error TS2322: Type 'number[]' is not assignable to type 'number'.
+a.ts(22,9): error TS2367: This comparison appears to be unintentional because the types 'keyof O' and '"c"' have no overlap.
+a.ts(28,5): error TS2367: This comparison appears to be unintentional because the types 'keyof O' and '"c"' have no overlap.
+a.ts(33,5): error TS2322: Type '<A, D extends number = 1, E = string>(a: A, d?: D | undefined) => E' is not assignable to type 'number'.
