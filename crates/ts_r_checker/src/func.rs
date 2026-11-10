@@ -2125,7 +2125,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// parameters may be contextually typed).
     pub fn check_function_expr(&mut self, e: Loc) -> TypeId {
         if !self.placeholder_fns.is_empty() && self.placeholder_fns.contains(&e) {
-            return TypeId::ANY;
+            return self.placeholder_fn_type;
         }
         // Under loop assumptions the contextual parameter types may rest on pending flow
         // types (`Array.from(g).some(x => ...)` while `g`'s walk is open): nothing is kept.

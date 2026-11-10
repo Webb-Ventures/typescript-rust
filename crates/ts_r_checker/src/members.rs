@@ -1498,8 +1498,12 @@ impl<'c, 'a> Ck<'c, 'a> {
             };
             for part in parts {
                 let bm = self.resolved_members(part);
-                let entries: Vec<(StrId, SymId)> =
-                    bm.names.iter().copied().zip(bm.props.iter().copied()).collect();
+                let entries: Vec<(StrId, SymId)> = bm
+                    .names
+                    .iter()
+                    .copied()
+                    .zip(bm.props.iter().copied())
+                    .collect();
                 for (n, p) in entries {
                     // A name several parts declare is the intersection's property (its
                     // parts decide accessibility: `extends Mix(Protected, Protected2)`).

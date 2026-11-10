@@ -1164,6 +1164,52 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
     }
 
+    /// TS1009 at the trailing comma of every type argument list of a TypeScript file
+    /// without syntax errors (`f<number,>()`, `Array<number,>`, `<C<number,> />`; tsc:
+    /// `checkGrammarTypeArguments` in `grammarchecks.go`).
+    pub(crate) fn check_type_arg_trailing_commas(&mut self, file: ts_r_diagnostics::FileId) {
+        if self.c.file(file).is_js() || self.has_syntax_errors(file) {
+            return;
+        }
+        let ast = self.ast(file);
+        let lists: Vec<NodeId> = (1..=ast.node_count() as u32)
+            .filter_map(NodeId::from_raw)
+            .filter(|&n| matches!(ast.node(n), Node::TypeArgs { .. }))
+            .collect();
+        for n in lists {
+            self.check_type_args_trailing_comma(Loc::new(file, n));
+        }
+    }
+
+    fn check_type_args_trailing_comma(&mut self, l: Loc) {
+        use ts_r_lexer::{Lexer, TokenKind};
+        let ast = self.ast(l.file);
+        let Node::TypeArgs { args } = *ast.node(l.node) else {
+            return;
+        };
+        let Some(&last) = ast.list(args).last() else {
+            return;
+        };
+        let end = self.c.span(Loc::new(l.file, last)).end;
+        let text = &self.c.file(l.file).text;
+        let mut lexer = Lexer::new(text);
+        lexer.seek(end);
+        if lexer.next_token() != TokenKind::Comma {
+            return;
+        }
+        let comma = lexer.token().span().start;
+        lexer.next_token();
+        let next = lexer.token().span().start as usize;
+        if text.as_bytes().get(next) == Some(&b'>') {
+            self.error_span(
+                l.file,
+                Span::new(comma, comma + 1),
+                dg::TRAILING_COMMA_NOT_ALLOWED_1009,
+                &[],
+            );
+        }
+    }
+
     /// The effective arguments (spreads of tuples expanded).
     fn effective_args(&mut self, e: Loc, args: Args) -> Vec<Arg> {
         let ast = self.ast(e.file);
@@ -1632,7 +1678,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// The context-sensitive functions in the property values and elements of an object or
     /// array literal argument (not the argument itself).
-    fn nested_sensitive_fns(&self, l: Loc, depth: u32, out: &mut Vec<Loc>) {
+    pub(crate) fn nested_sensitive_fns(&self, l: Loc, depth: u32, out: &mut Vec<Loc>) {
         if depth > 8 || out.len() > 64 {
             return;
         }
@@ -1697,7 +1743,7 @@ impl<'c, 'a> Ck<'c, 'a> {
 
     /// Whether `l` is a function expression or arrow (in parentheses or not) with
     /// unannotated parameters.
-    fn is_context_sensitive_fn_arg(&self, l: Loc) -> bool {
+    pub(crate) fn is_context_sensitive_fn_arg(&self, l: Loc) -> bool {
         let ast = self.ast(l.file);
         let n = crate::nodes::skip_parens(ast, l.node);
         matches!(ast.node(n), Node::Arrow { .. } | Node::FunctionExpr { .. })
@@ -1869,7 +1915,7 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// TS2558 / TS2743 for a call whose `n` type arguments no signature takes. One signature:
     /// its range. Overloads: the nearest counts below and above `n`; both present gives
     /// TS2743, otherwise TS2558 names whichever exists.
-    fn report_type_arg_arity_error(
+    pub(crate) fn report_type_arg_arity_error(
         &mut self,
         file: ts_r_diagnostics::FileId,
         ta: NodeId,
@@ -4089,6 +4135,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let ctx = self.first_context_of(l, sig).unwrap_or(pt);
                     let saved =
                         std::mem::replace(&mut self.placeholder_fns, nested.into_iter().collect());
+                    let saved_ty = std::mem::replace(&mut self.placeholder_fn_type, TypeId::ANY);
                     self.push_assumptions();
                     self.enter_speculation();
                     self.no_report += 1;
@@ -4097,6 +4144,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.leave_speculation();
                     self.pop_assumptions();
                     self.placeholder_fns = saved;
+                    self.placeholder_fn_type = saved_ty;
                     t
                 }
                 (Arg::Expr(n), None) => {
@@ -4119,6 +4167,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // A spread of unknown length into fixed parameters passed the arity check
                 // (it starts past the required ones): its elements meet this parameter.
                 (Arg::Elem(_, t) | Arg::Rest(_, t), _) => t,
+            };
+            // While context-sensitive arguments are left out, an object literal is related
+            // without its excess property check: its types are not all known yet (tsc:
+            // `isSignatureApplicable` in `checker.go` takes the regular object literal type).
+            let at = if matches!(pass, ArgPass::Skip(_)) {
+                self.regular_object_literal(at)
+            } else {
+                at
             };
             if tuple_ctx.is_some() {
                 let et = self.rest_arg_element_type(at, pt);
@@ -4163,6 +4219,19 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         None
+    }
+
+    /// The non-fresh twin of a fresh object literal type (no excess property check); any
+    /// other type as it is.
+    pub(crate) fn regular_object_literal(&self, t: TypeId) -> TypeId {
+        let s = self.store();
+        if s.object_of(t)
+            .is_some_and(|o| o.flags.contains(ts_r_types::ObjectFlags::FRESH_LITERAL))
+        {
+            s.regular(t)
+        } else {
+            t
+        }
     }
 
     /// The type of `sig`'s rest parameter when it is not an array or tuple (nor `any`, an

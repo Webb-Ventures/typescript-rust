@@ -178,6 +178,51 @@ Files, by layer:
   case; `program.rs` loads it like an import). `unused.rs` counts no JSX factory as used
   under the automatic runtime, an `@jsx` pragma's root in place of the options', and an
   `@jsxFrag` root only in files with fragments.
+- JSX resolution as a call (design note, parity/checker-gap-7). The rules came from reading
+  tsc's `jsx.go` (`resolveJsxOpeningLikeElement`, `getUninstantiatedJsxSignaturesOfType`,
+  `elaborateJsxComponents`), `checker.go` (`chooseOverload`, `isSignatureApplicable`,
+  `reportCallResolutionErrors`), `relater.go` (`elaborateIterableOrArrayLikeTargetElementwise`)
+  and `grammarchecks.go` (`checkGrammarTypeArguments`); the code is our own.
+  - Overloads take two passes per candidate. First the context-sensitive functions in the
+    attributes and children stand in as `(...args: any[]) => any` (`placeholder_fn_type`),
+    and the attributes are compared as a regular (non-fresh) object, so no excess check.
+    The first candidate that gets past that pass fixes those functions' contextual types
+    (`fixed_arg_contexts`, kept in the resolution cache so a cache hit sets them again).
+    Only then do the full attributes get checked. When every candidate fails, the
+    functions are fixed to the last candidate's props. The call path's skip pass also
+    compares a fresh object argument as regular (`regular_object_literal`). Ordinary-call
+    probes save and restore the placeholder type along with the function set, using `any`
+    for their own functions even when nested inside a JSX probe.
+  - Generic components infer from the attributes typed in the context of the generic
+    props. Suppose the remaining type parameters are only ones the props are made of
+    (naked) and only the context-sensitive attributes infer them. A lone candidate then
+    gets a second pass: the functions are fixed to the props instantiated with what has
+    been inferred so far, then every attribute infers again. Any other shape is not
+    modelled (`jsx_instantiate` returns `None`).
+  - Type arguments: on an intrinsic tag they are TS2558 "Expected 0". The wrong count for
+    every signature is TS2558 over the list, and a constraint failure on every candidate
+    is TS2344. A trailing comma before `>` is TS1009 in any type argument list
+    (`check_type_arg_trailing_commas`).
+  - Tags: a string literal inside a union tag is a fake intrinsic signature
+    `(props) => JSX.Element`. An unknown name in the union is TS2339 at the element, and
+    the union then has no signatures (TS2604). Without `IntrinsicElements` it is not
+    checked. A generic tag goes through its constraint. One string (`T extends "div"`,
+    `T extends string`) has `String` as its apparent type, which is TS2604. A string union
+    resolves to the intrinsic signatures, with `LibraryManagedAttributes<Tag, P>`
+    deferred on the tag.
+  - Children: each child is related to the element type of the array and tuple members
+    at its index (nothing past a tuple's end), joined with the iterated type of the other
+    iterable members. Under `exactOptionalPropertyTypes` the missing type is dropped from
+    the target. The whole props are elaborated before a member is picked for the report.
+  - `IntrinsicElements` index signatures keyed by template literals that fit the tag win
+    over its `string` index (`name_pattern_index_info`).
+  - Excess attributes `class` and `for` suggest `className` and `htmlFor` when the props
+    have them, before the spelling suggestion (tsc: `getSuggestedSymbolForNonexistentJSXAttribute`).
+  - Relations: a concrete source does not relate to a conditional with `infer`
+    parameters whose check type is instantiable. tsc never tries the branches there. A
+    conditional resolved eagerly by tsc but deferred here (a non-generic check type) is
+    still compared permissively. Inference from a type parameter whose constraint is a
+    union goes member by member (`infer.rs`).
 - Narrowing: `flow.rs` (backward flow walk, typeof/truthiness/equality/instanceof/`in`/
   discriminant/type-guard/asserts narrowing, `switch (true)`, definite assignment).
   `typeof x === "string"` turns an object member the primitive (or `Function`) is
@@ -3645,12 +3690,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, babed30, parity/checker-gap-6: heritage checks and relations;
+  Current (2026-11-08, parity/checker-gap-7: JSX overloads, inference, tags and children;
   12750 compared variants):
-  12489 exact (98.0%; all diagnostics and chains), 12509 (98.1%) exact on first lines;
-  126 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  12501 exact (98.0%; all diagnostics and chains), 12521 (98.2%) exact on first lines;
+  118 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12489, 126 and 4 (babed30, parity/checker-gap-6); 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3709,15 +3754,30 @@ and integration tests allow: they link the one library build).
 - Printing: tsc 7 drops `| undefined` from optional properties of a function expression's
   own annotated parameter (`(x: { a?: 1 } = {}) => x` prints `{ a?: 1; }`); we don't.
   (`?` parameters print `x?: T | undefined`, initialized ones `x?: T`, as tsc does.)
-- JSX (`jsx_check.rs`): generic components whose props are indexed access or conditional
-  types, or whose type parameters only context-sensitive attributes infer (tsc's second
-  inference pass), are not checked; TS2558 on JSX type arguments,
-  template-literal index signatures on `IntrinsicElements`, the TS2786 chain layering,
-  TS2604 for union tags. TS2698 and TS2783 are reported for JSX spreads only, not for
-  object literal spreads. JSX attributes have synthetic symbols without a declared prop
-  behind them, so the language server finds no symbol for `<form onSubmit>`. Evolving arrays
+- JSX (`jsx_check.rs`). These generic components are not checked:
+  - ones whose props are indexed access or conditional types;
+  - ones whose type parameters are left to the functions' own inferences (intra-expression
+    inference);
+  - ones whose props are mapped over a type parameter. Reverse mapped contexts in
+    attributes are not modelled, so `<C a={{ v: 1, f: x => .. }} />` with
+    `C<T>(p: { [K in keyof T]: Box<T[K]> })` leaves `x` unchecked, where the call form is
+    checked.
+
+  Other JSX gaps:
+  - The TS2786 chain layering (`jsxComponentTypeErrors`).
+  - React's `Defaultize` default-props inference for generic class components
+    (`reactDefaultPropsInferenceSuccess`).
+  - Generic spread sources against a deferred `LibraryManagedAttributes<Tag, P>`, which
+    are still permissive.
+  - Some printing: `JSX.Element` in tuple children, `IntrinsicClassAttributes<T>` with
+    the type argument uninstantiated, and the parentheses tsc keeps in a props
+    intersection (`tsxSpreadAttributesResolution6`).
+
+  The checker's JSX attribute symbols have no declared prop behind them. The language
+  server resolves an attribute through `jsx_props_type` instead (ts_r_lsp `locate.rs`).
+- Evolving arrays
   in JavaScript files, TS7005 for closures created after conditional assignments of an auto
-  variable, reverse mapped contexts in JSX attributes (treated as unknown), `this` parameter checks, modifier order outside classes
+  variable, `this` parameter checks, modifier order outside classes
   (`declare export`, `out in`), TS2729 through the computed names of object-literal
   accessors.
 - Heritage (parity/checker-gap-6 left): TS2310 is not reported for a class whose `extends`

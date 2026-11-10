@@ -1,0 +1,6 @@
+a.tsx(14,45): error TS2322: Type '(a: { x: string; }) => string' is not assignable to type '((a: { x: string; }) => string) & ((cur: { x: string; }) => { x: string; })'.
+  Type '(a: { x: string; }) => string' is not assignable to type '(cur: { x: string; }) => { x: string; }'.
+    Type 'string' is not assignable to type '{ x: string; }'.
+a.tsx(21,29): error TS2322: Type '(s: number) => string' is not assignable to type 'number | ((state: number) => number)'.
+  Type '(s: number) => string' is not assignable to type '(state: number) => number'.
+    Type 'string' is not assignable to type 'number'.

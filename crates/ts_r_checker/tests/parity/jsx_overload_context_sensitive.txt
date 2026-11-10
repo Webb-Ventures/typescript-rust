@@ -1,0 +1,11 @@
+a.tsx(7,24): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '{ onClick: (k: "left" | "right") => void; extra: true; }' is not assignable to type 'IntrinsicAttributes & LinkProps'.
+      Property 'onClick' does not exist on type 'IntrinsicAttributes & LinkProps'.
+a.tsx(11,4): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Object literal may only specify known properties, and 'onClick' does not exist in type 'LinkProps'.
+a.tsx(12,56): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Type '{ onClick: (k: "left" | "right") => void; extra: true; }' is not assignable to type 'IntrinsicAttributes & LinkProps'.
+      Property 'extra' does not exist on type 'IntrinsicAttributes & LinkProps'.

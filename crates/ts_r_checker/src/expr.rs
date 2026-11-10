@@ -4182,9 +4182,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             return false;
         };
         if modifiers.intersects(
-            ts_r_ast::Modifiers::STATIC | ts_r_ast::Modifiers::ABSTRACT | ts_r_ast::Modifiers::DECLARE,
-        )
-            || self.is_ambient_node(vd)
+            ts_r_ast::Modifiers::STATIC
+                | ts_r_ast::Modifiers::ABSTRACT
+                | ts_r_ast::Modifiers::DECLARE,
+        ) || self.is_ambient_node(vd)
             || self.contains_undefined(t)
         {
             return false;

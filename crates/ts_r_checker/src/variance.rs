@@ -142,7 +142,9 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         }
         let (sub, sup, other) = self.variance_markers();
-        if (self.type_mentions(x, sub) || self.type_mentions(x, sup) || self.type_mentions(x, other))
+        if (self.type_mentions(x, sub)
+            || self.type_mentions(x, sup)
+            || self.type_mentions(x, other))
             && let Some(p) = self.rel.probe.as_mut()
         {
             p.flags |= flag;
@@ -154,7 +156,12 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// so its comparison is unreliable (tsc: `getNonArrayRestType` in
     /// `compareSignaturesRelated`).
     pub(crate) fn note_unmeasurable_rest(&mut self, sig: ts_r_types::SigId) {
-        if self.rel.probe.as_ref().is_none_or(|p| p.flags & UNRELIABLE != 0) {
+        if self
+            .rel
+            .probe
+            .as_ref()
+            .is_none_or(|p| p.flags & UNRELIABLE != 0)
+        {
             return;
         }
         let st = self.store();

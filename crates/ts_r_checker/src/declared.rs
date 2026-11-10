@@ -2118,7 +2118,8 @@ impl<'c, 'a> Ck<'c, 'a> {
         // the union read through a union of keys), and the enclosing alias replaces it.
         if f.contains(TypeFlags::INDEXED_ACCESS) {
             return s.alias_of(t).is_some()
-                && s.flags(t).intersects(TypeFlags::UNION | TypeFlags::INDEXED_ACCESS);
+                && s.flags(t)
+                    .intersects(TypeFlags::UNION | TypeFlags::INDEXED_ACCESS);
         }
         if let Some(cd) = s.conditional_data(d) {
             // A branch type the conditional resolves to keeps its own name (`type V =

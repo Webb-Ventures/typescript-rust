@@ -32,13 +32,22 @@
 //!   for classes) in that order, when declared.
 //! - **Overloads**: the first signature whose props the attributes satisfy (a subtype pass,
 //!   then an assignability pass, as for calls); when none does, the last one's errors are
-//!   reported under TS2769 "The last overload gave the following error.".
+//!   reported under TS2769 "The last overload gave the following error.". Each candidate
+//!   first sees its context-sensitive functions as `(...args: any[]) => any` and its
+//!   attributes without the excess check; the first to pass that fixes the functions'
+//!   contextual types (the last candidate when none does).
 //! - **Arity**: under the classic factory, a function component whose every call signature
 //!   needs more arguments than any function-component parameter of the factory's
 //!   overloads takes (`(props, context?)`: two) is TS6229 at the tag, and its attributes
 //!   are not checked. A rest parameter there accepts any arity.
 //! - **Generic components** infer their type arguments from the attributes that are not
-//!   context sensitive; explicit type arguments of the wrong count are TS2558.
+//!   context sensitive, typed in the context of the generic props; a lone candidate whose
+//!   naked type parameters only context-sensitive attributes infer gets a second pass.
+//!   Explicit type arguments of the wrong count are TS2558 (any on an intrinsic tag),
+//!   failing constraints TS2344, a trailing comma TS1009.
+//! - **Union and generic tags**: a string literal member is an intrinsic signature (an
+//!   unknown one is TS2339 at the element, then TS2604); a type parameter goes through its
+//!   constraint, and one constrained to a single string is TS2604.
 //! - **Children** are an attribute when `JSX.ElementChildrenAttribute` names one (always
 //!   `children` under the automatic runtime): one child is its type, several an array of
 //!   their union. Whitespace-only text containing a line break is not a child; text is
@@ -86,6 +95,14 @@ pub(crate) struct JsxResolved {
     /// The tag is a union resolved through its members' combined signatures: its return
     /// is checked against `JSX.Element | null | JSX.ElementClass`.
     pub mixed: bool,
+    /// The contexts overload resolution fixed for context-sensitive functions in the
+    /// attributes (restored with a cached resolution: the fixed contexts are per file).
+    pub fixed: Vec<(Loc, Option<TypeId>)>,
+    /// Explicit type arguments no signature takes (TS2558; the attributes are not checked).
+    pub type_arg_arity: Option<Vec<SigId>>,
+    /// The candidate whose constraints the explicit type arguments fail (TS2344; the
+    /// attributes are not checked).
+    pub type_arg_constraint: Option<(SigId, Vec<TypeId>)>,
 }
 
 /// Per-file facts about JSX.
@@ -111,6 +128,10 @@ pub(crate) struct JsxState {
     pub resolved: FxHashMap<Loc, JsxResolved>,
     /// Props types assumed for openings while their candidates are tried (innermost last).
     pub assumed: Vec<(Loc, TypeId)>,
+    /// `(...args: any[]) => any`: what a context-sensitive function in the attributes
+    /// reads as while candidates are tried without them (tsc's `anyFunctionType`, a
+    /// subtype of every function type).
+    pub any_fn: Option<TypeId>,
 }
 
 impl<'c, 'a> Ck<'c, 'a> {
@@ -343,6 +364,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         if let Some(p) = self.property_of_type(ie, tag) {
             return Ok(self.type_of_symbol(p));
         }
+        // Index signatures keyed by template literals the tag fits (their values
+        // intersected) win over a `string` one (tsc: `getApplicableIndexInfoForName`).
+        if let Some(i) = self.name_pattern_index_info(ie, tag) {
+            return Ok(i.value);
+        }
         match self.index_info_of(ie, TypeId::STRING) {
             Some(i) => Ok(i.value),
             None => Err(false),
@@ -395,12 +421,23 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// The resolution of `opening` (computed quietly; cached outside speculation).
     pub(crate) fn jsx_resolved(&mut self, opening: Loc) -> JsxResolved {
         if let Some(r) = self.jsx.resolved.get(&opening) {
-            return r.clone();
+            let r = r.clone();
+            for &(f, c) in &r.fixed {
+                self.fixed_arg_contexts.entry(f).or_insert(c);
+            }
+            return r;
         }
         if !self.push_resolution(Resolving::Node(opening)) {
             return JsxResolved::default();
         }
-        let r = self.quietly(|ck| ck.resolve_jsx(opening));
+        let mut r = self.quietly(|ck| ck.resolve_jsx(opening));
+        if r.sig.is_some() {
+            r.fixed = self
+                .jsx_sensitive_fns(opening, r.target.children)
+                .into_iter()
+                .filter_map(|f| self.fixed_arg_contexts.get(&f).map(|&c| (f, c)))
+                .collect();
+        }
         let circular = !self.pop_resolution();
         if self.speculative == 0 && !circular {
             self.jsx.resolved.insert(opening, r.clone());
@@ -462,7 +499,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             r.target.props = self.jsx_intrinsic_props(ns, &text).ok();
             return r;
         }
-        let Some((sigs, construct)) = self.jsx_signatures(tt) else {
+        let Some((sigs, construct)) = self.jsx_signatures(tt, ns) else {
             return r;
         };
         if sigs.is_empty() {
@@ -499,10 +536,32 @@ impl<'c, 'a> Ck<'c, 'a> {
             })
             .collect();
         if candidates.is_empty() {
+            if explicit.as_ref().is_some_and(|x| !x.is_empty()) {
+                r.type_arg_arity = Some(sigs);
+            }
             return r;
         }
+        // Explicit type arguments must satisfy the candidate's constraints; a candidate
+        // that fails is not tried against the attributes (as for calls).
+        let mut candidates = candidates;
+        if let Some(ex) = explicit.as_ref().filter(|x| !x.is_empty()) {
+            let mut failed = None;
+            candidates.retain(|&c| {
+                let ok = self
+                    .type_args_satisfy_constraints(c, ex, None)
+                    .is_none_or(|ok| ok);
+                if !ok {
+                    failed = Some(c);
+                }
+                ok
+            });
+            if candidates.is_empty() {
+                r.type_arg_constraint = failed.map(|c| (c, ex.clone()));
+                return r;
+            }
+        }
         if let [s] = candidates[..] {
-            let Some(inst) = self.jsx_instantiate(opening, s, construct, explicit.as_deref())
+            let Some(inst) = self.jsx_instantiate(opening, s, construct, explicit.as_deref(), true)
             else {
                 return r;
             };
@@ -512,10 +571,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let relations = [RelationKind::Subtype, RelationKind::Assignable];
         let mut last = None;
+        // Context-sensitive functions in the attributes (and children) are left out until a
+        // candidate fits the rest: that candidate fixes their parameter types for every
+        // later one, as for calls (`resolve_call_inner`).
+        let sensitive = self.jsx_sensitive_fns(opening, r.target.children);
+        for f in &sensitive {
+            self.fixed_arg_contexts.remove(f);
+        }
         for rel in relations {
             for &cand in &candidates {
                 let Some(inst) =
-                    self.jsx_instantiate(opening, cand, construct, explicit.as_deref())
+                    self.jsx_instantiate(opening, cand, construct, explicit.as_deref(), false)
                 else {
                     return r;
                 };
@@ -524,6 +590,31 @@ impl<'c, 'a> Ck<'c, 'a> {
                     return r;
                 };
                 last = Some((inst, props));
+                let unfixed: Vec<Loc> = sensitive
+                    .iter()
+                    .copied()
+                    .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                    .collect();
+                if !unfixed.is_empty() {
+                    let saved = std::mem::replace(
+                        &mut self.placeholder_fns,
+                        unfixed.iter().copied().collect(),
+                    );
+                    let any_fn = self.jsx_any_fn();
+                    let saved_ty = std::mem::replace(&mut self.placeholder_fn_type, any_fn);
+                    let attrs = self.jsx_attributes_under(opening, props, r.target.children);
+                    self.placeholder_fns = saved;
+                    self.placeholder_fn_type = saved_ty;
+                    let Some(attrs) = attrs else {
+                        return r;
+                    };
+                    // Without its excess property check (tsc: `isSignatureApplicable`).
+                    let attrs = self.regular_object_literal(attrs);
+                    if !self.is_type_related(attrs, props, rel) {
+                        continue;
+                    }
+                    self.jsx_fix_contexts(opening, props, &unfixed);
+                }
                 let attrs = self.jsx_attributes_under(opening, props, r.target.children);
                 let Some(attrs) = attrs else {
                     return r;
@@ -536,11 +627,107 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         if let Some((inst, props)) = last {
+            // The last candidate's error check fixes the functions still open.
+            let unfixed: Vec<Loc> = sensitive
+                .iter()
+                .copied()
+                .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                .collect();
+            self.jsx_fix_contexts(opening, props, &unfixed);
             r.sig = Some((inst, construct));
             r.target.props = Some(props);
             r.no_overload = true;
         }
         r
+    }
+
+    /// The context-sensitive functions among `opening`'s attribute values, in the object
+    /// and array literals of its values and spreads, and among its children when they are
+    /// an attribute.
+    fn jsx_sensitive_fns(&self, opening: Loc, children: Option<StrId>) -> Vec<Loc> {
+        let file = opening.file;
+        let ast = self.ast(file);
+        let Node::JsxOpening { attrs, .. } = *ast.node(opening.node) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let visit = |ck: &Self, x: NodeId, out: &mut Vec<Loc>| {
+            let l = Loc::new(file, x);
+            if ck.is_context_sensitive_fn_arg(l) {
+                out.push(Loc::new(file, crate::nodes::skip_parens(ast, x)));
+            } else {
+                ck.nested_sensitive_fns(l, 0, out);
+            }
+        };
+        for &a in ast.list(attrs) {
+            match *ast.node(a) {
+                Node::JsxAttr { value: Some(v), .. } => {
+                    if let Node::JsxExprContainer { expr: Some(x) } = *ast.node(v) {
+                        visit(self, x, &mut out);
+                    }
+                }
+                Node::JsxSpreadAttr { arg } => visit(self, arg, &mut out),
+                _ => {}
+            }
+        }
+        if children.is_some()
+            && let Some(el) = self.c.parent(opening)
+            && let Node::JsxElement { children: list, .. } = *ast.node(el.node)
+        {
+            for &c in ast.list(list) {
+                if let Node::JsxExprContainer { expr: Some(x) } = *ast.node(c) {
+                    visit(self, x, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// `JsxState::any_fn`.
+    fn jsx_any_fn(&mut self) -> TypeId {
+        if let Some(t) = self.jsx.any_fn {
+            return t;
+        }
+        let rest = self.create_array(TypeId::ANY, false);
+        let name = self.store().intern_str("args");
+        let sig = ts_r_types::Signature::new(
+            ts_r_types::SigFlags::HAS_REST,
+            None,
+            ListId::EMPTY,
+            vec![ts_r_types::Param {
+                name,
+                ty: rest,
+                optional: false,
+                sym: SymId::NONE,
+            }],
+            None,
+            0,
+            Some(TypeId::ANY),
+        );
+        let sig = self.store().add_signature(sig);
+        let t = self.store().literal_object(
+            SymId::NONE,
+            ts_r_types::ObjectFlags::ANONYMOUS,
+            ts_r_types::ResolvedMembers::new(Vec::new(), vec![sig], Vec::new(), Vec::new()),
+            ts_r_types::TypeTraits::NONE,
+        );
+        self.jsx.any_fn = Some(t);
+        t
+    }
+
+    /// Fixes the contexts of the functions `fns` to the ones they have with `props` assumed
+    /// for `opening`.
+    fn jsx_fix_contexts(&mut self, opening: Loc, props: TypeId, fns: &[Loc]) {
+        if fns.is_empty() {
+            return;
+        }
+        self.jsx.assumed.push((opening, props));
+        let fixed: Vec<(Loc, Option<TypeId>)> =
+            fns.iter().map(|&f| (f, self.contextual_type(f))).collect();
+        self.jsx.assumed.pop();
+        for (f, c) in fixed {
+            self.fixed_arg_contexts.insert(f, c);
+        }
     }
 
     /// The signatures a value tag of type `tt` is resolved against, and whether they are
@@ -550,7 +737,11 @@ impl<'c, 'a> Ck<'c, 'a> {
     /// (props are the first parameter; tsc: `getUninstantiatedJsxSignaturesOfType` in
     /// `tsc/internal/checker/jsx.go`). `None` when not modelled (a string or instantiable
     /// member); an empty list is TS2604.
-    pub(crate) fn jsx_signatures(&mut self, tt: TypeId) -> Option<(Vec<SigId>, bool)> {
+    pub(crate) fn jsx_signatures(
+        &mut self,
+        tt: TypeId,
+        ns: Option<SymId>,
+    ) -> Option<(Vec<SigId>, bool)> {
         let construct = self.signatures_of(tt, SigKind::Construct);
         if !construct.is_empty() {
             return Some((construct, true));
@@ -559,13 +750,47 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !call.is_empty() {
             return Some((call, false));
         }
-        let at = self.apparent_type(tt);
+        let at = if self.store().flags(tt).contains(TypeFlags::UNION) {
+            tt
+        } else {
+            self.apparent_type(tt)
+        };
         if !self.store().flags(at).contains(TypeFlags::UNION) {
             return Some((Vec::new(), false));
         }
         let members = self.store().members_of_union(at).to_vec();
         let mut lists = Vec::with_capacity(members.len());
         for m in members {
+            // A string literal member is an intrinsic tag: a signature taking its props
+            // (none for an unknown tag, which leaves the union without signatures).
+            if self.store().flags(m).contains(TypeFlags::STRING_LITERAL)
+                && let Some(text) = self.literal_text(m)
+            {
+                let props = match self.jsx_intrinsic_props(ns, &text) {
+                    Ok(p) => p,
+                    // No `JSX.IntrinsicElements`: any props, nothing to check.
+                    Err(true) => return None,
+                    Err(false) => return Some((Vec::new(), false)),
+                };
+                let ret = self.jsx_ns_type(ns, "Element").unwrap_or(TypeId::ANY);
+                let name = self.store().intern_str("props");
+                let sig = ts_r_types::Signature::new(
+                    ts_r_types::SigFlags::NONE,
+                    None,
+                    ListId::EMPTY,
+                    vec![ts_r_types::Param {
+                        name,
+                        ty: props,
+                        optional: false,
+                        sym: SymId::NONE,
+                    }],
+                    None,
+                    1,
+                    Some(ret),
+                );
+                lists.push(vec![self.store().add_signature(sig)]);
+                continue;
+            }
             if self.store().flags(m).intersects(
                 TypeFlags::STRING_LIKE
                     | TypeFlags::ANY
@@ -575,6 +800,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             ) {
                 return None;
             }
+            let m = self.apparent_type(m);
             let mut sigs = self.signatures_of(m, SigKind::Construct);
             if sigs.is_empty() {
                 sigs = self.signatures_of(m, SigKind::Call);
@@ -603,15 +829,20 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     /// Instantiates a generic candidate with explicit type arguments or ones inferred from
-    /// the attributes that are not context sensitive. `None` when the inference is not
-    /// modelled: props that are not plain object types (indexed access, conditional types)
-    /// or a type parameter only context-sensitive values could infer.
+    /// the attributes that are not context sensitive. When a type parameter is left to the
+    /// context-sensitive ones (or the props are a naked type parameter, inferred from the
+    /// whole attributes object), `second_pass` (a lone candidate) fixes their functions'
+    /// contexts to the props instantiated with the inferences so far and infers again from
+    /// all attributes (tsc's second pass in `chooseOverload`); without it that is not
+    /// modelled. `None` when not modelled, also for props that are not plain object types
+    /// (indexed access, conditional types).
     fn jsx_instantiate(
         &mut self,
         opening: Loc,
         sig: SigId,
         construct: bool,
         explicit: Option<&[TypeId]>,
+        second_pass: bool,
     ) -> Option<SigId> {
         let d = self.store().sig(sig);
         if d.type_params == ListId::EMPTY {
@@ -628,9 +859,13 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
                 let mut ctx = self.inference_context_for(sig);
                 let children = self.jsx_children_prop(opening.file, ns);
+                // The attributes are typed in the context of the generic props (a literal
+                // for a type parameter with a primitive constraint stays literal).
+                self.jsx.assumed.push((opening, pt));
                 self.enter_speculation();
                 let attrs = self.jsx_attributes_type_inner(opening, children, false, true);
                 self.leave_speculation();
+                self.jsx.assumed.pop();
                 let attrs = attrs?;
                 self.infer_types(&mut ctx, attrs, pt, 0);
                 // A type parameter that only context-sensitive values infer, or one inferred
@@ -640,7 +875,53 @@ impl<'c, 'a> Ck<'c, 'a> {
                         || (0..tps.len())
                             .any(|i| ctx.candidates[i].is_empty() && ctx.contra[i].is_empty()))
                 {
-                    return None;
+                    // Only the type parameters the props are made of may wait for the
+                    // second pass: one left to the functions' own inferences (intra-
+                    // expression inference) is not modelled.
+                    let mut naked = Vec::new();
+                    self.jsx_collect_naked_type_params(pt, 0, &mut naked);
+                    if !second_pass
+                        || (0..tps.len()).any(|i| {
+                            ctx.candidates[i].is_empty()
+                                && ctx.contra[i].is_empty()
+                                && !naked.contains(&tps[i])
+                        })
+                    {
+                        return None;
+                    }
+                    // The functions are typed by the props instantiated with what the
+                    // other attributes inferred (defaults and constraints for the rest, as
+                    // tsc's non-fixing mapper), then every attribute infers afresh.
+                    // The first pass's attributes hold placeholders for the functions:
+                    // nothing is inferred from them to a naked type parameter (tsc: they
+                    // are non-inferrable).
+                    for (i, tp) in tps.iter().enumerate() {
+                        if naked.contains(tp) {
+                            ctx.candidates[i].clear();
+                            ctx.contra[i].clear();
+                            ctx.weak[i].clear();
+                            ctx.preferred[i].clear();
+                        }
+                    }
+                    let mut probe = ctx.clone();
+                    let so_far: Vec<TypeId> = (0..tps.len())
+                        .map(|i| self.inferred_type_at(&mut probe, i))
+                        .collect();
+                    let m = self.store().mapper(&tps, &so_far);
+                    let so_far = self.instantiate(pt, m);
+                    let fns: Vec<Loc> = self
+                        .jsx_sensitive_fns(opening, children)
+                        .into_iter()
+                        .filter(|f| !self.fixed_arg_contexts.contains_key(f))
+                        .collect();
+                    self.jsx_fix_contexts(opening, so_far, &fns);
+                    ctx = self.inference_context_for(sig);
+                    self.jsx.assumed.push((opening, so_far));
+                    self.enter_speculation();
+                    let attrs = self.jsx_attributes_type_inner(opening, children, false, false);
+                    self.leave_speculation();
+                    self.jsx.assumed.pop();
+                    self.infer_types(&mut ctx, attrs?, pt, 0);
                 }
                 (0..tps.len())
                     .map(|i| self.inferred_type_at(&mut ctx, i))
@@ -715,6 +996,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                 .members_of_union(t)
                 .iter()
                 .any(|&m| self.jsx_naked_type_param(m, depth + 1))
+    }
+
+    /// The type parameters `t` is, or has as union or intersection members.
+    fn jsx_collect_naked_type_params(&self, t: TypeId, depth: u32, out: &mut Vec<TypeId>) {
+        let flags = self.store().flags(t);
+        if flags.contains(TypeFlags::TYPE_PARAMETER) {
+            out.push(t);
+        } else if depth < 8 && flags.intersects(TypeFlags::UNION | TypeFlags::INTERSECTION) {
+            for &m in self.store().members_of_union(t) {
+                self.jsx_collect_naked_type_params(m, depth + 1, out);
+            }
+        }
     }
 
     /// Whether some attribute value or child of `opening`'s element is context sensitive.
@@ -859,7 +1152,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         let ft = self.type_of_symbol(frag);
-        let Some((sigs, construct)) = self.jsx_signatures(ft) else {
+        let Some((sigs, construct)) = self.jsx_signatures(ft, ns) else {
             return;
         };
         let [sig] = sigs[..] else {
@@ -1166,12 +1459,21 @@ impl<'c, 'a> Ck<'c, 'a> {
     fn check_jsx_opening(&mut self, opening: Loc, children: NodeList) {
         let file = opening.file;
         let ast = self.ast(file);
-        let Node::JsxOpening { name, attrs, .. } = *ast.node(opening.node) else {
+        let Node::JsxOpening {
+            name,
+            attrs,
+            type_args,
+            ..
+        } = *ast.node(opening.node)
+        else {
             return;
         };
         let reporting = self.reporting(file);
         let ns = self.jsx_ns(opening);
         let r = self.jsx_resolved(opening);
+        if reporting && let Some(ta) = type_args {
+            self.check_jsx_type_args(opening, name, ta, &r);
+        }
         if reporting {
             if self.jsx_file_info(file).automatic.is_none() {
                 self.check_jsx_container_props(ns, "ElementChildrenAttribute");
@@ -1235,13 +1537,19 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
             let mark = self.diags.len();
-            let (source, target) = self.jsx_report_target(ns, attrs_t, props);
-            self.check_assignable_with_elaboration(
-                source,
-                target,
-                Loc::new(file, name),
-                Some(opening),
-            );
+            // Elaborated against the whole props first; the relation error that follows a
+            // failed elaboration names the member the attributes fail (tsc:
+            // `checkTypeAssignableToAndOptionallyElaborate`, then `reportErrorResults`).
+            if !self.is_assignable(attrs_t, props) && !self.elaborate_error(opening, attrs_t, props)
+            {
+                let (source, target) = self.jsx_report_target(ns, attrs_t, props);
+                self.check_assignable_with_elaboration(
+                    source,
+                    target,
+                    Loc::new(file, name),
+                    Some(opening),
+                );
+            }
             if r.no_overload {
                 for d in &mut self.diags[mark..] {
                     d.message = crate::call::wrap_last_overload(&d.message);
@@ -1255,6 +1563,32 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         if reporting {
             self.check_jsx_validity(opening, name, &r, ns);
+        }
+    }
+
+    /// Explicit type arguments of a JSX tag (tsc: `resolveJsxOpeningLikeElement` in
+    /// `jsx.go` and `reportCallResolutionErrors` in `checker.go`): an intrinsic tag takes
+    /// none (TS2558 over the list, its arguments still checked), a value tag's must fit
+    /// some signature's type parameter count (TS2558) and then the constraints (TS2344 at
+    /// the first failing argument). An empty list is only the parser's TS1099.
+    fn check_jsx_type_args(&mut self, opening: Loc, name: NodeId, ta: NodeId, r: &JsxResolved) {
+        let file = opening.file;
+        let ast = self.ast(file);
+        let Node::TypeArgs { args } = *ast.node(ta) else {
+            return;
+        };
+        let n = ast.list(args).len();
+        if n == 0 {
+            return;
+        }
+        if crate::check::is_intrinsic_tag(ast, name) {
+            self.report_type_arg_arity_error(file, ta, &[], n);
+            return;
+        }
+        if let Some(sigs) = &r.type_arg_arity {
+            self.report_type_arg_arity_error(file, ta, sigs, n);
+        } else if let Some((c, ex)) = &r.type_arg_constraint {
+            self.type_args_satisfy_constraints(*c, ex, Some(Loc::new(file, ta)));
         }
     }
 
@@ -1382,6 +1716,18 @@ impl<'c, 'a> Ck<'c, 'a> {
             if c == TypeId::UNKNOWN || self.jsx_unusable(c) {
                 return;
             }
+            // A generic tag constrained to one string (`T extends "div"`, `T extends string`)
+            // is no intrinsic name: its apparent type is `String`, without signatures.
+            let cf = self.store().flags(c);
+            if cf.intersects(TypeFlags::STRING_LIKE) && !cf.contains(TypeFlags::UNION) {
+                let text = self.jsx_tag_text(opening.file, name);
+                self.error(
+                    Loc::new(opening.file, name),
+                    dg::JSX_ELEMENT_TYPE_0_DOES_NOT_HAVE_ANY_CONSTRUCT_OR_CALL_SIGNATURES_2604,
+                    &[&text],
+                );
+                return;
+            }
             c
         } else {
             tt
@@ -1407,15 +1753,33 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             return;
         }
-        if self
-            .store()
-            .flags(tt)
-            .intersects(TypeFlags::STRING_LIKE | TypeFlags::INSTANTIABLE)
+        let is_union = self.store().flags(tt).contains(TypeFlags::UNION);
+        if !is_union
+            && self
+                .store()
+                .flags(tt)
+                .intersects(TypeFlags::STRING_LIKE | TypeFlags::INSTANTIABLE)
         {
             return;
         }
+        let ns = self.jsx_ns(opening);
+        // Each unknown intrinsic name in a union is TS2339 at the element.
+        if is_union {
+            for m in self.store().members_of_union(tt).to_vec() {
+                if self.store().flags(m).contains(TypeFlags::STRING_LITERAL)
+                    && let Some(text) = self.literal_text(m)
+                    && self.jsx_intrinsic_props(ns, &text) == Err(false)
+                {
+                    self.error(
+                        opening,
+                        dg::PROPERTY_0_DOES_NOT_EXIST_ON_TYPE_1_2339,
+                        &[&text, "JSX.IntrinsicElements"],
+                    );
+                }
+            }
+        }
         if self
-            .jsx_signatures(tt)
+            .jsx_signatures(tt, ns)
             .is_some_and(|(sigs, _)| sigs.is_empty())
         {
             let text = self.jsx_tag_text(opening.file, name);

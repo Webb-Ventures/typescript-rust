@@ -523,6 +523,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             // A type parameter (a class's `this`) infers to an object target through its
             // constraint (`new Wrapper(this)` in `Subject<T>` infers `T`).
             match self.base_constraint(source) {
+                // A union constraint infers member by member (`I extends ObservableValue<any>`
+                // to `Observable<T>`).
+                c if c != source && self.store().flags(c).contains(TypeFlags::UNION) => {
+                    return self.infer_from(ctx, c, target, contra, depth + 1);
+                }
                 c if c != TypeId::UNRESOLVED && c != source => c,
                 _ => source,
             }

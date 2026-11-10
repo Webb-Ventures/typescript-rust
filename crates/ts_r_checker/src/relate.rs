@@ -1618,7 +1618,11 @@ impl<'c, 'a> Ck<'c, 'a> {
         let saved_assumed = std::mem::take(&mut self.rel.assumed);
         let saved_skipped = std::mem::take(&mut self.rel.deferred_skipped);
         let pending_start = self.rel.pending.len();
-        let saved_flags = self.rel.probe.as_mut().map(|p| std::mem::take(&mut p.flags));
+        let saved_flags = self
+            .rel
+            .probe
+            .as_mut()
+            .map(|p| std::mem::take(&mut p.flags));
         let r = self.structured_related(s, t, rel, report);
         // What a measurement noted while comparing this pair is kept with its result.
         let noted = match (self.rel.probe.as_mut(), saved_flags) {
@@ -3265,6 +3269,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             return self
                 .conditional_constraint(s)
                 .is_some_and(|c| c != s && self.related_to(c, t, rel, report, None));
+        }
+        // A concrete source relates to no conditional with `infer` parameters deferred on a
+        // generic check type (`{}` is not a `C extends { d: infer D } ? P & D : P`): its
+        // branches are not tried.
+        if tf.contains(TypeFlags::CONDITIONAL)
+            && !sf.intersects(TypeFlags::INSTANTIABLE)
+            && !self
+                .store()
+                .traits(s)
+                .contains(TypeTraits::CONTAINS_TYPE_PARAMETER)
+            && self.conditional_has_infer(t)
+            && self.conditional_check_instantiable(t)
+        {
+            return false;
         }
         // Deferred generic forms we do not model: be permissive.
         if tf.intersects(
@@ -5023,7 +5041,10 @@ impl<'c, 'a> Ck<'c, 'a> {
         let mut cur = p;
         for _ in 0..8 {
             match self.c.synth_sym(cur) {
-                Some(x) if x.check & check_flags::SYNTHETIC_INTERSECTION != 0 && x.origins.len() > 1 => {
+                Some(x)
+                    if x.check & check_flags::SYNTHETIC_INTERSECTION != 0
+                        && x.origins.len() > 1 =>
+                {
                     return x.origins.to_vec();
                 }
                 Some(x) if x.origins.len() == 1 => cur = x.origins[0],
@@ -6319,6 +6340,18 @@ impl<'c, 'a> Ck<'c, 'a> {
                     )
                 });
                 if is_jsx_attr {
+                    // HTML's `class` and `for` are `className` and `htmlFor` in JSX.
+                    let html = match pn.as_str() {
+                        "class" => Some("className"),
+                        "for" => Some("htmlFor"),
+                        _ => None,
+                    };
+                    let html = html.filter(|h| {
+                        self.properties_of(error_target)
+                            .into_iter()
+                            .any(|(n, _)| self.symbol_display_name(n) == *h)
+                    });
+                    let suggestion = html.map(str::to_owned).or(suggestion);
                     match &suggestion {
                         Some(sug) => {
                             // A name that isn't an identifier is quoted (`'"ns:a"'`).
