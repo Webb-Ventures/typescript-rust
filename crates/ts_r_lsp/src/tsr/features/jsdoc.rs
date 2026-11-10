@@ -227,11 +227,19 @@ pub fn parse(raw: &str) -> JsDoc {
         i += 1;
     }
     pieces.push((cur.0, cur.1, b.len()));
+    // Pieces are ordered, so visit each line boundary only once.
+    let mut line_starts = text.match_indices('\n').map(|(i, _)| i + 1).peekable();
+    let mut line = 0;
+    let mut line_start = 0;
     for (name, start, end) in pieces {
+        while let Some(next) = line_starts.next_if(|&next| next <= start) {
+            line += 1;
+            line_start = next;
+        }
         let piece = Piece {
             text: &text[start..end],
-            col: start - text[..start].rfind('\n').map_or(0, |i| i + 1),
-            keep_from: &keep_from[text[..start].matches('\n').count()..],
+            col: start - line_start,
+            keep_from: &keep_from[line..],
         };
         match name {
             None => doc.comment = parts(piece.dedent(0, false).trim()),
@@ -654,8 +662,33 @@ pub fn render(doc: &JsDoc, resolve: &mut Resolve<'_>) -> String {
 mod tests {
     use super::*;
 
+    ts_r_testing::cap_memory!();
+
     fn md(raw: &str) -> String {
         render(&parse(raw), &mut |_| None)
+    }
+
+    #[test]
+    fn tag_margins_follow_line_boundaries() {
+        let doc = parse(
+            "/** Intro {@link A\n * label}.\n * @first\n *   one\n *     continued\n * @second two @third three\n *  last\n */",
+        );
+        assert_eq!(doc.tags.len(), 3);
+        assert_eq!(doc.tags[0].raw, "one\n    continued");
+        assert_eq!(doc.tags[1].raw, "two");
+        assert_eq!(doc.tags[2].raw, "three\nlast");
+    }
+
+    #[test]
+    fn many_tags_parse_in_linear_time() {
+        let raw = format!("/**\n{} */", " * @tag x\n".repeat(100_000));
+        let t = std::time::Instant::now();
+        let doc = parse(&raw);
+        assert!(t.elapsed() < std::time::Duration::from_secs(5));
+        assert_eq!(doc.tags.len(), 100_000);
+        assert!(doc.tags.iter().all(|tag| tag.name == "tag"
+            && tag.raw == "x"
+            && tag.comment == [Part::Text("x".to_string())]));
     }
 
     /// The fence is one backtick longer than the longest run in the code (at least three),
