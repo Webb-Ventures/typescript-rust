@@ -603,6 +603,10 @@ impl<'c, 'a> Ck<'c, 'a> {
             cur = parents.parent(n);
         }
         let mut names: Vec<&str> = Vec::new();
+        // A class's `this` type is referenced only by a `this` type node (tsc:
+        // isTypeParameterPossiblyReferenced): `{ type: null }` in a method's parameter
+        // stays one type for every receiver.
+        let mut this_used = false;
         let mut steps = 0;
         while let Some(n) = stack.pop() {
             steps += 1;
@@ -611,6 +615,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             match *ast.node(n) {
                 Node::TypeQuery { .. } => return outer,
+                Node::ThisType {} => this_used = true,
                 Node::Ident { .. } => {
                     if let Some(t) = crate::nodes::ident_text(ast, n)
                         && !names.contains(&t)
@@ -625,6 +630,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         outer
             .into_iter()
             .filter(|&p| {
+                if !this_used && self.store().type_param_data(p).is_some_and(|d| d.is_this) {
+                    return false;
+                }
                 let mut found = false;
                 for &(id, text) in &declared {
                     if id == p {
