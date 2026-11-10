@@ -96,6 +96,52 @@ fn wide_array_of_context_sensitive_callbacks() {
 }
 
 #[test]
+fn partial_inference_marker_search_exhaustion() {
+    let Some(libs) = LibStore::locate() else {
+        return;
+    };
+    for marker_first in [false, true] {
+        let mut fields = String::new();
+        for i in 0..261 {
+            fields.push_str(&format!("p{i:03}: 0,\n"));
+        }
+        let marker = "z: { fn: x => x },\n";
+        let value = if marker_first {
+            format!("{marker}{fields}")
+        } else {
+            format!("{fields}{marker}")
+        };
+        let src = format!(
+            "declare function q<T>(x: {{ [K in keyof T]: {{ value: T[K]; cb: (v: T[K]) => void }} }}): T;\n\
+             q({{ a: {{ value: {{\n{value}}}, cb: v => {{ v.z.fn(1); }} }} }});\n"
+        );
+        let mut fs = MemoryFs::new();
+        fs.set_cwd("/p");
+        fs.add_file("/p/a.ts", &src);
+        fs.add_file(
+            "/p/tsconfig.json",
+            r#"{"compilerOptions": {"strict": true, "target": "esnext", "lib": ["esnext"], "noLib": false, "noEmit": true}, "files": ["a.ts"]}"#,
+        );
+        let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
+        let program = load_program(&fs, &cfg.file_names, &cfg.options, Some(&libs), 1);
+        let result = check_program(&program, CheckRun { threads: 1 });
+        let msgs: Vec<_> = result
+            .diagnostics
+            .iter()
+            .map(|d| (d.code, d.message.as_str()))
+            .collect();
+        assert_eq!(
+            msgs,
+            [
+                (7006, "Parameter 'x' implicitly has an 'any' type."),
+                (18046, "'v' is of type 'unknown'."),
+            ],
+            "marker_first={marker_first}"
+        );
+    }
+}
+
+#[test]
 fn locals_used_twice_in_nested_callbacks() {
     let mut s = String::from(
         "declare function run<T>(f: (x: number) => T): T;\nrun((x) => {\n  const a0 = { v: x };\n",
