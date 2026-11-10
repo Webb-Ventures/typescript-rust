@@ -82,6 +82,8 @@ struct Unused<'x, 'a> {
     read_value: FxHashSet<SymbolId>,
     /// Script-global symbols (never reported).
     global: FxHashSet<SymbolId>,
+    /// Merge eligibility, computed once per symbol in this file.
+    merged: FxHashMap<SymbolId, bool>,
     /// Property names accessed in the file: name → (access node, is a read).
     accesses: FxHashMap<String, Vec<(NodeId, bool)>>,
     locals: bool,
@@ -132,6 +134,7 @@ impl<'c, 'a> Ck<'c, 'a> {
             read_type: FxHashSet::default(),
             read_value: FxHashSet::default(),
             global: FxHashSet::default(),
+            merged: FxHashMap::default(),
             accesses: FxHashMap::default(),
             locals,
             params,
@@ -481,7 +484,16 @@ impl<'x, 'a> Unused<'x, 'a> {
     /// unread (overloads, `function`/`class`/`enum` + `namespace`, `class`/`function` +
     /// `interface`, `interface`/`type` + `const`): only conflict-free combinations, all
     /// in this file and none decorated.
-    fn merged_ok(&self, s: SymbolId) -> bool {
+    fn merged_ok(&mut self, s: SymbolId) -> bool {
+        if let Some(&ok) = self.merged.get(&s) {
+            return ok;
+        }
+        let ok = self.merged_ok_uncached(s);
+        self.merged.insert(s, ok);
+        ok
+    }
+
+    fn merged_ok_uncached(&self, s: SymbolId) -> bool {
         let decls = self.b.decls(s);
         if decls.len() < 2 || self.c.decls(self.c.sym(self.file, s)).len() != decls.len() {
             return false;
