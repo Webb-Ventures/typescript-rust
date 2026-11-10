@@ -218,6 +218,12 @@ Files, by layer:
   An `asserts c` call (no type) whose argument is a constant false condition (`false`,
   `(false)`, `false && x`) ends the flow like a `never` call; `!true`, `0`, `null`, a
   `const` holding `false` and `asserts c is T` do not (tsc 7, observed).
+  A `for (const item of items)` variable is an explicitly typed call target when `items`
+  is an identifier with an explicit type (`explicit_type_with`; tsc: checker.go
+  getExplicitTypeOfSymbol; longer dotted iterables are not followed). A union member that
+  a conflicting discriminant empties (`RuntimeValue & { type: "number" }`) takes no part
+  in `is_discriminant_property`, as tsc reads union properties through reduced members
+  (parity test `discriminant_reduced_members`).
   `(f(), x).p` is the reference `x.p`; `this` declared by a `this` parameter narrows.
   `if (x = y)` narrows `y` as the condition `y`, and `if (x &&= y)` when true;
   `isString(x?.y)` (a predicate ruling out `undefined` in the branch) makes `x` non-nullish;
@@ -349,6 +355,11 @@ Files, by layer:
   narrowed parent (a pattern without a reference is keyed by its first binding's symbol).
   A parent narrowed to `never` (the default clause after every `kind` case) makes the
   sibling `never` (`destructured_sibling_never`; tsc: checker.go getNarrowedTypeOfSymbol).
+  A generic parent narrows through its base constraint (`{ kind, payload }: T` with `T
+  extends Action`), a rest parameter's pattern is one (`...[kind, data]: Args`), and the
+  sibling's narrowed property still gets the narrowing of the read where it is declared
+  (`if (a.payload) { const { kind, payload } = a; ... }`: tsc's getFlowTypeOfDestructuring
+  on the narrowed parent; parity test `dependent_destructuring`).
   An aliased condition (`const ok = isSuccess && x; if (ok)`) narrows a constant reference;
   an unassigned binding of a parameter or catch variable pattern is one, like the
   parameter itself (`aliased_condition_param_pattern`; tsc: checker/flow.go,
@@ -1527,7 +1538,10 @@ Files, by layer:
   `{ [K in C]: X }[C]` relates as `X[K := C]` (and any `{ [K in C]: X }[I]` has the base
   constraint `X[K := I]`; one that leads back to itself has none); `(A & B)[K]`'s base
   constraint is the intersection of `A[K]`'s and `B[K]`'s, without a union part that contains
-  another part. A conditional without `infer` relates to a generic `keyof X` through its
+  another part, when the intersection is generic. A concrete one (`ElementTagNameMap =
+  HTMLElementTagNameMap & Pick<...>`) is indexed whole by the key's constraint, as tsc's
+  getBaseConstraint does: a member that lacks some key may not decide alone, and its
+  constraint for writing is the intersection's (`concrete_intersection_index`). A conditional without `infer` relates to a generic `keyof X` through its
   branches' union. Type predicates narrow a conditional member with no concrete base
   constraint by intersection (`DeepPartial<T> & any[]`). A concrete source never relates to
   `(M & O)[K]` with a generic key when the intersection holds a generic mapped type: tsc
@@ -1761,7 +1775,10 @@ Files, by layer:
   when the contextual return type takes it, a type parameter of a call being inferred
   read through what the call's contextual type implies (`const x: 0 | 1 = invoke(() =>
   1)` infers `T = 1`; tsc: `instantiateContextualType` with the return mapper;
-  `return_context_literal_callback`).
+  `return_context_literal_callback`). A nested generic call whose contextual type is such
+  a type parameter infers from what it implies too (`const n: number = f({ x: absorb()
+  })` gives `absorb` `number`; only the outer return context is read, not the outer
+  arguments' inferences; parity `nested_call_return_context`).
 - **Generic call arguments resolve once.** A generic call argument without
   context-sensitive functions inside keeps the contextual type it had while the outer call
   inferred (when that mentions the outer type parameters) for the final argument check, as
@@ -2463,6 +2480,14 @@ Files, by layer:
   type of a signature without a declaration (`call::new_of_callable`; tsc:
   tsc/internal/checker/checker.go, resolveNewExpression and checkCallExpression).
 - **Identity.** Identical object types have as many properties (`identity_property_count`).
+  Two references to one generic type are identical when their arguments are, before any
+  structural walk (a recursive global `Observable<T>` with ~150 members otherwise fails
+  identity through its own cycles). Deferred types are identical by their parts: `keyof X`
+  by `X`, `O[K]` by `O` and `K`, a conditional by distributivity, check, extends and both
+  instantiated branches, a substitution by its base (`identity_structured`;
+  `identity_deferred_types`; tsc: relater.go, structuredTypeRelatedToWorker under
+  identityRelation, and its type-reference variance branch, which runs for identity too).
+  expect-type's `toEqualTypeOf` depends on both (RxJS specs).
 - **Spread arguments.** A spread of unknown length fits a signature when it starts at or past
   the required parameters and before the last parameter or into a rest one (else TS2556);
   each spread is then checked by position, against an optional parameter's type with
@@ -2949,6 +2974,14 @@ Files, by layer:
   a type parameter relates only through its constraint. `${M}` for a single non-generic
   pattern `M` is `M` itself (tsc: relater.go, structuredTypeRelatedToWorker; checker.go,
   getTemplateLiteralType; `generic_template_target`).
+- **Comparing template literals** (`templates_maybe_overlap`; tsc: relater.go,
+  templateLiteralTypesDefinitelyUnrelated, replacePrimitivesWithLiterals in checker.go).
+  Two template literals are comparable unless their first texts differ over the shorter
+  one's length or their last texts at the end (`foo-${string}` and `${string}-bar`
+  overlap). A pattern source compared with a string literal is the literal matching the
+  pattern. A pattern literal property type is a literal part of a discriminant
+  (`{ type: `${string}_SUCCESS` }`), and `=== "FOO_SUCCESS"` narrows a matching pattern
+  to the literal (parity test `template_discriminants`).
 - **A union source against a type parameter** elaborates its first failing member like any
   union, except that the "could be instantiated with an arbitrary type" hint drops what was
   reported inside it (tsc: relater.go, reportRelationError resets the chain). Type argument
@@ -3342,13 +3375,14 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-10-27, f2f24bb, wip/v1-checker10 on v1/emit10: JSDoc `@overload`
-  signatures, TS4023 for unexported declared types, TS7008 along CommonJS export chains;
+  Current (2026-11-06, 3042fe0, parity/checker-3: dependent destructuring, template
+  literal comparability, for-of assertion targets, nested call return context, concrete
+  intersections indexed by a generic key, identity of references and deferred types;
   12750 compared variants):
-  12460 exact (97.7%; all diagnostics and chains), 12480 (97.9%) exact on first lines;
-  144 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
+  12463 exact (97.7%; all diagnostics and chains), 12483 (97.9%) exact on first lines;
+  136 variants with a diagnostic tsc does not report, 5 of them tests where tsc reports
   nothing.
-  Earlier: 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.

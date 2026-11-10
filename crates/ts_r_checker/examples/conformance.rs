@@ -88,12 +88,13 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A `// @name: value` directive. As in tsc's harness, it starts the line: an indented
+/// `// @todo: ...` comment is code (`tsc/internal/testrunner/test_case_parser.go`).
 fn parse_directive(line: &str) -> Option<(String, String)> {
-    let t = line.trim_start();
-    let rest = t.strip_prefix("//")?.trim_start().strip_prefix('@')?;
+    let rest = line.strip_prefix("//")?.trim_start().strip_prefix('@')?;
     let (k, v) = rest.split_once(':')?;
     let k = k.trim_end();
-    if k.is_empty() || !k.chars().all(|c| c.is_ascii_alphanumeric()) {
+    if k.is_empty() || !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
     Some((k.trim().to_ascii_lowercase(), v.trim().to_owned()))

@@ -513,7 +513,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         None
     }
 
-    fn base_constraint_or_self(&mut self, t: TypeId) -> TypeId {
+    pub(crate) fn base_constraint_or_self(&mut self, t: TypeId) -> TypeId {
         if self.store().flags(t).intersects(TypeFlags::INSTANTIABLE) {
             let c = self.base_constraint(t);
             if c != TypeId::UNKNOWN && c != TypeId::UNRESOLVED {
@@ -808,6 +808,20 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         best.map(|b| b.1)
+    }
+
+    /// Whether two template literal types may share a value: their first texts agree over
+    /// the shorter one's length, and so do their last texts at the end.
+    pub fn templates_maybe_overlap(&self, a: TypeId, b: TypeId) -> Option<bool> {
+        let s = self.store();
+        let (at, _) = s.template_parts(a)?;
+        let (bt, _) = s.template_parts(b)?;
+        let text = |t: Option<&TypeId>| t.and_then(|&t| s.string_value(t)).unwrap_or("");
+        let (a0, b0) = (text(at.first()).as_bytes(), text(bt.first()).as_bytes());
+        let (a1, b1) = (text(at.last()).as_bytes(), text(bt.last()).as_bytes());
+        let n = a0.len().min(b0.len());
+        let m = a1.len().min(b1.len());
+        Some(a0[..n] == b0[..n] && a1[a1.len() - m..] == b1[b1.len() - m..])
     }
 
     /// Relation of a source to a template literal or string mapping target that is not

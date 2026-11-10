@@ -1,0 +1,1 @@
+a.ts(43,5): error TS18048: 'payload' is possibly 'undefined'.

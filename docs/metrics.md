@@ -51,8 +51,8 @@ A speed below 1× means ts-r is slower.
 diagnostics differ from tsc's, ts-r-lint runs without type information (its parity gate).
 ² ts-r-build leaves out excalidraw's 61 locale chunks (template-literal `import()` isn't
 bundled yet), which flatters its times.
-³ On 26 Oct 2026 (`687b025`) ts-r-check matched tsc exactly on tRPC, TypeORM and Playwright;
-on RxJS it reported none extra and 5 missing (of about 21,900). Times
+³ On 6 Nov 2026 (`3042fe0`) ts-r-check matched tsc exactly on tRPC, TypeORM, Playwright and
+RxJS (about 21,900 diagnostics). Times
 will move as it grows.
 ⁴ Like-for-like: tRPC's ESLint config limited to the rules ts-r-lint implements, the same file
 for both tools, `lint-trpc-same-rules` in `bench/scenarios.toml` (2026-10-18). Both report 0

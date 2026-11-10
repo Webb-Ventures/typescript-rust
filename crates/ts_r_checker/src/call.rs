@@ -2515,6 +2515,11 @@ impl<'c, 'a> Ck<'c, 'a> {
             return None;
         }
         let c = self.contextual_type(e)?;
+        // A context that is an outer call's type parameter reads what that call's own
+        // contextual type implies for it (`const n: number = f({ x: absorb() })`: `absorb`
+        // infers `number`; tsc: checker.go inferTypeArguments instantiates the contextual
+        // type with the outer context's mapper).
+        let c = self.instantiate_with_return_context(c);
         if self
             .store()
             .flags(c)

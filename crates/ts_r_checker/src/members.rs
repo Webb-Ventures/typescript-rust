@@ -2713,8 +2713,12 @@ impl<'c, 'a> Ck<'c, 'a> {
                         cur = sub;
                         continue;
                     }
-                    // `(A & B)[K]` is constrained by `A[K]`'s and `B[K]`'s constraints.
-                    if self.store().flags(obj).contains(TypeFlags::INTERSECTION) {
+                    // `(A & B)[K]` is constrained by `A[K]`'s and `B[K]`'s constraints. A
+                    // concrete intersection is read whole below (`(A & Pick<B, "c">)[T]`
+                    // with `T extends "a" | "c"`: a key need not be in every member).
+                    if self.store().flags(obj).contains(TypeFlags::INTERSECTION)
+                        && self.is_generic_type(obj)
+                    {
                         let ms = self.store().members_of_union(obj).to_vec();
                         let mut parts = Vec::with_capacity(ms.len());
                         for m in ms {

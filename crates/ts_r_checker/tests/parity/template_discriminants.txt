@@ -1,0 +1,2 @@
+a.ts(9,11): error TS2322: Type '"FOO_SUCCESS"' is not assignable to type '1'.
+a.ts(19,7): error TS2367: This comparison appears to be unintentional because the types '`foo-${string}`' and '`baz-${string}`' have no overlap.

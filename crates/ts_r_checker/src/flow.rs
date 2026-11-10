@@ -2565,11 +2565,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                 // Any other source (a call, `for (const { k, v } of xs)`): the pattern alone.
                 self.pattern_alias(pattern, pp, prop)
             }
-            Node::Param {
-                pattern: pat,
-                rest: false,
-                ..
-            } if pat == pattern.node => {
+            // `(...[kind, data]: Args)` too: the rest parameter's type is the tuple union.
+            Node::Param { pattern: pat, .. } if pat == pattern.node => {
                 if self.is_symbol_assigned(s, f) {
                     return None;
                 }
@@ -2621,6 +2618,14 @@ impl<'c, 'a> Ck<'c, 'a> {
             {
                 continue;
             }
+            // A member emptied by a conflicting discriminant takes no part (tsc reads the
+            // union's property through each member's apparent, reduced type):
+            // `RuntimeValue & { type: 'number' }` has one `type`, not a discriminant.
+            if self.store().flags(m).contains(TypeFlags::INTERSECTION)
+                && self.reduced_type(m) == TypeId::NEVER
+            {
+                continue;
+            }
             let Some(p) = self.property_of_type(m, prop) else {
                 continue;
             };
@@ -2636,6 +2641,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 || (s.flags(pt).contains(TypeFlags::UNION)
                     && s.members_of_union(pt).iter().all(|&x| unit(x)))
             {
+                literal = true;
+            }
+            // A pattern literal (`${string}_SUCCESS`) is a literal part too (tsc:
+            // checker.go createUnionOrIntersectionProperty, isPatternLiteralType).
+            if self.is_pattern_literal_type(pt) {
                 literal = true;
             }
         }
@@ -2702,6 +2712,9 @@ impl<'c, 'a> Ck<'c, 'a> {
         let a = self.binding_alias(sym)?;
         let pattern = a.pattern?;
         let parent = self.pattern_parent_type(pattern);
+        // A generic parent narrows through its constraint (`{ kind, payload }: T` with
+        // `T extends Action`; tsc: checker.go getNarrowedTypeOfSymbol).
+        let parent = self.map_type(parent, |ck, m| ck.base_constraint_or_self(m));
         if !self.store().flags(parent).contains(TypeFlags::UNION) {
             return None;
         }
@@ -2737,7 +2750,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 let idx: usize = a.prop.parse().ok()?;
                 self.array_element_at(nt, idx)
             }
-            _ => self.destructured_property_type(nt, &a.prop),
+            _ => {
+                let t = self.destructured_property_type(nt, &a.prop);
+                // The property read where the variable is declared keeps its narrowing
+                // (`if (action.payload) { const { kind, payload } = action; ... }`).
+                match self.c.value_decl(sym).and_then(|d| self.c.parent(d)) {
+                    Some(bp) => self.destructured_flow_type(bp, t),
+                    None => t,
+                }
+            }
         })
     }
 
@@ -3635,6 +3656,14 @@ impl<'c, 'a> Ck<'c, 'a> {
                             | TypeFlags::ENUM
                             | TypeFlags::ES_SYMBOL,
                     ) && ck.is_assignable(v, m)
+                    {
+                        return v;
+                    }
+                    // A pattern literal compared with a string literal it matches is that
+                    // literal (tsc: checker.go replacePrimitivesWithLiterals).
+                    if ck.is_pattern_literal_type(m)
+                        && ck.store().flags(v).contains(TypeFlags::STRING_LITERAL)
+                        && ck.is_assignable(v, m)
                     {
                         return v;
                     }
@@ -5066,6 +5095,13 @@ impl<'c, 'a> Ck<'c, 'a> {
     }
 
     fn call_target_has_explicit_type(&self, s: SymId) -> bool {
+        self.explicit_type_with(s, true)
+    }
+
+    /// `for_of`: a `for (const item of items)` variable counts when `items` is an
+    /// identifier with an explicit type (tsc: checker.go getExplicitTypeOfSymbol reads the
+    /// iterated dotted name; deeper names are not followed here).
+    fn explicit_type_with(&self, s: SymId, for_of: bool) -> bool {
         let s = self.c.resolve_alias(s).unwrap_or(s);
         // A mapped type's property (`Readonly<T>`'s) has one when the property it maps does.
         if let Some(x) = self.c.synth_sym(s)
@@ -5088,6 +5124,21 @@ impl<'c, 'a> Ck<'c, 'a> {
                 Node::Ident { .. } => self.c.parent(d).unwrap_or(d),
                 _ => d,
             };
+            if for_of
+                && matches!(*self.node(d), Node::VarDeclarator { type_ann: None, .. })
+                && let Some(list) = self.c.parent(d)
+                && let Some(stmt) = self.c.parent(list)
+                && let Node::ForOf { left, right, .. } = *self.node(stmt)
+                && left == list.node
+            {
+                let ast = self.ast(stmt.file);
+                let r = skip_parens(ast, right);
+                return matches!(ast.node(r), Node::Ident { .. })
+                    && self
+                        .c
+                        .resolve_ident(Loc::new(stmt.file, r), meaning::VALUE)
+                        .is_some_and(|x| x != s && self.explicit_type_with(x, false));
+            }
             matches!(
                 *self.node(d),
                 Node::VarDeclarator {
