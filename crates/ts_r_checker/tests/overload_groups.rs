@@ -19,7 +19,7 @@ fn check(src: &str) -> Vec<String> {
     fs.add_file("/p/lib.d.ts", LIB);
     fs.add_file(
         "/p/tsconfig.json",
-        r#"{"compilerOptions": {"noLib": true, "strict": true, "types": []}, "files": ["a.ts", "lib.d.ts"]}"#,
+        r#"{"compilerOptions": {"noLib": true, "target": "es2022", "strict": true, "types": []}, "files": ["a.ts", "lib.d.ts"]}"#,
     );
     let cfg = load_tsconfig(&fs, "/p/tsconfig.json");
     let program = load_program(&fs, &cfg.file_names, &cfg.options, None, 1);
@@ -72,4 +72,16 @@ fn many_declarations_are_grouped_linearly() {
     assert_eq!(d.len(), n);
     assert!(d.iter().all(|l| l.ends_with("TS2391")), "{:?}", &d[..3]);
     assert!(took < Duration::from_secs(20), "{took:?}");
+}
+
+#[test]
+fn many_methods_of_a_class_merged_with_an_interface() {
+    let mut src = String::from("interface C {}\nclass C {\n");
+    for i in 0..50_000 {
+        src.push_str(&format!("m{i}() {{}}\n"));
+    }
+    src.push_str("}\n");
+    let start = Instant::now();
+    assert!(check(&src).is_empty());
+    assert!(start.elapsed() < Duration::from_secs(20));
 }
