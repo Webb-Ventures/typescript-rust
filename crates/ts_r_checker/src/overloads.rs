@@ -569,13 +569,24 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         // The class's own members merge same-named methods of every declaration into
         // one symbol whose origins are each declaration's.
+        let key = match *self.node(here) {
+            Node::MethodDef { key, .. } | Node::MethodSignature { key, .. } => key,
+            _ => return None,
+        };
+        let name = if let Node::ComputedKey { expr } = *self.ast(file).node(key)
+            && key_text(self.ast(file), key).is_none()
+        {
+            let name = self.late_bound_name(Loc::new(file, expr))?;
+            self.store().intern_str(&name)
+        } else {
+            self.c.sym_name_id(own)
+        };
         let raw = self.raw_members(csym);
-        let merged = raw.props.iter().copied().find(|&p| {
-            self.c
-                .synth_sym(p)
-                .is_some_and(|x| x.origins.len() > 1 && x.origins.contains(&own))
-        })?;
+        let merged = raw.find(name)?;
         let origins = self.c.synth_sym(merged)?.origins.clone();
+        if origins.len() <= 1 || !origins.contains(&own) {
+            return None;
+        }
         let mut decls: Vec<Loc> = origins
             .iter()
             .flat_map(|&o| self.c.decls(o))
