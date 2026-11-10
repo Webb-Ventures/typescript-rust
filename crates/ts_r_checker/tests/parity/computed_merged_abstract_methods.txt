@@ -1,0 +1,2 @@
+a.ts(3,15): error TS2512: Overload signatures must all be abstract or non-abstract.
+a.ts(6,15): error TS2512: Overload signatures must all be abstract or non-abstract.

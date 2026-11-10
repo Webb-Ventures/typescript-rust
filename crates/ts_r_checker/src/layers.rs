@@ -22,7 +22,7 @@ use ts_r_types::{ChunkVec, ResolvedMembers, SymId, TypeId, TypeStore, level_of};
 
 use crate::checker::Checker;
 use crate::program::SourceFile;
-use crate::symbols::{EnumMemberValue, SymLinks, SymbolTable, SynthSym};
+use crate::symbols::{EnumMemberValue, ResolvedBases, SymLinks, SymbolTable, SynthSym};
 
 /// Values kept in per-symbol slots, with the level of what they refer to.
 pub(crate) trait Leveled {
@@ -44,6 +44,12 @@ impl Leveled for SymId {
 impl Leveled for Box<[TypeId]> {
     fn level(&self, _: &TypeStore) -> u8 {
         self.iter().map(|t| level_of(t.0)).max().unwrap_or(0)
+    }
+}
+
+impl Leveled for ResolvedBases {
+    fn level(&self, store: &TypeStore) -> u8 {
+        self.types.level(store)
     }
 }
 
@@ -99,7 +105,7 @@ pub(crate) struct Shadows {
     pub declared: Shadow<TypeId>,
     pub ty: Shadow<TypeId>,
     pub alias: Shadow<SymId>,
-    pub bases: Shadow<Box<[TypeId]>>,
+    pub bases: Shadow<ResolvedBases>,
     pub enum_members: Shadow<Box<[EnumMemberValue]>>,
     pub raw_members: Shadow<Box<ResolvedMembers>>,
 }
@@ -266,7 +272,7 @@ pub(crate) struct LinksRef<'c> {
     pub declared: SlotRef<'c, TypeId>,
     pub ty: SlotRef<'c, TypeId>,
     pub alias: SlotRef<'c, SymId>,
-    pub bases: SlotRef<'c, Box<[TypeId]>>,
+    pub bases: SlotRef<'c, ResolvedBases>,
     pub enum_members: SlotRef<'c, Box<[EnumMemberValue]>>,
     pub raw_members: SlotRef<'c, Box<ResolvedMembers>>,
 }
