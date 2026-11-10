@@ -1553,6 +1553,7 @@ Files, by layer:
   constrained to arrays and tuples only, relates to a target without type parameters as the
   mapped type applied to that constraint (its apparent type), so `Hom<T>` with `T extends
   [number] | readonly [string]` is not an `any[]`; other generic mapped sources stay opaque
+  except against index signatures ("Generic mapped types in relations")
   (`mapped_over_tuple_constraint_relation`; tsc: `getResolvedApparentTypeOfMappedType` in
   `tsc/internal/checker/checker.go`, used through `getApparentType` in `relater.go`).
 - **Element access in expressions.** `obj[key]` defers to `Obj[Key]` only for a generic key
@@ -2562,6 +2563,57 @@ Files, by layer:
   `reverseMappedTypeContextualTypesPerElementOfTupleConstraint` (a false TS2322) and
   `contextualTypeFunctionObjectPropertyIntersection` (a false TS7006), all exact now; probes
   against tsc 7.0.2 in `reverse_mapped_partial` and `reverse_mapped_intersection_context`.
+- **Generic mapped types in relations** (design note for the parity round's gap 2; tsc's
+  rules read for reference only in `structuredTypeRelatedToWorker`, `mappedTypeRelatedTo`,
+  `indexSignaturesRelatedTo` in tsc/internal/checker/relater.go and `isKnownProperty`,
+  `resolveMappedTypeMembers`, `getLowerBoundOfKeyType` in checker.go, at v7.0.2). The rules:
+  1. *Target generic, source not a generic mapped type* (`source_to_generic_mapped`). Unless
+     the target removes `?`, the keys decide first: the target's keys (its `as` type, else
+     its constraint) must relate to the known keys of the source (`keyof S` without index
+     signatures; with `?` they only need to overlap). With keys that fit, a template `X[P]`
+     (no `as`) asks the source to relate to `X`. When that fails, a type parameter relates
+     through its constraint (an unconstrained one fails: `unknown` is no mapped type),
+     an empty object matches a `?` target, and every other source (primitives, arrays,
+     objects with or without type parameters) is unrelated. So `number`, `{ a: 1 }` and
+     `{ [k: string]: V }` are not `Partial<U>`, `Record<K, V>` or `MappedModel<T>`.
+  2. *Source generic, target only index signatures with a `string` one*
+     (`generic_mapped_to_index_signature`): the template relates to each signature's type
+     (`Record<K, U>` is no `{ [k: string]: T }`: `U` is no `T`); an `any` signature takes it.
+  3. *Both generic* (existing `generic_mapped_pair_related`): optionality, contravariant
+     constraints, equal `as` types, templates with the key parameters matched. Under
+     identity (`identity_structured`) the modifiers must be equal (`+` reads as written) and
+     the constraints, `as` types and templates identical, so redeclaring
+     `x: { [P in keyof T]: T[P] }` as `{ readonly [P in keyof T]: T[P] }` is TS2403.
+  4. *Excess properties* (`generic_mapped_known_names`): a generic mapped type has the
+     members its key type's lower bound gives: `keyof X` reads the properties and index keys
+     of `X`'s constraint (none for an unconstrained `X`, the known names of a generic
+     mapped `X`), a bare `K` gives none, literal keys give themselves, and an `as` type still
+     generic in an outer parameter (`` `${K}${S}` ``) gives none. So a fresh literal
+     against `Partial<T>`, `Record<K, V>`, `Pick<T, K>` or `MappedModel<T>` is TS2353 for
+     properties outside that set, before the relation is tried. A generic mapped type
+     known to have no member at all is its own apparent type (`apparent_type`), so
+     `pick.foo` on `Pick<T, K>` and `rec.foo` on `Record<K, V>` are TS2339 (with members
+     known only in part, `{ [P in K | "c"]: X }`, it stays opaque).
+     During one excess-property check, interned-name sets are reused per mapped target,
+     including union/intersection members; this cache ends with the check.
+  A `?` generic mapped type prints its template with `| undefined` (`print_mapped`), as tsc
+  prints the template type it relates.
+  What stays silent (related, never a new error): templates other than `X[P]` when the keys
+  fit (`T` to `Box<T>` with `Box<T> = { [P in keyof T]: { v: T[P] } }`, which tsc rejects by
+  relating `T[P]` to the template), keys that are conditional or indexed-access types
+  (`as` clauses like `T[P] extends F ? P : never`, `Exclude<keyof T, K>` against a generic
+  source), intersection, indexed-access and conditional sources, a generic mapped source
+  against targets with properties or signatures (tsc compares the resolved members), and
+  `Partial<V>` with a constrained `V`, which still relates as its apparent type
+  `Partial<C>` (tsc reads `V[P]`). Our data model adds nothing: the rules read the mapped
+  type's parts (`mapped_info`, `mapped_constraint`, `mapped_template_and_name_for_key`).
+  Affected conformance tests: `genericMappedTypeAsClause` (6 missing errors) and
+  `indexSignatureAndMappedType` (3), now exact; `keyofAndIndexedAccess2` (2 of 10),
+  `templateLiteralTypes1` (1 of 4) closer, `mappedTypeErrors` (4 TS2403, 2 TS2339) exact.
+  `complicatedIndexedAccessKeyofReliesOnKeyofNeverUpperBound` now reports its line through
+  the `Partial<Omit<..>>` member, which tsc also rejects; tsc names the `Pick<.., "type">`
+  member first (a separate gap). Probes against tsc 7.0.2 in the `generic_mapped_*` parity
+  fixtures.
 - **Enum relation by members** (`enum_types_related`, cached per enum pair in
   `Ck::enum_relation`; tsc: `isEnumTypeRelatedTo` and `computeEnumMemberValue` in
   `tsc/internal/checker/relater.go` and `checker.go`). Two different enums are related only
@@ -3423,13 +3475,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, 6639285, parity/checker-gap-1: partial reverse mapped inference
-  from context-sensitive literals, contexts through generic mapped intersections, no
-  inference to mapped types with an `as` clause; 12750 compared variants):
-  12466 exact (97.8%; all diagnostics and chains), 12486 (97.9%) exact on first lines;
-  134 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, 077005b, parity/checker-gap-2: generic mapped types in relations,
+  identity and excess property checks, members known to be none; 12750 compared variants):
+  12469 exact (97.8%; all diagnostics and chains), 12489 (98.0%) exact on first lines;
+  135 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3448,7 +3499,17 @@ and integration tests allow: they link the one library build).
   inferred here and stays `unknown` in tsc; `mappedTypeRecursiveInference` still differs;
   partial literals with spreads, accessors or computed keys and JSX attributes are not
   modelled (silent).
-- Type operators: generic mapped types stay opaque in relations; `keyof X` and
+- Generic mapped types in relations (design note "Generic mapped types in relations"):
+  still silent are templates other than `X[P]` once the keys fit (`T` to
+  `{ [P in keyof T]: { v: T[P] } }`, needs exact relations of `T[P]` to `U[keyof U]`-style
+  accesses), conditional or indexed-access keys (`as T[P] extends F ? P : never`,
+  `Exclude<keyof T, K>`) against generic sources, intersection and indexed-access sources,
+  generic mapped sources against targets with properties or signatures (tsc compares the
+  resolved members: `Partial<T>` lacks `a` of `{ a: string }`), `Partial<V>` of a
+  constrained `V` (relates as `Partial<C>`, where tsc reads `V[P]`), members known only in
+  part (`{ [P in K | "c"]: X }` has `c`: `m.d` is not TS2339), and writes through the index
+  signature of a generic mapped type (TS2862, TS2551 in `mappedTypeGenericWithKnownKeys`).
+- Type operators: `keyof X` and
   indexed-access aliases print expanded (`"a" | "b"` where tsc prints `keyof Foo`); TS2589
   for a recursive alias is reported at the use, not at the recursive reference.
 - Variance is measured only for classes, interfaces and aliases compared in

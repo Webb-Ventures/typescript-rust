@@ -761,6 +761,15 @@ impl<'c, 'a> Ck<'c, 'a> {
                 return true;
             }
         }
+        // Two generic mapped types are compared by their parts (`identity_structured`), which
+        // the identity check above did.
+        if mapped(self, a)
+            && mapped(self, b)
+            && self.is_generic_mapped_type(a)
+            && self.is_generic_mapped_type(b)
+        {
+            return true;
+        }
         if mapped(self, a) || mapped(self, b) {
             return false;
         }

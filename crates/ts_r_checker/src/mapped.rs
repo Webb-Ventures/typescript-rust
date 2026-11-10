@@ -999,6 +999,133 @@ impl<'c, 'a> Ck<'c, 'a> {
         ResolvedMembers::new(out, Vec::new(), Vec::new(), index)
     }
 
+    /// The property names a generic mapped type is known to have, for excess property
+    /// checks (tsc resolves its members from the lower bound of its key type, where a
+    /// generic key such as `K` or `` `a${S}` `` gives no member: `Record<K, V>` has none,
+    /// `Partial<T>` has the properties of `T`'s constraint). `Err(())` when every name is
+    /// known (an index signature), `None` when not modelled.
+    pub(crate) fn generic_mapped_known_names(
+        &mut self,
+        t: TypeId,
+    ) -> Option<Result<Vec<String>, ()>> {
+        self.generic_mapped_known_names_at(t, 0)
+    }
+
+    fn generic_mapped_known_names_at(
+        &mut self,
+        t: TypeId,
+        depth: u32,
+    ) -> Option<Result<Vec<String>, ()>> {
+        if depth > 8 {
+            return None;
+        }
+        let info = self.mapped_info(t)?;
+        let keys: Vec<TypeId> = if self.keyof_constraint_operand(&info).is_some() {
+            let m = self.mapped_modifiers_type(&info);
+            self.known_keys_of_keyof_operand(m, depth)?
+        } else if let Some(lb) = self.mapped_lower_bound_keys(t) {
+            self.union_members(lb)
+        } else {
+            let c = self.mapped_constraint(&info);
+            if c == TypeId::UNRESOLVED {
+                return None;
+            }
+            let mut keys = Vec::new();
+            for m in self.union_members(c) {
+                let f = self.store().flags(m);
+                if f.contains(TypeFlags::TYPE_PARAMETER) {
+                    continue;
+                }
+                if let TypeKind::Index(x) = self.store().kind(m) {
+                    keys.extend(self.known_keys_of_keyof_operand(x, depth)?);
+                    continue;
+                }
+                if self.could_contain_type_params(m) {
+                    return None;
+                }
+                keys.push(m);
+            }
+            keys
+        };
+        let name_raw = self.mapped_name_raw(&info);
+        let mut names = Vec::new();
+        for key in keys {
+            let pnt = match name_raw {
+                Some(n) => {
+                    let m = self.mapped_template_mapper(&info, key);
+                    self.instantiate(n, m)
+                }
+                None => key,
+            };
+            for pn in self.union_members(pnt) {
+                if let Some(name) = self.property_name_of_type(pn) {
+                    names.push(name);
+                    continue;
+                }
+                let f = self.store().flags(pn);
+                if f.contains(TypeFlags::NEVER) {
+                    continue;
+                }
+                // A name still generic in an outer type parameter (`` `a${S}` ``) is no
+                // member; other generic names are not modelled.
+                if self.could_contain_type_params(pn) {
+                    if f.contains(TypeFlags::TEMPLATE_LITERAL) {
+                        continue;
+                    }
+                    return None;
+                }
+                // `string`, `number`, `symbol` and pattern keys: index signatures.
+                return Some(Err(()));
+            }
+        }
+        Some(Ok(names))
+    }
+
+    /// The keys `keyof X` reads when a generic mapped type resolves its members: the
+    /// properties and index keys of `X`'s constraint (none for an unconstrained `X`).
+    /// `None` when `X` is generic otherwise or its constraint is not concrete.
+    fn known_keys_of_keyof_operand(&mut self, x: TypeId, depth: u32) -> Option<Vec<TypeId>> {
+        let f = self.store().flags(x);
+        // A generic mapped operand (`Partial<Record<K, V>>`) has its own known names.
+        if f.contains(TypeFlags::OBJECT) && self.is_generic_mapped_type(x) {
+            return match self.generic_mapped_known_names_at(x, depth + 1)? {
+                Ok(names) => Some(
+                    names
+                        .iter()
+                        .map(|n| self.store().string_literal(n, false))
+                        .collect(),
+                ),
+                Err(()) => Some(vec![TypeId::STRING]),
+            };
+        }
+        let c = if f.contains(TypeFlags::TYPE_PARAMETER) {
+            self.base_constraint(x)
+        } else if self.is_generic_type(x) || self.could_contain_type_params(x) {
+            if f.contains(TypeFlags::OBJECT) && !self.is_generic_object_type(x) {
+                x
+            } else {
+                return None;
+            }
+        } else {
+            x
+        };
+        if c == TypeId::UNKNOWN {
+            return Some(Vec::new());
+        }
+        let cf = self.store().flags(c);
+        if c == TypeId::UNRESOLVED
+            || self.store().is_error(c)
+            || cf.intersects(
+                TypeFlags::ANY | TypeFlags::INSTANTIABLE | TypeFlags::UNION_OR_INTERSECTION,
+            )
+            || !cf.contains(TypeFlags::OBJECT)
+            || self.is_generic_object_type(c)
+        {
+            return None;
+        }
+        Some(self.mapped_keys_of_modifiers(c))
+    }
+
     /// The key types a `keyof X` mapped type iterates: `X`'s property names and index keys.
     fn mapped_keys_of_modifiers(&mut self, modifiers: TypeId) -> Vec<TypeId> {
         let at = self.apparent_type(modifiers);

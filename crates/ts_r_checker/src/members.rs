@@ -2932,6 +2932,11 @@ impl<'c, 'a> Ck<'c, 'a> {
                 {
                     t
                 }
+                // Or it is known to have none (`Record<K, V>`, `Pick<T, K>`, `Partial<T>` of
+                // an unconstrained `T`): its own apparent type, without members.
+                _ if matches!(self.generic_mapped_known_names(t), Some(Ok(ref n)) if n.is_empty()) => {
+                    t
+                }
                 _ => TypeId::UNRESOLVED,
             };
         }
