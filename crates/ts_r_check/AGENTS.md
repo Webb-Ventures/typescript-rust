@@ -99,6 +99,15 @@ diagnostics in tsc's format. Root rules:
   are merged, and its listing and TS5033 printed, exactly where the sequential path does.
   This costs a second checker's memory during the check (date-fns `pkgs/core` peak RSS
   116 → 129 MB, typeorm 202 → 221 MB) for the emit's wall time.
+- **Declaration diagnostics under `noEmit`** (record 0012, invariant 5): with `declaration`
+  (or `emitDeclarationOnly`) and `noEmit`, TS4094 and the rest are reported when nothing
+  else was (`reports_declaration_diagnostics`: no diagnostics beyond the config parse's).
+  `-p`/`--no-history` takes them from `ts_r_history` (computed with the check through a
+  hook); the program path (`-b`, incremental, `--listFiles`, ...) computes them with
+  `ts_r_emit::declaration_diagnostics`. They are not "errors" for the buildinfo: each file
+  with one is flagged (`FileState::dts_errors`, `Reported::dts_error_files`), and the flag
+  survives builds that do not compute them while the file is unchanged (tsc keeps a file's
+  emit diagnostics); a non-incremental build counts them as errors.
 - **Exit code** (record 0012, invariant 3): 0 with no errors; 2 with errors when every output
   was written; 1 with errors when any output was skipped (`noEmit`, `noEmitOnError`, TS5055,
   a write failure, or a file ts-r cannot emit yet: TSR2002 resolver unknown, TSR2003 target

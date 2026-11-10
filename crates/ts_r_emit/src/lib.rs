@@ -942,6 +942,92 @@ pub fn emit<'a, 'c>(
     result
 }
 
+/// Whether `options` ask for declarations (`declaration`, implied by `composite`, or
+/// `emitDeclarationOnly`), `noEmit` aside: tsc then reports declaration diagnostics under
+/// `noEmit` too (record 0012, invariant 5).
+pub fn emits_declarations(options: &CompilerOptions) -> bool {
+    options.effective().declaration() || options.emit_declaration_only() == Some(true)
+}
+
+/// Whether declaration diagnostics are asked of `f`: a declaration would be written for it
+/// (not a lib, declaration, `node_modules` or JSON file).
+pub fn has_declarations(f: &SourceFile) -> bool {
+    emittable(f) && !f.is_json()
+}
+
+/// The declaration diagnostics of `file` (TS4094, TS2883, TS9xxx, ...): what the declaration
+/// emitter reports with a tsc code. ts-r's own refusals (TSR2001, and a JavaScript file it
+/// refuses with TSR2006) say an output was not written and are left out: the caller asks
+/// under `noEmit`, where nothing is written.
+pub fn declaration_diagnostics_of(
+    checker: &Checker,
+    file: FileId,
+    options: &CompilerOptions,
+    host: Option<&dyn ts_r_checker::typenode::ModuleSpecifierHost>,
+) -> Vec<Diagnostic> {
+    let f = checker.file(file);
+    if !has_declarations(f) {
+        return Vec::new();
+    }
+    if !f.kind.is_typescript() && dts::js::unsupported(checker, file).is_some() {
+        return Vec::new();
+    }
+    let opts = dts::DtsOptions {
+        newline: "\n",
+        remove_comments: options.remove_comments() == Some(true),
+        strip_internal: options.strip_internal() == Some(true),
+        declaration_map: false,
+        isolated_declarations: options.isolated_declarations() == Some(true),
+    };
+    let mut d = dts::declaration_file(checker, file, &opts, host).diagnostics;
+    d.retain(|d| d.code < SOUND_CODE_BASE);
+    d
+}
+
+/// [`declaration_diagnostics_of`] for every file of `program`, in program order, on a
+/// checker of its own (up to `cfg.threads` threads).
+pub fn declaration_diagnostics(program: &ProgramFiles, cfg: &EmitConfig) -> Vec<Diagnostic> {
+    let todo: Vec<usize> = (0..program.files.len())
+        .filter(|&i| has_declarations(&program.files[i]))
+        .collect();
+    if todo.is_empty() {
+        return Vec::new();
+    }
+    let checker = Checker::new(program);
+    let slots: Vec<Mutex<Vec<Diagnostic>>> = todo.iter().map(|_| Mutex::new(Vec::new())).collect();
+    let next = AtomicUsize::new(0);
+    let work = || {
+        loop {
+            let k = next.fetch_add(1, Ordering::Relaxed);
+            let Some(&i) = todo.get(k) else { break };
+            let d =
+                declaration_diagnostics_of(&checker, FileId(i as u32), cfg.options, cfg.specifiers);
+            if let Ok(mut s) = slots[k].lock() {
+                *s = d;
+            }
+        }
+    };
+    let threads = cfg.threads.clamp(1, 4).min(todo.len());
+    if threads <= 1 {
+        work();
+    } else {
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                let spawned = std::thread::Builder::new()
+                    .stack_size(64 << 20)
+                    .spawn_scoped(s, work);
+                if spawned.is_err() {
+                    work();
+                }
+            }
+        });
+    }
+    slots
+        .into_iter()
+        .flat_map(|s| s.into_inner().unwrap_or_default())
+        .collect()
+}
+
 fn target_name(t: ts_r_config::ScriptTarget) -> &'static str {
     use ts_r_config::ScriptTarget as T;
     match t {
