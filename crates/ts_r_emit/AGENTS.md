@@ -265,9 +265,10 @@ Declarations (E2, 2026-10-19): 1,127 of 1,320 baselines without JavaScript input
 (brace-expansion, lru-cache, minimatch, rxjs): 261 / 261 `.d.ts` bytes-exact, 4 / 4
 consumers identical. See the record's E2 implementation notes.
 
-Real repositories (E6, 2026-10-19, `cargo xtask emit-repos`, 13 gated cases): 7,047 / 7,279
-output files byte-identical with tsc 7 (96.8%, gate 95%; was 68.4%), peak RSS at or under
-tsc 7's on 13 / 13 cases. See the record's E6 implementation notes.
+Real repositories (E6, 2026-11-10, `cargo xtask emit-repos`, 13 gated cases): 7,161 / 7,279
+output files byte-identical with tsc 7 (98.4%, gate 95%; was 68.4%), identical diagnostics on
+13 / 13 cases, peak RSS at or under tsc 7's on 13 / 13 cases (minimatch 60 MB, 0.14 s). See
+the record's E6 implementation notes.
 
 Tests: `tests/emit.rs` (refusals, `using`, TS5055 overwrite protection, JSON copies, writer
 order, 1-vs-4-thread determinism) and `tsc_layout_projects`: each `tests/tsc_layout/<case>/` (a tsconfig and sources, `expected/`

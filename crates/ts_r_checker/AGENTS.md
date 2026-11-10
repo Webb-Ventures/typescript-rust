@@ -347,7 +347,12 @@ Files, by layer:
   `(t: T, t1: T) => void` gives `t2: D` (tsc: `inferFromAnnotatedParametersAndReturn`
   in checker.go; `annotated_params_infer_first`). With a generic return context, a
   context-sensitive argument fixes to the context's inferences that don't mention the
-  outer call's open type parameters. A conditional type's `infer` takes an empty array
+  outer call's open type parameters. A return-context inference whose widened covariant
+  candidates are `never`, `any` or assignable to no contravariant candidate takes the
+  contravariant inference instead (`settle_return_context`; tsc: getInferredType), so
+  `Mono<T>` against `Op<string, number>` gives `T = string`. A conditional expression of
+  context-sensitive branches collects both branches' contextual signatures
+  (`nested_context_sigs`). A conditional type's `infer` takes an empty array
   literal's element type (the implicit `never`); a call's type parameters take it as a
   plain `never` candidate (`from([])` is `Box<never>`). A literal candidate is widened
   only when no candidate came from inside another type (type argument, property, index
@@ -2062,7 +2067,9 @@ Files, by layer:
   `typeof` queries, blocks, `this`, mapped and `infer` parameters keep all of them, and a
   parameter named in the extends type of an enclosing conditional type counts as named (its
   implied constraint can appear inside; tsc: isTypeParameterPossiblyReferenced). So
-  `(data: { elements: El[] }) => R` doesn't mention `R` in its parameter.
+  `(data: { elements: El[] }) => R` doesn't mention `R` in its parameter. A class's `this`
+  type parameter counts only when a `this` type node appears inside, so `{ type: null }` in a
+  method parameter is one type for every receiver (minimatch: 5.5 s / 700 MB -> 0.14 s).
 - **`const` type parameters.** A literal whose contextual type (at its level or any
   enclosing array, spread or property level) is a `const` type parameter, a union or
   intersection with one, or an indexed access of one is in a const context

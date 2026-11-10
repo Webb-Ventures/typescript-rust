@@ -374,3 +374,35 @@ fn many_this_assignments_walk_flow_linearly() {
     assert_eq!(msgs, ["Type 'number' is not assignable to type 'string'."]);
     assert!(took.as_secs() < 30, "took {took:?}");
 }
+
+/// A type literal in a class member's signature doesn't capture the class's `this` type
+/// (tsc: isTypeParameterPossiblyReferenced). When it did, each member read through an
+/// intersection receiver (`A & { type: E }`) made new `{ type: null }` instantiations, and
+/// relating the narrowed argument to the parameter ran until the relation budget was
+/// spent: minimatch's `ast.ts` took 5.5 s and 700 MB (0.15 s and 60 MB after).
+#[test]
+fn class_type_literals_ignore_the_receiver() {
+    let mut s = String::from(
+        "type E = '!' | '?'\n\
+         export class A {\n\
+         \x20 type: E | null = null\n\
+         \x20 m1(c: A): c is A & { type: null } { return false }\n\
+         \x20 m2(this: A & { type: E }, c: A & { type: null }) {}\n\
+         \x20 m3(c: A & { type: null }) {}\n\
+         \x20 m4(c: A): c is A & { p: [A & { type: E }] } { return false }\n\
+         }\n\
+         declare const a: A & { type: E }\n",
+    );
+    for i in 0..8 {
+        s.push_str(&format!(
+            "declare const c{i}: A\nif (a.m1(c{i})) {{ a.m3(c{i}); a.m2(c{i}) }}\n"
+        ));
+    }
+    let start = std::time::Instant::now();
+    let Some(out) = check(&s) else {
+        return;
+    };
+    assert!(out.is_empty(), "{out:?}");
+    let took = start.elapsed();
+    assert!(took.as_secs() < 10, "took {took:?}");
+}
