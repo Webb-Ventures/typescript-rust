@@ -508,7 +508,11 @@ Files, by layer:
   JSX closing tag replay drops it. TS2715 (`abstract_access.rs`): `this.p` and
   destructurings of `this` reaching an abstract property during construction. TS2612
   (`check_base_property_overwrite`): an uninitialized field redeclaring a base field under
-  `useDefineForClassFields`, unless the constructor assigns it. TS2816 (`check_this`):
+  `useDefineForClassFields`, unless the constructor assigns it on every path (the flow
+  walk of TS2564, with the class type as the declared type, as tsc passes it); a field
+  with `!` or a program without strictNullChecks is reported even when assigned, and
+  abstract base fields never are (tsc: checker.go, checkKindsOfPropertyMemberOverrides).
+  TS2816 (`check_this`):
   `this` in a static field value (arrows included) of a class with legacy
   (`experimentalDecorators`) class decorators.
 - **Widening implicit-any errors** (`widening_errors.rs`; only under noImplicitAny without
@@ -549,9 +553,55 @@ Files, by layer:
   `T2`. An intersection of class references is rebuilt without its alias and prints as
   `Foo & Bar` (tsc: checker/checker.go, resolveBaseTypesOfInterface, isValidBaseType,
   getTypeWithThisArgument).
+- Properties of an intersection (a class extending `Mix(A, B)`, `x: A & B`), tsc's
+  synthetic properties: in relations (`property_related`) the source property is private
+  if any part is, else public if any part is, and a protected target is matched by any
+  part declared in (a class derived from) the target's class (`intersection_constituents`;
+  tsc: relater.go, isValidOverrideOf). In accesses (`check_property_accessibility`) parts
+  with one declaration (instantiations of one class) are checked as it; otherwise
+  (`intersection_property_access`) a public part makes it public, and all-protected parts
+  are accessible only in a class deriving from every part's class, else TS2445 naming
+  the accessed type; private parts, `this` parameters and TS2446 stay silent (tsc:
+  checker.go, checkPropertyAccessibilityAtLocation, isClassDerivedFromDeclaringClasses).
+  A class's statics from an intersection base constructor take the intersection's
+  property for names several parts declare (`class_static_members`).
+- TS2510 (`check_base_constructor_returns` in `heritage.rs`): a class whose `extends`
+  expression is not a class (no class name, no class static side) but a plain object
+  type with construct signatures: the signatures taking the written type arguments,
+  instantiated with them, must all return identical types, else TS2510 at the
+  expression. Intersections, unions and type variables (mixins) are not checked (tsc:
+  checker.go, checkClassLikeDeclaration, getInstantiatedConstructorsForTypeArguments).
+- A method declared by a class and a merged interface (`class_interface_method` in
+  `overloads.rs`: one merged member whose origins span both) checks `abstract` across all
+  its declarations in source order (one file only): TS2512 at each declaration whose
+  `abstract` differs from the canonical one, the implementation when it shares the first
+  declaration's container, else the first (`check_merged_abstract_agreement`; the class
+  body's own group check leaves such methods alone). `super.m` of such a member reads the
+  modifiers of the origin declared first, so an abstract class method declared before the
+  interface's signature is TS2513 (tsc: checker.go, checkFunctionOrConstructorSymbol,
+  getCanonicalOverload; the symbol's value declaration).
+- Signature parameters under strictFunctionTypes (`relate.rs`, `signature_related_mode`)
+  relate contravariantly unless the target signature was declared by a method or a class
+  `constructor` (`is_class_constructor_sig`): construct signatures of `new (x: T) => U`
+  types and interfaces are strict like call signatures, so `new (x: number) => R` does not
+  fit `new (x?: number) => R` (tsc: relater.go, compareSignaturesRelated, strictVariance).
+  A class without a constructor has no declaration kind to exempt it either.
 - TS2310 (`check_circular_interface_bases`): every interface declaration with an
   `extends` clause whose symbol's bases lead back to it (`has_circular_bases`). Classes
-  get TS2506 instead. A class `extends` naming an interface with no value
+  whose chain of class names loops get TS2506 instead. Besides that, TS2310 is reported
+  when resolving the base types ran into itself (`base_resolution_circular`: the
+  `Resolving::BaseTypes` entry was marked circular), for interfaces and for class
+  declarations whose `extends` names a class: `interface K extends J<K["x"]>`,
+  `class Foo extends Next<Foo>` where `Next`'s default reads `C["p"]` (tsc: checker.go,
+  getBaseTypes). The outer resolution keeps the bases it found (they are cached, as tsc
+  keeps `resolvedBaseTypes`); only the inner request sees none. The shared bases slot
+  publishes the circularity flag together with the types, and cache hits restore that
+  flag in the reading worker so TS2310 does not depend on which worker resolved first.
+  The type of a class's `extends` expression is resolved under its own key,
+  `Resolving::BaseConstructor` (tsc's base constructor type), so a cycle through a mixin
+  call's argument alone
+  (`mixinWithBaseDependingOnSelfNoCrash1`) is not TS2310; classes extending an expression
+  never get it here, since our order of resolution there differs from tsc's. A class `extends` naming an interface with no value
   (`extends_interface_only`) is TS2689 and its expression is not checked. Only the first
   type of the first `extends` clause is checked; the rest of `extends A, B` and a second
   `extends` clause are grammar errors only (tsc: checker.go, checkClassLikeDeclaration
@@ -1335,6 +1385,18 @@ Files, by layer:
   `T | undefined`) still includes `undefined`, is TS2565 (`super.p`, or `f.p` before
   `f.p = v`; tsc 7). CommonJS `module.exports.p` is not covered (`module` is `any`), nor a
   `const` arrow's expando in TypeScript (`expando_used_before_assigned`).
+- **Property initialization through flow** (strictPropertyInitialization): TS2564 for an
+  identifier or `#private` field asks the flow walk of `this.<name>` at the constructor's
+  end and its returns (`property_initialized_in_constructor`, initial type `T |
+  undefined`): `undefined` left on any path is the error, so an early `return` or an
+  assignment in a loop body is not enough. Computed names keep the syntactic test
+  (assigned anywhere in the constructor). TS2565 (`this_property_used_before_assigned`):
+  `this.p` read where the flow container is the constructor of the class declaring `p`
+  without an initializer (not static, abstract, `!`, `declare` or ambient), and its flow
+  type from `T | undefined` still holds `undefined`; compound assignments and `++` read,
+  the target of `&&=`, `||=`, `??=` is not reported (observed). Arrows in the
+  constructor are their own flow containers (tsc: checker.go,
+  isPropertyInitializedInConstructor, getFlowTypeOfAccessExpression).
 - **Arrow `this` parameters.** An arrow function whose first parameter is `this` is TS2730
   at the parameter (`check_function_like`; JSDoc `@this` on an arrow is the parser's,
   `arrow_this_param`). Elsewhere (`check_this_param_placement`, from the type-annotation
@@ -1837,6 +1899,15 @@ Files, by layer:
 - **Conditional sources.** A deferred conditional source relates through its constraint,
   then through its branches; generic branches relate through their base constraint
   (`Awaited<E>` with `E extends { a: 1 }` is not assignable to `never`).
+  Against another deferred conditional, after the pairwise and target-branch rules, the
+  source's default constraint (its two branches, the true one narrowed by `extends`, an
+  `any` branch dropped) comes before its distributive constraint. The distributive one
+  replaces the check type by its constraint, so `Tag<Key<P>, V>` (`T extends X ? T : T &
+  Y` over a conditional `Key<P>`) would become `[string] & Y | [string[], string] & Y`
+  and stop being a `Key<P>`; this order is what tRPC's tanstack-react-query option
+  interfaces depend on to avoid TS2430 (tsc: relater.go, structuredTypeRelatedToWorker,
+  the conditional-source case; checker.go, getDefaultConstraintOfConditionalType).
+  Elaborations still print the distributive constraint where tsc prints the default one.
 - **Callback return contexts.** While a call infers, a defaulted type parameter that only
   a callback's return type mentions stays open in that callback's contextual type
   (`then(v => Promise.reject())` gives `Promise<never>`, not `Promise<T>`); optional
@@ -3574,12 +3645,12 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-07, e8416dd, parity/checker-gap-5: tagged templates take tsc's tag
-  rules; 12750 compared variants):
-  12481 exact (97.9%; all diagnostics and chains), 12501 (98.0%) exact on first lines;
-  128 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
+  Current (2026-11-07, babed30, parity/checker-gap-6: heritage checks and relations;
+  12750 compared variants):
+  12489 exact (98.0%; all diagnostics and chains), 12509 (98.1%) exact on first lines;
+  126 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
-  Earlier: 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
+  Earlier: 12481, 128 and 4 (e8416dd, parity/checker-gap-5); 12481, 128 and 4 (dc65132, parity/checker-gap-4-fix); 12480, 129 and 4 (a24c22a, parity/checker-gap-4); 12473, 132 and 4 (c35c628, parity/checker-gap-3); 12469, 135 and 4 (077005b, parity/checker-gap-2); 12466, 134 and 4 (6639285, parity/checker-gap-1); 12463, 136 and 5 (3042fe0, parity/checker-3); 12460, 144 and 5 (f2f24bb, wip/v1-checker10); 12458, 144 and 5 (400dc10, wip/v1-checker9); 12451, 144 and 5 (d505570, wip/v1-checker8); 12446, 144 and 5 (6a873bc, wip/v1-checker7); 12433, 150 and 5 (d5a9934, wip/v1-checker6); 12428, 154 and 5 (31b97a8, wip/v1-checker5); 12408, 173 and 6 (fb99a81, wip/v1-checker4); 12389, 178 and 6 (f7fe53f, wip/v1-checker3); 12372, 186 and 10 (687b025, wip/v1-checker on fa446e4); 12365, 191 and 10 (9b5f8f2, parity/checker-2 on 79646f9); 12350, 200 and 17 (3cd16f3, #39 on main); 12360, 194 and 10 (321762c, this branch on 0353caa); 12345, 203 and 17 (48eb582, #32 on main); 12350, 198 and 10 (bad3df6, this branch on 1c10cde); 12335, 207 and 17 (1d94474, #31 on main); 12330, 214 and 22 (775ce97, this branch before #31); 12326, 216 and 22 (on 087afc9, before the merge); 12316, 220 and 22 (47300d06, alpha.4 round 3); 12116, 303 and 37 (0bcd47e3, alpha.4 round 2); 11965, 328 and 43 (7c73600, alpha.4 round 1); 11615, 454 and 54 (0bc6c71, alpha.3); 11111, 703 and 92 (main at 9f23c9d); 8444 exact, 1698 and 320 (2026-10-16, after conformance round 4); 7879, 2319 and 573 (round 3).
   The example checks through syntax errors as tsc's harness does (since m8/parser-diagnostics).
 - Single files against tsc: put the file next to a `tsconfig.json` and diff
   `target/release/ts-r-check -p dir --pretty false` with tsc's output.
@@ -3647,13 +3718,22 @@ and integration tests allow: they link the one library build).
   behind them, so the language server finds no symbol for `<form onSubmit>`. Evolving arrays
   in JavaScript files, TS7005 for closures created after conditional assignments of an auto
   variable, reverse mapped contexts in JSX attributes (treated as unknown), `this` parameter checks, modifier order outside classes
-  (`declare export`, `out in`), TS2512/TS2513
-  across a class merged with an interface, TS2564 on computed names (`["c"]: number`),
-  TS2729 through the computed names of object-literal accessors.
-- Heritage: TS2612 (redeclared base property under `useDefineForClassFields`), TS2310
-  (circular bases: the heritage checks are skipped), discriminated-union decomposition in
-  relations (`{ done: boolean }` to `IteratorResult`), generic method parameters inferred
-  against a `keyof` constraint.
+  (`declare export`, `out in`), TS2729 through the computed names of object-literal
+  accessors.
+- Heritage (parity/checker-gap-6 left): TS2310 is not reported for a class whose `extends`
+  is an expression (a mixin call) in a base cycle (tsc does; ours is order-dependent in
+  project mode, so silent); a circular type parameter default (`C['someProp']` while `C`
+  resolves) reads as `unknown` (extra TS18046 in circularConstraintYieldsAppropriateError,
+  and TS2456/TS2313 are missed in circularBaseTypes); protected access through an
+  intersection of classes stays silent with a private part, a `this` parameter, or for
+  TS2446; destructuringParameterDeclaration2's TS2416 chain differs (an optional binding
+  pattern adds `| undefined` without strictNullChecks); a conditional source whose check
+  type is itself a conditional misses tsc's error against an unrelated conditional when
+  the extends types differ (`X<P> extends any ? K<P> : K<P>` to `K2<P>`, silent).
+- tRPC packages other than server, each checked with its own tsconfig (client, next,
+  openapi, react-query, tanstack-react-query, tests, upgrade): no TS2430 left; the extras
+  are TS2339 on `TRPCClient<TRouter>` / `CreateQueryUtils<TRouter>` proxies, TS7006,
+  TS2344, TS2322 in openapi's `params.gen.ts`, and TS2688 for `jest` types.
 - Unused checks: write-only private properties through element access in another file,
   overloaded functions and merged declarations are not reported (silent).
 - Sibling type parameters in the constraints of a cloned generic method signature keep

@@ -175,34 +175,41 @@ impl<'c, 'a> Ck<'c, 'a> {
                 }
             }
         }
-        if out.is_none()
-            && let Some((a, b)) = self.conditional_branches_narrowed(t)
-        {
-            // `infer X` template placeholders are strings here.
-            let infers = self.store().list_items(root.infer_params).to_vec();
-            let strs: Vec<TypeId> = infers
-                .iter()
-                .filter(|&&p| self.is_template_infer_param(p))
-                .copied()
-                .collect();
-            let (a, b) = if strs.is_empty() {
-                (a, b)
-            } else {
-                let to = vec![TypeId::STRING; strs.len()];
-                let m = self.store().mapper(&strs, &to);
-                (self.instantiate(a, m), self.instantiate(b, m))
-            };
-            out = Some(if self.store().flags(a).contains(TypeFlags::ANY) {
-                b
-            } else if self.store().flags(b).contains(TypeFlags::ANY) {
-                a
-            } else {
-                self.union2(a, b)
-            });
+        if out.is_none() {
+            out = self.conditional_default_constraint(t);
         }
         self.pop_resolution();
         self.cond_constraint_depth -= 1;
         out.filter(|&x| x != TypeId::UNRESOLVED)
+    }
+
+    /// The default constraint of a deferred conditional type: the union of its branches
+    /// (the true one narrowed by the `extends` type), without a branch that is `any`.
+    pub(crate) fn conditional_default_constraint(&mut self, t: TypeId) -> Option<TypeId> {
+        let d = self.store().conditional_data(t)?;
+        let root = *self.store().conditional_root_data(d.root);
+        let (a, b) = self.conditional_branches_narrowed(t)?;
+        // `infer X` template placeholders are strings here.
+        let infers = self.store().list_items(root.infer_params).to_vec();
+        let strs: Vec<TypeId> = infers
+            .iter()
+            .filter(|&&p| self.is_template_infer_param(p))
+            .copied()
+            .collect();
+        let (a, b) = if strs.is_empty() {
+            (a, b)
+        } else {
+            let to = vec![TypeId::STRING; strs.len()];
+            let m = self.store().mapper(&strs, &to);
+            (self.instantiate(a, m), self.instantiate(b, m))
+        };
+        Some(if self.store().flags(a).contains(TypeFlags::ANY) {
+            b
+        } else if self.store().flags(b).contains(TypeFlags::ANY) {
+            a
+        } else {
+            self.union2(a, b)
+        })
     }
 
     /// What a source must relate to for a deferred conditional target without `infer`

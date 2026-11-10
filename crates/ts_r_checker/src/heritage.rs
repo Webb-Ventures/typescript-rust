@@ -39,32 +39,125 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(start) = self.c.sym_of_decl(c) else {
             return;
         };
+        if !self.class_name_cycle(start) {
+            return;
+        }
+        let ast = self.ast(c.file);
+        let (Node::ClassDecl { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. }) =
+            *ast.node(c.node)
+        else {
+            return;
+        };
+        let name = self.c.sym_name(start).to_owned();
+        self.error(
+            Loc::new(c.file, n),
+            dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_BASE_EXPRESSION_2506,
+            &[&name],
+        );
+    }
+
+    /// Whether the `extends` chain of class names from class `start` leads back to it.
+    fn class_name_cycle(&mut self, start: SymId) -> bool {
         let mut cur = start;
         let mut seen: Vec<SymId> = Vec::new();
         for _ in 0..64 {
             let Some(next) = self.base_class_symbol(cur) else {
-                return;
+                return false;
             };
             if next == start {
-                let ast = self.ast(c.file);
-                let (Node::ClassDecl { name: Some(n), .. } | Node::ClassExpr { name: Some(n), .. }) =
-                    *ast.node(c.node)
-                else {
-                    return;
-                };
-                let name = self.c.sym_name(start).to_owned();
-                self.error(
-                    Loc::new(c.file, n),
-                    dg::_0_IS_REFERENCED_DIRECTLY_OR_INDIRECTLY_IN_ITS_OWN_BASE_EXPRESSION_2506,
-                    &[&name],
-                );
-                return;
+                return true;
             }
             if seen.contains(&next) {
-                return;
+                return false;
             }
             seen.push(next);
             cur = next;
+        }
+        false
+    }
+
+    /// TS2510 at the `extends` expression of class declaration `l` when its base
+    /// constructor is a class-like object type that is not a class (`getBase()` returning
+    /// an interface with several `new` signatures) and the construct signatures taking the
+    /// written type arguments, instantiated with them, do not all return the same type
+    /// (tsc: checker.go, checkClassLikeDeclaration, getInstantiatedConstructorsForTypeArguments).
+    /// Intersections, unions and type variables (mixins) are left alone.
+    fn check_base_constructor_returns(&mut self, l: Loc, sym: SymId) {
+        if self.c.file(l.file).is_js() || self.base_class_symbol(sym).is_some() {
+            return;
+        }
+        let ast = self.ast(l.file);
+        let (Node::ClassDecl { heritage, .. } | Node::ClassExpr { heritage, .. }) = *ast.node(l.node)
+        else {
+            return;
+        };
+        let Some(first) = ast.list(heritage).iter().find_map(|&h| match *ast.node(h) {
+            Node::HeritageClause {
+                kind: HeritageKind::Extends,
+                types,
+            } => ast.list(types).first().copied(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let Node::ExprWithTypeArgs { expr, type_args } = *ast.node(first) else {
+            return;
+        };
+        let Some(bc) = self.base_constructor_type(sym) else {
+            return;
+        };
+        let st = self.store();
+        if !st.flags(bc).contains(TypeFlags::OBJECT)
+            || st.flags(bc).intersects(TypeFlags::UNION | TypeFlags::INTERSECTION)
+        {
+            return;
+        }
+        // A class's own static side (`typeof C` through a variable or call) is a class.
+        if let Some(o) = st.object_of(bc)
+            && let ts_r_types::ObjectKind::Anonymous { kind, .. } = o.kind
+            && matches!(
+                kind,
+                crate::declared::anon::CLASS_STATIC | crate::declared::anon::CLASS_EXPR
+            )
+        {
+            return;
+        }
+        let args: Vec<TypeId> = match type_args.map(|t| *ast.node(t)) {
+            Some(Node::TypeArgs { args }) => ast
+                .list(args)
+                .iter()
+                .map(|&a| self.type_from_node(Loc::new(l.file, a)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let sigs = self.signatures_of(bc, SigKind::Construct);
+        let mut returns: Vec<TypeId> = Vec::new();
+        for s in sigs.iter().copied() {
+            let tps = self
+                .store()
+                .list_items(self.store().sig(s).type_params)
+                .to_vec();
+            if !self.type_arg_count_fits(&tps, args.len()) {
+                continue;
+            }
+            let s = if tps.is_empty() {
+                s
+            } else {
+                let filled = self.fill_type_args_in(&tps, &args, false);
+                let m = self.store().mapper(&tps, &filled);
+                self.instantiate_signature_full(s, m)
+            };
+            returns.push(self.return_type_of(s));
+        }
+        let Some((&r0, rest)) = returns.split_first() else {
+            return;
+        };
+        if rest.iter().any(|&r| !self.is_identical(r0, r)) {
+            self.error(
+                Loc::new(l.file, expr),
+                dg::BASE_CONSTRUCTORS_MUST_ALL_HAVE_THE_SAME_RETURN_TYPE_2510,
+                &[],
+            );
         }
     }
 
@@ -184,6 +277,17 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(false)
     }
 
+    /// Whether resolving the base types of `sym` ran into itself: an `extends` whose type
+    /// arguments, defaults or indexed accesses need the members of `sym` (`interface M2
+    /// extends M<M2[keyof M2]>`, `class Foo extends Next<Foo>` with a default reading
+    /// `Foo["p"]`). tsc reports TS2310 at each class and interface declaration then
+    /// (tsc: checker.go, getBaseTypes).
+    pub(crate) fn base_resolution_circular(&mut self, sym: SymId) -> bool {
+        let _ = self.base_types(sym);
+        self.circular
+            .contains(&crate::checker::Resolving::BaseTypes(sym))
+    }
+
     /// TS2310 for interface declaration `l` with an `extends` clause whose symbol's base
     /// types lead back to it (every such declaration of the symbol is reported).
     pub(crate) fn check_circular_interface_bases(&mut self, l: Loc) {
@@ -199,7 +303,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         let Some(sym) = self.c.sym_of_decl(l) else {
             return;
         };
-        if self.has_circular_bases(sym) != Some(true) {
+        if self.has_circular_bases(sym) != Some(true) && !self.base_resolution_circular(sym) {
             return;
         }
         let t = self.declared_type_of_symbol(sym);
@@ -307,9 +411,28 @@ impl<'c, 'a> Ck<'c, 'a> {
             return;
         };
         let at = name.map_or(l, |n| Loc::new(l.file, n));
+        if self.base_resolution_circular(sym) {
+            // A cycle of class names is TS2506 instead (`check_base_cycle`). A base that is
+            // an expression (a mixin call) reaches its cycle through the base constructor in
+            // tsc, in an order ours doesn't follow: left silent.
+            if matches!(self.node(l), Node::ClassDecl { .. })
+                && self.base_class_symbol(sym).is_some()
+                && !self.class_name_cycle(sym)
+            {
+                let t = self.declared_type_of_symbol(sym);
+                let shown = self.type_to_string(t);
+                self.error(
+                    at,
+                    dg::TYPE_0_RECURSIVELY_REFERENCES_ITSELF_AS_A_BASE_TYPE_2310,
+                    &[&shown],
+                );
+            }
+            return;
+        }
         if self.has_circular_bases(sym) != Some(false) {
             return;
         }
+        self.check_base_constructor_returns(l, sym);
         let derived = self.type_with_this(sym);
         if self.heritage_skip(derived) {
             return;

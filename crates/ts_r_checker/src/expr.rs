@@ -4128,7 +4128,7 @@ impl<'c, 'a> Ck<'c, 'a> {
         }
         let ast = self.ast(e.file);
         if matches!(ast.node(skip_parens(ast, obj)), Node::This {}) {
-            return false;
+            return self.this_property_used_before_assigned(e, p, t);
         }
         let Some(vd) = self.c.value_decl(p) else {
             return false;
@@ -4150,6 +4150,74 @@ impl<'c, 'a> Ck<'c, 'a> {
             || self.flow_container(vd) != self.flow_container(e)
             || self.contains_undefined(t)
         {
+            return false;
+        }
+        let optional = self.union(&[t, TypeId::UNDEFINED]);
+        let ft = self.flow_type_of_reference(e, t, optional);
+        self.contains_undefined(ft)
+    }
+
+    /// TS2565 (strictPropertyInitialization): `this.p` read in the constructor of the class
+    /// declaring `p` without an initializer (not static, abstract, `!` or ambient) before
+    /// every path to it assigns `p`: its flow type, starting from `t | undefined`, still holds
+    /// `undefined` (tsc: checker.go, getFlowTypeOfAccessExpression, assumeUninitialized).
+    fn this_property_used_before_assigned(&mut self, e: Loc, p: SymId, t: TypeId) -> bool {
+        if !self.c.opts.strict_property_initialization {
+            return false;
+        }
+        let Some(vd) = self.c.value_decl(p) else {
+            return false;
+        };
+        if vd.file != e.file || self.c.file(e.file).is_js() {
+            return false;
+        }
+        let ast = self.ast(e.file);
+        let Node::PropertyDef {
+            value: None,
+            modifiers,
+            definite: false,
+            ..
+        } = *ast.node(vd.node)
+        else {
+            return false;
+        };
+        if modifiers.intersects(
+            ts_r_ast::Modifiers::STATIC | ts_r_ast::Modifiers::ABSTRACT | ts_r_ast::Modifiers::DECLARE,
+        )
+            || self.is_ambient_node(vd)
+            || self.contains_undefined(t)
+        {
+            return false;
+        }
+        // The read's flow container is the constructor of the declaring class.
+        let Some(container) = self.flow_container(e) else {
+            return false;
+        };
+        let cl = Loc::new(e.file, container);
+        let in_ctor = self.c.parent(cl).is_some_and(|m| {
+            matches!(
+                *ast.node(m.node),
+                Node::MethodDef {
+                    kind: ts_r_ast::MethodKind::Constructor,
+                    value,
+                    ..
+                } if value == container
+            ) && self.c.parent(m) == self.c.parent(vd)
+        });
+        if !in_ctor || !self.is_narrowable_reference(e) {
+            return false;
+        }
+        // The target of a logical assignment (`this.p ??= v`) is not reported (observed).
+        if self.c.parent(e).is_some_and(|a| {
+            matches!(
+                *ast.node(a.node),
+                Node::Assign {
+                    left,
+                    op: AssignOp::AndAssign | AssignOp::OrAssign | AssignOp::CoalesceAssign,
+                    ..
+                } if left == e.node
+            )
+        }) {
             return false;
         }
         let optional = self.union(&[t, TypeId::UNDEFINED]);
@@ -4309,8 +4377,59 @@ impl<'c, 'a> Ck<'c, 'a> {
         if !self.reporting(pl.file) {
             return;
         }
+        // A property of an intersection: one declaration behind every part (instantiations
+        // of one class) is checked as that declaration; parts from different declarations
+        // follow tsc's rules for synthetic properties (`intersection_property_access`).
+        let mut p = p;
+        if !name.starts_with('#')
+            && let Some(origins) = self.intersection_parts(p)
+        {
+            let decls: Vec<Option<Loc>> = origins
+                .iter()
+                .map(|&o| self.c.value_decl(o).or_else(|| self.c.first_decl(o)))
+                .collect();
+            if decls[0].is_some() && decls.iter().all(|d| *d == decls[0]) {
+                p = origins[0];
+            } else {
+                self.intersection_property_access(pl, &origins, obj_type, name, is_super);
+                return;
+            }
+        }
+        // (`super.m` of an instantiated member of a merged one: the merged symbol.)
+        let p = match self.c.synth_sym(p) {
+            Some(x)
+                if is_super
+                    && x.origins.len() == 1
+                    && self
+                        .c
+                        .synth_sym(x.origins[0])
+                        .is_some_and(|y| y.origins.len() > 1) =>
+            {
+                x.origins[0]
+            }
+            _ => p,
+        };
         let sym = match self.c.synth_sym(p) {
             Some(x) if x.origins.len() == 1 => Some(x.origins[0]),
+            // A class member merged with an interface's (`super.m` with `abstract m()` in
+            // the class and `m()` in a merged interface): tsc reads the symbol's first
+            // declaration, so the origin declared first (in one file) stands for it.
+            Some(x) if is_super && x.flags.contains(SymbolFlags::METHOD) => {
+                let firsts: Vec<(SymId, Loc)> = x
+                    .origins
+                    .iter()
+                    .filter_map(|&o| Some((o, self.c.first_decl(o)?)))
+                    .collect();
+                let one_file = firsts.windows(2).all(|w| w[0].1.file == w[1].1.file);
+                if one_file {
+                    firsts
+                        .iter()
+                        .min_by_key(|(_, d)| self.ast(d.file).span(d.node).start)
+                        .map(|(o, _)| *o)
+                } else {
+                    None
+                }
+            }
             Some(_) => None,
             None => Some(p),
         };
@@ -4497,6 +4616,85 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
             self.error(pl, dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_AND_ITS_SUBCLASSES_2445, &[name, &class_name]);
         }
+    }
+
+    /// The parts of property `p` when it is a property of an intersection with several
+    /// (through instantiations of it).
+    fn intersection_parts(&self, p: SymId) -> Option<Box<[SymId]>> {
+        let mut cur = p;
+        for _ in 0..8 {
+            let x = self.c.synth_sym(cur)?;
+            if x.check & crate::symbols::check_flags::SYNTHETIC_INTERSECTION != 0
+                && x.origins.len() > 1
+            {
+                return Some(x.origins.clone());
+            }
+            if x.origins.len() != 1 {
+                return None;
+            }
+            cur = x.origins[0];
+        }
+        None
+    }
+
+    /// Accessibility of a property of an intersection whose parts have different
+    /// declarations (tsc: checker.go, checkPropertyAccessibilityAtLocation on a synthetic
+    /// property): public when any part is public; protected when all are, accessible in a
+    /// class deriving from every part's declaring class, else TS2445 naming the accessed
+    /// type (`C4`, `typeof C4`, `Protected & Protected2`). A private part, a `this`
+    /// parameter and the instance check (TS2446) are left silent.
+    fn intersection_property_access(
+        &mut self,
+        pl: Loc,
+        parts: &[SymId],
+        obj_type: TypeId,
+        name: &str,
+        is_super: bool,
+    ) {
+        let kinds: Vec<Option<bool>> = parts.iter().map(|&q| self.is_private_like(q)).collect();
+        if is_super || kinds.iter().any(|k| *k != Some(false)) {
+            return;
+        }
+        let mut classes = Vec::new();
+        for &q in parts {
+            let Some(c) = self
+                .c
+                .value_decl(q)
+                .or_else(|| self.c.first_decl(q))
+                .and_then(|d| self.enclosing_class(d))
+            else {
+                return;
+            };
+            classes.push(c);
+        }
+        let mut cur = self.enclosing_class(pl);
+        let mut guard = 0;
+        while let Some(c) = cur {
+            guard += 1;
+            if guard > 64 {
+                return;
+            }
+            let mut all = true;
+            for &dc in &classes {
+                if c != dc && !self.class_derives_from(c, dc) {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                return;
+            }
+            cur = self.enclosing_class(c);
+        }
+        if self.this_parameter_class(pl).is_some() {
+            return;
+        }
+        let shown = self.type_to_string(obj_type);
+        self.error(
+            pl,
+            dg::PROPERTY_0_IS_PROTECTED_AND_ONLY_ACCESSIBLE_WITHIN_CLASS_1_AND_ITS_SUBCLASSES_2445,
+            &[name, &shown],
+        );
     }
 
     /// The class or interface named by the explicit `this` parameter of the function

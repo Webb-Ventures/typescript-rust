@@ -582,6 +582,49 @@ impl<'c, 'a> Ck<'c, 'a> {
         Some(t)
     }
 
+    /// Whether `this.<name>` of type `declared` is definitely assigned where the constructor
+    /// function `ctor` (its `FunctionExpr`) returns: its flow type there, starting from
+    /// `declared | undefined`, no longer holds `undefined` (TS2564; tsc: checker.go,
+    /// isPropertyInitializedInConstructor). `None` when the constructor has no flow graph.
+    pub(crate) fn property_initialized_in_constructor(
+        &mut self,
+        file: ts_r_diagnostics::FileId,
+        ctor: NodeId,
+        name: &str,
+        declared: TypeId,
+    ) -> Option<bool> {
+        let ff = *self.c.bound(file).flow.function_flow(ctor)?;
+        let key = RefKey {
+            root: RefRoot::This,
+            path: vec![name.into()],
+        };
+        let mut h = FxHasher::default();
+        key.hash(&mut h);
+        let initial = self.union(&[declared, TypeId::UNDEFINED]);
+        let w = Walk {
+            key,
+            hash: h.finish(),
+            root_name: "this".into(),
+            declared,
+            initial,
+            cross_functions: false,
+            file,
+            at: None,
+        };
+        if self.flow_depth == 0 && self.flow_loop > 0 {
+            self.clear_flow_temp(0);
+        }
+        for f in [ff.end, ff.returns] {
+            if !f.is_unreachable() && self.flow_reachable_with(file, f, false, false) {
+                let t = self.walk_flow(&w, f);
+                if self.contains_undefined(t) {
+                    return Some(false);
+                }
+            }
+        }
+        Some(true)
+    }
+
     /// Narrowing of an identifier that refers to a variable or parameter, with the
     /// "used before being assigned" check.
     pub fn narrowed_identifier_type(
