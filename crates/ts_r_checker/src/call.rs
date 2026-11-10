@@ -4311,6 +4311,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     let ctx = self.first_context_of(l, sig).unwrap_or(pt);
                     let saved =
                         std::mem::replace(&mut self.placeholder_fns, nested.into_iter().collect());
+                    let saved_ty = std::mem::replace(&mut self.placeholder_fn_type, TypeId::ANY);
                     self.push_assumptions();
                     self.enter_speculation();
                     self.no_report += 1;
@@ -4319,6 +4320,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                     self.leave_speculation();
                     self.pop_assumptions();
                     self.placeholder_fns = saved;
+                    self.placeholder_fn_type = saved_ty;
                     t
                 }
                 (Arg::Expr(n), None) => {
