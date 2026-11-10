@@ -2864,6 +2864,12 @@ Files, by layer:
   `any` is a mixin constructor.
 - **Spread freshness.** An object literal with spreads is fresh (`fresh_spread_literal`,
   `spread_literals`), but only the properties written in it are excess, not spread ones.
+  Instantiating a fresh literal keeps both relations: its regular twin is the regular
+  twin's instantiation, and the copy inherits the `spread_literals` owner (Playwright's
+  `[{ ...userConfig, workers: undefined }]` through a union of arrays' `map`). A spread
+  result carries `CONTAINS_TYPE_PARAMETER` when a spread side does, so a generic
+  function's inferred `{ ...mk(router), x }` return type is instantiated at each call
+  (`parity/spread_generic_return.ts`).
 - **Array literal elaboration.** Elements are typed in the target element's context and
   stay fresh (their excess properties are errors); a union with one array-like member (or
   number index signature) elaborates against it. A spread whose argument is itself an
@@ -3051,6 +3057,26 @@ Files, by layer:
   contextually types an enclosing function (`const f: <R>() => R = () => make()`) like
   those of enclosing declarations, unless an outer call is inferring them: an uninferred
   `R` of `make` becomes the outer `R`, not its default.
+  A context is generic only when a type parameter is really inside it
+  (`has_type_params_inside`: through references without their `this` argument, unions,
+  literal members and the mapper targets of anonymous and mapped types, an enclosing
+  interface's `this` excluded); the summary bit alone is too conservative (tRPC's
+  `BuiltRouter<..>` has it).
+- **Calls nested in literal and function arguments.** While a call infers, a literal or
+  function argument with calls inside (`has_nested_call`) is typed with
+  `outer_inference_mappers` holding its return-context mapper and what its arguments
+  inferred so far (nothing fixed); a nested call's return-context inference reads its
+  contextual type through them (tsc: the outer context's mapper, cloned). So
+  `res(router, { client: { links: [httpLink()] } })` and `const l: Link<B> = split({ t:
+  link() })` infer the router, not the default. The context-free members of a literal with
+  context-sensitive functions are typed the same way
+  (`parity/nested_call_outer_inference.ts`).
+- **Void positions of rest tuples.** `arity` drops trailing required positions whose type
+  accepts `void` from the minimum, tuple elements of a rest parameter included
+  (`(...args: [input: void | Date, opts?: O])` takes none; `parity/void_tuple_rest_arity.ts`).
+- **TS2688 under skipLibCheck.** An unresolved `/// <reference types>` in a declaration
+  file is not recorded when `skipLibCheck` is on (tsc 7 drops the include diagnostics of a
+  file it skips checking); `missing_type_references` holds only reported ones.
 - **Quick initializer types.** An unannotated variable initialized by a call to a callee
   with exactly one non-generic call signature (no properties, index or construct
   signatures; not an optional chain, `super` or JavaScript) takes that signature's return
@@ -3707,8 +3733,8 @@ and integration tests allow: they link the one library build).
   `TS_R_CONFORMANCE_ROOT` replaces the upstream checkout (a directory with the same
   `tests/cases` and `tests/baselines/reference` layout, for ad hoc tests) and
   `TS_R_CONFORMANCE_OUT` the mismatch file.
-  Current (2026-11-08, parity/checker-gap-8: unused merges and overloads, boolean
-  predicates; 12750 compared variants):
+  Current (2026-11-10, parity/checker-4: React Compiler and tRPC packages; unchanged
+  since parity/checker-gap-8; 12750 compared variants):
   12502 exact (98.1%; all diagnostics and chains), 12522 (98.2%) exact on first lines;
   117 variants with a diagnostic tsc does not report, 4 of them tests where tsc reports
   nothing.
@@ -3807,10 +3833,16 @@ and integration tests allow: they link the one library build).
   pattern adds `| undefined` without strictNullChecks); a conditional source whose check
   type is itself a conditional misses tsc's error against an unrelated conditional when
   the extends types differ (`X<P> extends any ? K<P> : K<P>` to `K2<P>`, silent).
-- tRPC packages other than server, each checked with its own tsconfig (client, next,
-  openapi, react-query, tanstack-react-query, tests, upgrade): no TS2430 left; the extras
-  are TS2339 on `TRPCClient<TRouter>` / `CreateQueryUtils<TRouter>` proxies, TS7006,
-  TS2344, TS2322 in openapi's `params.gen.ts`, and TS2688 for `jest` types.
+- tRPC packages other than server, each checked with its own tsconfig (parity/checker-4,
+  extra / missing): client 0/0, next 0/0, openapi 11/0, react-query 25/0,
+  tanstack-react-query 4/0, tests 15/0, upgrade 25/18 (bench/README.md). openapi's 11 are
+  TS2322 in the generated `params.gen.ts`: `Object.entries(arg ?? {})` with `arg: unknown`
+  picks the `{ [s: string]: T }` overload, because the `{}` of narrowing `unknown` is
+  `EMPTY_OBJECT`, an object literal type with an implicit index signature (tsc's
+  `emptyObjectType` has none and falls through to `entries(o: {}): [string, any][]`).
+  The rest are small groups: TS2344 on expect-type assertions over query results, TS18048
+  and TS2532 on `useQueries` results, TS2349 and TS2769 in tests, TS7006 in upgrade, and
+  TS2578 where we miss the error a `@ts-expect-error` expects.
 - Unused checks: a merge with an ambient declaration (`declare namespace D {}` +
   `interface D {}`, tsc reports the interface) and overloaded private methods read only
   through element access stay silent.
