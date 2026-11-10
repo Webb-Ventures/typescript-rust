@@ -1700,3 +1700,38 @@ As designed above, with these details:
 
 Emit (11,253 tests bytes-exact, `.d.ts` 2,467 / 2,640) and trace (142 / 146) are unchanged.
 TSR2006-refused JavaScript files still report no declaration diagnostics.
+
+## Implementation notes (JavaScript declarations, third part, `parity/emit-4`, 2026-11-10)
+
+The 27 refused JavaScript inputs fell into nine buckets: CommonJS forms 12 (nine different
+shapes), dotted `@typedef` names 4, `@enum` 2, `@type` on a function declaration 2, `this.x`
+next to a base class's member 2, `this["x"]` 2, a class's statics, a `@callback` rest
+parameter and `this.x = this.x...` one each. Five are now written:
+
+- **`this.x` next to a base member.** tsc leaves it out when an `extends` base has an
+  accessor or method `x`, or a property `x` of the same readonly-ness, optionality and type;
+  the class's own `x` has the base's type unless the constructor assigns it (tsc:
+  tsc/internal/checker/emitresolver.go, `IsThisPropertyAssignmentDeclarationRedundant`). Still
+  refused where the checker types the own `x` from its assignments and another member reads
+  it (thisPropertyAssignmentInherited: a getter returning `this.textContent`).
+- **`@type` on a function declaration** applies when no `@param`, `@returns` or `@template`
+  comes first and no parameter has its own `@type` (jsdocTypeParameterTagConflict); the
+  declaration is the type's one call signature under the function's parameter names.
+- **`@enum`** was already written as tsc writes it (the value's type; the name stays a type
+  reference). Probed against tsc 7.0.2; one difference remains outside the refusal: a file
+  importing an `@enum` keeps the import where tsc drops it.
+- **`this["x"] = v`** with a JSDoc `@type` is `"x": T`; the checker declares no member for
+  an element assignment, so the tag (recorded on the target) gives the type.
+- **A `@callback`'s `@param {...T} a`** is `...a: T`, without the array.
+
+| Measure | Before | After |
+|---|---|---|
+| Emit tests bytes-exact | 11,253 / 11,925 | 11,261 / 11,925 |
+| `.d.ts` bytes-exact | 2,467 / 2,640 | 2,475 / 2,640 |
+| TSR2006 refusals | 27 | 19 |
+
+Left: the CommonJS shapes (the named-export path refuses any `require` call, which blocks
+`module.exports.ns = ns` of a required `ns` and `exports.x = require(...)`; the others are
+single tests), dotted `@typedef` names (the parser does not model them, so this needs the
+parser and the checker), a class's statics with a base class, and the two `this.x` cases
+that need the checker's typing of inherited this-properties.
