@@ -879,6 +879,23 @@ fn javascript_overloads_are_written() {
     }
 }
 
+/// `/** @type {T} */ this["x"] = v` declares a member `"x": T` (tsc 7.0.2,
+/// argumentsReferenceInMethod2_Js; probed with braces too); without a `@type` it is refused.
+#[test]
+fn javascript_this_element_assignment_with_a_type() {
+    let config = r#"{ "compilerOptions": { "allowJs": true, "declaration": true, "outDir": "out", "types": [] }, "files": ["a.js"] }"#;
+    let src = "export class A {\n  constructor(foo = {}) {\n    /** @type {object} */\n    this[\"arguments\"] = foo;\n  }\n}\n";
+    let want = "export declare class A {\n    /** @type {object} */\n    \"arguments\": object;\n    constructor(foo?: {});\n}\n";
+    let r = emit(&[("tsconfig.json", config), ("a.js", src)]);
+    assert!(r.diagnostics.is_empty() && !r.skipped, "{:?}", codes(&r));
+    let d = r
+        .outputs
+        .iter()
+        .find(|o| o.path == "/p/out/a.d.ts")
+        .expect("a.d.ts");
+    assert_eq!(d.text, want);
+}
+
 /// A JSDoc `@enum` const is written as its value's type and the enum name stays a type
 /// reference where JSDoc names it (tsc 7.0.2, jsDeclarationsEnumTag; probed).
 #[test]

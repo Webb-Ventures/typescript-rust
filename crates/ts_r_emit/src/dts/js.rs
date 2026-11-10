@@ -646,8 +646,21 @@ fn assignment_target<'a>(
             if name == "constructor" || declared.contains(&(is_static, name)) {
                 return None;
             }
-            // `this["x"] = v` is not written.
-            if !matches!(ast.node(target), Node::Member { .. }) {
+            // `this["x"] = v` is written `"x": T`: only a double-quoted key without escapes
+            // (how tsc quotes another is not observed), and only with a JSDoc `@type` on
+            // the statement, its type (the checker declares no member for it).
+            let quoted = match *ast.node(target) {
+                Node::Member { .. } => true,
+                Node::Index { index, .. } => {
+                    let text = c.file(file).text.as_bytes();
+                    matches!(ast.node(index), Node::StringLit { .. })
+                        && text.get(ast.span(index).start as usize) == Some(&b'"')
+                        && !name.contains(['"', '\\', '\n', '\r'])
+                        && assignment_type_tag(ast, target).is_some()
+                }
+                _ => false,
+            };
+            if !quoted {
                 return Some("a property assignment to `this` in a class");
             }
             // `this.x = v` is written by `Emitter::this_properties` (a base class's accessor,
@@ -800,6 +813,15 @@ fn base_member_of(c: &Checker, file: FileId, class: NodeId, name: &str) -> BaseM
     let mut ck = ts_r_checker::Ck::new(c, file);
     ck.no_report += 1;
     base_member(&mut ck, sym, name)
+}
+
+/// The type node of the JSDoc `@type` on the statement of assignment target `target`
+/// (`/** @type {T} */ this["x"] = v;`; the parser records it on the target).
+pub(super) fn assignment_type_tag(ast: &Ast, target: NodeId) -> Option<NodeId> {
+    ast.jsdoc_tags_of(target)
+        .iter()
+        .find(|t| t.kind == JsDocTagKind::Type)
+        .and_then(|t| t.ty)
 }
 
 /// The type node of the JSDoc `@type` that types JavaScript function declaration `f`: tsc 7
@@ -1031,9 +1053,27 @@ fn this_assignments(ast: &Ast, parents: &ParentMap, members: &[NodeId]) -> Vec<T
                     left,
                     ..
                 } => {
-                    if let Node::Member { obj, prop, .. } = *ast.node(left)
-                        && matches!(ast.node(obj), Node::This {})
-                        && let Node::Ident { name } = *ast.node(prop)
+                    // `this.x = v`, or `this["x"] = v` (written `"x": T`).
+                    let key = match *ast.node(left) {
+                        Node::Member { obj, prop, .. }
+                            if matches!(ast.node(obj), Node::This {}) =>
+                        {
+                            match *ast.node(prop) {
+                                Node::Ident { name } => Some(name),
+                                _ => None,
+                            }
+                        }
+                        Node::Index { obj, index, .. }
+                            if matches!(ast.node(obj), Node::This {}) =>
+                        {
+                            match *ast.node(index) {
+                                Node::StringLit { value } => Some(value),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(name) = key
                         && seen.insert((is_static, name))
                     {
                         let parent = parents.parent(n);
@@ -1091,12 +1131,22 @@ impl super::Emitter<'_, '_> {
                 continue;
             }
             let owner = if is_static { constructor } else { instance };
-            let Some(prop) = self.ck.property_of_type(owner, &name) else {
-                continue;
+            // `this["x"] = v`: the checker declares no member; the statement's `@type`
+            // (which `unsupported` requires) gives the type.
+            let tagged = match *self.ast.node(target) {
+                Node::Index { .. } => assignment_type_tag(&self.ast, target)
+                    .map(|ty| self.ck.type_from_node(self.loc(ty))),
+                _ => None,
+            };
+            let prop = self.ck.property_of_type(owner, &name);
+            let typed = match (tagged, prop) {
+                (Some(t), _) => t,
+                (None, Some(p)) => self.ck.type_of_symbol(p),
+                (None, None) => continue,
             };
             // Redundant next to a base class's member (`base_member`): its type is the
             // base's unless the constructor assigns it.
-            if !is_static {
+            if !is_static && let Some(prop) = prop {
                 match base_member(&mut self.ck, sym, &name) {
                     BaseMember::None => {}
                     BaseMember::Behaviour => continue,
@@ -1117,9 +1167,17 @@ impl super::Emitter<'_, '_> {
             if is_static {
                 self.w("static ");
             }
-            self.w(&name);
+            if matches!(self.ast.node(target), Node::Index { .. }) {
+                // `this["x"] = v` keeps its quotes (tsc 7.0.2, argumentsReferenceInMethod2_Js;
+                // `unsupported` admits only double-quoted keys without escapes).
+                self.w("\"");
+                self.w(&name);
+                self.w("\"");
+            } else {
+                self.w(&name);
+            }
             self.w(": ");
-            let mut t = self.ck.type_of_symbol(prop);
+            let mut t = typed;
             // Without strictNullChecks `null` and `undefined` widen to `any` (observed:
             // `this.field = null` is `field: any`).
             if !self.c.opts.strict_null_checks && matches!(t, TypeId::NULL | TypeId::UNDEFINED) {
