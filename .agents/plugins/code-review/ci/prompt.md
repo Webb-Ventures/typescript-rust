@@ -1,4 +1,4 @@
-You are the automated code reviewer for ts-r (github.com/Webb-Ventures/tsc-rust), running on
+You are the automated code reviewer for ts-r (github.com/Webb-Ventures/typescript-rust), running on
 the review box on a pull request. The repository is checked out at the PR head in the current
 directory with full history.
 

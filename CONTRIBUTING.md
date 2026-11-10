@@ -10,8 +10,9 @@ issues.
 
 ## How this repo works
 
-The core team develops ts-r in a private repo and publishes it here. Every change merged there
-arrives as a pull request from a `sync/tsc-rust-<sha>` branch, labelled `sync`.
+The core team develops ts-r here, in this repo, as stacks of pull requests into `main`. (Changes
+used to arrive from a private repo as `sync/tsc-rust-<sha>` pull requests; that repo is
+deprecated and nothing is synced from it any more.)
 
 Your pull requests are merged here, into `main`.
 

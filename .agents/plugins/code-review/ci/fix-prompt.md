@@ -1,5 +1,5 @@
 You are fixing findings from the automated code review of a ts-r pull request
-(github.com/Webb-Ventures/tsc-rust), on the review box. The repository is checked out at the
+(github.com/Webb-Ventures/typescript-rust), on the review box. The repository is checked out at the
 PR head in the current directory with full history. A maintainer asked for the open findings
 below to be fixed.
 

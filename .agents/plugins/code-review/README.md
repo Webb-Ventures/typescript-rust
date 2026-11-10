@@ -64,7 +64,7 @@ review. The box does the work in fresh Docker containers and posts as the **ts-r
 GitHub App.
 
 **Automatically, once per PR**: when a non-draft pull request from a branch of this repo (not a
-`sync/` branch: those are the mirror's sync PRs, reviewed in the private repo) is
+`sync/` branch: those were the sync PRs from the deprecated private repo) is
 opened or marked ready, whatever its base (each PR of a stack is reviewed against the PR below
 it), and both the author and whoever triggered the run are
 trusted (see below). Pushes, reopening and marking a PR ready again do not start another.
