@@ -155,6 +155,12 @@ impl Project {
                     self.sound.invalidate();
                 }
                 Some(PMsg::Fallback(on)) => self.fallback = on,
+                Some(PMsg::LintWanted(on)) => self.on_lint_wanted(on),
+                Some(PMsg::LintConfig {
+                    generation,
+                    path,
+                    config,
+                }) => self.on_lint_config(generation, path, config),
                 Some(m) => {
                     self.backlog.push_front(m);
                     self.release.unloaded = false;

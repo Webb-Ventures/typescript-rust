@@ -294,6 +294,102 @@ fn type_aware_lint_runs_on_our_checker() {
     c.shutdown();
 }
 
+/// An ESLint flat config that leaves marks when Node evaluates it: `started` at once, `done`
+/// after spinning for `spin_ms`. Tells a test whether (and how long) the config was read.
+fn marking_eslint_config(env: &Env, spin_ms: u64) -> (PathBuf, PathBuf) {
+    let started = env.dir.join("config-started");
+    let done = env.dir.join("config-done");
+    let js = format!(
+        "import fs from 'node:fs';\nfs.writeFileSync({started:?}, '1');\n\
+         const t = Date.now();\nwhile (Date.now() - t < {spin_ms}) {{}}\n\
+         fs.writeFileSync({done:?}, '1');\n\
+         export default [{{ files: ['**/*.ts'], rules: {{ 'no-var': 'error' }} }}];\n",
+        started = started.to_string_lossy(),
+        done = done.to_string_lossy(),
+    );
+    fs::write(env.proj.join("eslint.config.mjs"), js).unwrap();
+    (started, done)
+}
+
+const TYPE_ERROR: &str = "export const n: number = \"s\";\nexport const k = n + 1;\n";
+
+fn wait_for_file(p: &std::path::Path, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    while Instant::now() < deadline {
+        if p.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    p.exists()
+}
+
+/// With the client's lint off, the ESLint config is never evaluated (it costs 1 s of Node
+/// on a big repo): types and hover work, and no marker appears.
+#[test]
+fn lint_off_never_evaluates_the_eslint_config() {
+    if !libs_present() || Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let env = Env::new(
+        "lintoff",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", TYPE_ERROR)],
+    );
+    let (started, _done) = marking_eslint_config(&env, 0);
+    let mut c = env.lsp_lint("w1", "off");
+    let ua = env.uri("src/a.ts");
+    env.open(&mut c, "src/a.ts");
+    let d = diags_for(&mut c, &ua, |d| codes(d).contains(&2322)).expect("type error");
+    assert!(d.iter().all(|x| x["source"] != "ts-r-lint"), "{d:?}");
+    assert!(hover_text(&mut c, &ua, 1, 13).contains("number"));
+    // Edits check again: still no config read.
+    change(&mut c, &ua, 2, range(1, 22, 1, 23), "2");
+    let _ = hover_text(&mut c, &ua, 1, 13);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        !started.exists(),
+        "the ESLint config was evaluated with lint off"
+    );
+    c.shutdown();
+}
+
+/// With lint on, the config is evaluated off the project thread: a slow config delays
+/// only lint results. Type diagnostics and hover answer while Node is still running it.
+#[test]
+fn slow_eslint_config_does_not_block_types_or_hover() {
+    if !libs_present() || Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let env = Env::new(
+        "lintslow",
+        &[("tsconfig.json", TSCONFIG), ("src/a.ts", TYPE_ERROR)],
+    );
+    let (started, done) = marking_eslint_config(&env, 6000);
+    let mut c = env.lsp_lint("w1", "on");
+    let ua = env.uri("src/a.ts");
+    env.open(&mut c, "src/a.ts");
+    let d = diags_for(&mut c, &ua, |d| codes(d).contains(&2322)).expect("type error");
+    assert!(d.iter().any(|x| x["source"] != "ts-r-lint"), "{d:?}");
+    // The config is being evaluated now (control: lint on does read it).
+    assert!(
+        wait_for_file(&started, Duration::from_secs(10)),
+        "config never read"
+    );
+    let t = Instant::now();
+    assert!(hover_text(&mut c, &ua, 1, 13).contains("number"));
+    change(&mut c, &ua, 2, range(1, 22, 1, 23), "2");
+    let _ = hover_text(&mut c, &ua, 1, 13);
+    let waited = t.elapsed();
+    assert!(
+        !done.exists() && waited < Duration::from_secs(3),
+        "hover waited {waited:?} (config done: {})",
+        done.exists()
+    );
+    // The evaluation does finish in the background.
+    assert!(wait_for_file(&done, Duration::from_secs(15)));
+    c.shutdown();
+}
+
 /// Type-aware fixes are offered only from results for the current text: after an edit, the
 /// published spans are moved, but a fix's edits would still point at the old offsets.
 #[test]
