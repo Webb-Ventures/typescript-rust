@@ -3103,6 +3103,8 @@ impl<'c, 'a> Ck<'c, 'a> {
                         }
                         // So do the elements of an array literal that are not
                         // (`[makeFooer(), { foo: (v) => v }]` infers `Fooer` for `T[]`).
+                        // (Calls inside read their contexts as below.)
+                        let depth = self.push_outer_inference(l, &ctx, ret_mapper);
                         if let Some(at) = self.context_free_array_elements_type(l, pt) {
                             self.infer_types(&mut ctx, at, pt, 0);
                         }
@@ -3111,6 +3113,7 @@ impl<'c, 'a> Ck<'c, 'a> {
                         // 12 }` infers `T = number` for `BaseProps<T>` before `v` is typed).
                         let mut pairs = Vec::new();
                         self.context_free_object_properties(l, pt, 0, &mut pairs);
+                        self.outer_inference_mappers.truncate(depth);
                         for (at, tt) in pairs {
                             self.infer_types(&mut ctx, at, tt, 0);
                         }
@@ -3205,20 +3208,10 @@ impl<'c, 'a> Ck<'c, 'a> {
                     {
                         self.first_arg_context.entry((l, sig)).or_insert(cty);
                     }
-                    // A literal or function argument with calls inside: they read their
-                    // contextual types through what this call inferred so far.
-                    let outer = if self.has_nested_call(l) {
-                        self.inferred_so_far_mapper(&ctx)
-                    } else {
-                        None
-                    };
-                    if let Some(m) = outer {
-                        self.outer_inference_mappers.push(m);
-                    }
+                    let depth = self.push_outer_inference(l, &ctx, ret_mapper);
                     let mut at = self.speculative_arg_type(l, cty);
-                    if outer.is_some() {
-                        self.outer_inference_mappers.pop();
-                    } // A literal of a literal contextual type is not widened later
+                    self.outer_inference_mappers.truncate(depth);
+                    // A literal of a literal contextual type is not widened later
                     // (`const w: Wrap<"foo"> = wrap("foo")` infers `"foo"`).
                     if self
                         .store()
@@ -3803,6 +3796,28 @@ impl<'c, 'a> Ck<'c, 'a> {
             }
         }
         false
+    }
+
+    /// For a literal or function argument `l` with calls inside: they read their contextual
+    /// types through what this call inferred so far, then what its contextual type implies
+    /// (`const l: Link<B> = split({ t: link() })` gives `link` the context `Link<B>`).
+    /// Returns the depth to truncate `outer_inference_mappers` back to.
+    fn push_outer_inference(
+        &mut self,
+        l: Loc,
+        ctx: &InferenceContext,
+        ret_mapper: Option<ts_r_types::MapperId>,
+    ) -> usize {
+        let depth = self.outer_inference_mappers.len();
+        if self.has_nested_call(l) {
+            if let Some(m) = ret_mapper {
+                self.outer_inference_mappers.push(m);
+            }
+            if let Some(m) = self.inferred_so_far_mapper(ctx) {
+                self.outer_inference_mappers.push(m);
+            }
+        }
+        depth
     }
 
     /// Whether an object or array literal or function argument has a call or `new`

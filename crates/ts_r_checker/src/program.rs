@@ -626,7 +626,8 @@ pub struct ProgramFiles {
     /// `types` entries that could not be resolved.
     pub missing_types: Vec<String>,
     /// `/// <reference types="..." />` directives that could not be resolved: `(containing
-    /// file path, name as written)`, in load order (TS2688 at the name).
+    /// file path, name as written)`, in load order (TS2688 at the name); not those of
+    /// declaration files under `skipLibCheck`, which tsc does not report.
     pub missing_type_references: Vec<(String, String)>,
     /// `exports`/`imports` entries of the program's own package left unresolved for want
     /// of a project root (TS2209/TS2210, global diagnostics).
@@ -1097,6 +1098,7 @@ fn load<F: FileSystem>(
     let mut package_ids: FxHashMap<String, ts_r_resolver::PackageId> = FxHashMap::default();
     let mut reference_starts: FxHashMap<String, usize> = FxHashMap::default();
     let no_resolve = options.no_resolve() == Some(true);
+    let skip_lib_check = options.skip_lib_check() == Some(true);
     for r in roots {
         Pending {
             path: r.clone(),
@@ -1248,7 +1250,14 @@ fn load<F: FileSystem>(
                         js_depth: p.js_depth,
                     }
                     .enqueue(&mut queue, &mut queued);
-                } else if kind.starts_with("types") && !no_resolve && !f.is_lib {
+                } else if kind.starts_with("types")
+                    && !no_resolve
+                    && !f.is_lib
+                    && (!skip_lib_check || !is_declaration_file_name(&f.path.to_ascii_lowercase()))
+                {
+                    // (tsc 7 drops a file's include diagnostics where it skips checking
+                    // the file: a declaration file under `skipLibCheck`, e.g. jest-dom's
+                    // `/// <reference types="jest" />` without @types/jest.)
                     missing_type_references.push((f.path.clone(), v.clone()));
                 }
             }

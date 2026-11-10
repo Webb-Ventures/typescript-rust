@@ -25,3 +25,11 @@ declare const b: Builder<object>;
 const built = b.create();
 declare function one<R extends Router>(r: R, l: Link<R>): R;
 export const n5: number = one(built, link({ url: '' }));
+
+// Type parameters with nothing inferred yet read as what the outer call's contextual type
+// implies (tRPC's `splitLink({ true: wsLink(..), false: httpBatchLink(..) })` in a
+// `links` array), also when the literal has context-sensitive functions.
+declare function split<R extends Router = Router>(o: { c: (x: number) => boolean; t: Link<R> | Link<R>[]; f: Link<R> }): Link<R>;
+export const l1: Link<Built<string>> = split({ c: (x) => x > 1, t: link({ url: '' }), f: link({ url: '' }) });
+export const l2: Link<Built<string>> = split({ c: (x: number) => x > 1, t: [link({ url: '' })], f: link({ url: '' }) });
+export const n6: number = res(br, { client(o) { return { links: [split({ c(x) { return x > 1; }, t: link({ url: o.u }), f: link({ url: '' }) })] }; } }).client;
